@@ -259,8 +259,6 @@
             { sku: "MMM06652", name: "3M Yellow Masking Tape 18mm", previousPrice: "159.99", salePrice: "119.99" },
             { sku: "MMM06654", name: "3M Yellow Masking Tape 36mm", previousPrice: "159.99", salePrice: "119.99" },
             { sku: "MMM06656", name: "3M Yellow Masking Tape 48mm", previousPrice: "191.99", salePrice: "129.99" },
-            { sku: "MMM06718", name: "3M Scotchblok Masking Paper", previousPrice: "74.99", salePrice: "64.99" },
-            { sku: "MMM06736", name: "3M Scotchblock Masking Paper", previousPrice: "74.99", salePrice: "64.99" },
             { sku: "MMM06386", name: "3M Two Way Acrylic Plus Tape 1/4in", previousPrice: "61.99", salePrice: "29.99" },
             { sku: "MMM06382", name: "3M Two Way Acrylic Plus Tape 1/2in", previousPrice: "73.99", salePrice: "49.99" },
             { sku: "MMM06349", name: "3M Trim & Lift Masking Tape", previousPrice: "63.99", salePrice: "39.99" },
@@ -639,7 +637,7 @@
     };
     const BRANDS = ["All", "3M", "SEM", "PPG", "Norton", "Equipment", "Henkel", "Q1", "Rexall", "Tork", "Wipeco", "Pump & Spray"];
     const BRANCHES = ["Woodbridge", "Markham", "Ottawa", "Hamilton", "Oakville", "St. Catharines"];
-    const PRODUCT_COUNTS = {"3M": 214, "SEM": 63, "PPG": 90, "Norton": 20, "Equipment": 30, "Henkel": 16, "Tork": 2, "Rexall": 12, "Wipeco": 6, "Q1": 2, "Pump & Spray": 1, "All": 456};
+    const PRODUCT_COUNTS = {"3M": 212, "SEM": 63, "PPG": 90, "Norton": 20, "Equipment": 30, "Henkel": 16, "Tork": 2, "Rexall": 12, "Wipeco": 6, "Q1": 2, "Pump & Spray": 1, "All": 454};
     // APPLICATION STATE
     // ========================================
     let state = {
@@ -660,6 +658,8 @@
       orderNotes: "",
       toast: null,
       passwordError: false,
+      tokenError: false,
+      tokenValidating: false,
       lastOrderId: null
     };
     const CASE_QUANTITIES = {"MMM01131": 4, "MMM02021": 5, "MMM02022": 5, "MMM02023": 5, "MMM02035": 5, "MMM02036": 5, "MMM02038": 5, "MMM02044": 5, "MMM02045": 5, "MMM02085": 4, "MMM02087": 6, "MMM04240": 6, "MMM04247": 6, "MMM04248": 6, "MMM04274": 6, "MMM05706": 6, "MMM05707": 6, "MMM05708": 6, "MMM05860": 5, "MMM05861": 6, "MMM05887": 6, "MMM05916": 2, "MMM05917": 6, "MMM06068": 6, "MMM06094": 6, "MMM06349": 12, "MMM06382": 12, "MMM06383": 12, "MMM06386": 12, "MMM06652": 4, "MMM06654": 4, "MMM06656": 4, "MMM06718": 2, "MMM06724": 5, "MMM06736": 2, "MMM06742": 2, "MMM07333": 6, "MMM08115": 6, "MMM08116": 6, "MMM08194": 3, "MMM08217": 6, "MMM08219": 6, "MMM08223": 6, "MMM08227": 6, "MMM08235": 6, "MMM08237": 6, "MMM08243": 6, "MMM08307": 6, "MMM08308": 6, "MMM08323": 6, "MMM08329": 6, "MMM08360": 6, "MMM08361": 6, "MMM08370": 6, "MMM08374": 6, "MMM08458": 6, "MMM08463": 6, "MMM08522": 6, "MMM08524": 6, "MMM08526": 6, "MMM08528": 6, "MMM08609": 6, "MMM08851": 1, "MMM08852": 4, "MMM08889": 6, "MMM09678": 4, "MMM20382": 4, "MMM26000": 3, "MMM26024": 3, "MMM26112": 4, "MMM26114": 4, "MMM26301": 4, "MMM26312": 4, "MMM26314": 4, "MMM26325": 4, "MMM26334": 2, "MMM26338": 2, "MMM26340": 2, "MMM26689": 6, "MMM26712": 2, "MMM26713": 2, "MMM26714": 2, "MMM26716": 2, "MMM26718": 2, "MMM26720": 2, "MMM26832": 1, "MMM26912": 2, "MMM26913": 2, "MMM26914": 2, "MMM26916": 2, "MMM26918": 2, "MMM30362": 4, "MMM30366": 4, "MMM30367": 4, "MMM30662": 4, "MMM30666": 4, "MMM30667": 4, "MMM30668": 4, "MMM30669": 4, "MMM30670": 4, "MMM30671": 4, "MMM30766": 4, "MMM30767": 4, "MMM30804": 4, "MMM30806": 4, "MMM31180": 6, "MMM31370": 4, "MMM31371": 4, "MMM31372": 4, "MMM31373": 4, "MMM31374": 4, "MMM31481": 4, "MMM31482": 4, "MMM31483": 4, "MMM31484": 4, "MMM31485": 4, "MMM31486": 4, "MMM31487": 4, "MMM31491": 4, "MMM33279": 6, "MMM33377": 6, "MMM33379": 6, "MMM33380": 6, "MMM33389": 6, "MMM33391": 6, "MMM33392": 6, "MMM33437": 5, "MMM33439": 5, "MMM33440": 5, "MMM33443": 5, "MMM33445": 5, "MMM33446": 5, "MMM33457": 6, "MMM33458": 6, "MMM33531": 6, "MMM33532": 6, "MMM33533": 6, "MMM33534": 6, "MMM33535": 6, "MMM33536": 6, "MMM33537": 6, "MMM33538": 4, "MMM33539": 4, "MMM33540": 4, "MMM33541": 4, "MMM33542": 4, "MMM33543": 4, "MMM33544": 4, "MMM33550": 4, "MMM33551": 4, "MMM33552": 4, "MMM33553": 4, "MMM33554": 4, "MMM33991": 2, "MMM33992": 2, "MMM33993": 2, "MMM33994": 2, "MMM33995": 2, "MMM33996": 2, "MMM33997": 2, "MMM33998": 2, "MMM34440": 5, "MMM34442": 5, "MMM34444": 5, "MMM34445": 5, "MMM34446": 5, "MMM34447": 5, "MMM34448": 5, "MMM34449": 5, "MMM34450": 5, "MMM34451": 5, "MMM36060": 6, "MMM36170": 4, "MMM36172": 4, "MMM36174": 4, "MMM36176": 4, "MMM36178": 4, "MMM36180": 4, "MMM36181": 4, "MMM36182": 4, "MMM36183": 4, "MMM36184": 4, "MMM36189": 4, "MMM36195": 4, "MMM36196": 4, "MMM36241": 4, "MMM36242": 4, "MMM36244": 4, "MMM36246": 4, "MMM36247": 4, "MMM36248": 4, "MMM36249": 4, "MMM36250": 4, "MMM36251": 4, "MMM36852": 1, "MMM26163": 2, "MMM26164": 2, "MMM07847": 3, "MMM07848": 3, "MMM09250": 4, "MMM09251": 4, "MMM09252": 4, "MMM09254": 4, "MMM09256": 4, "MMM09257": 4, "MMM09258": 4, "MMM09259": 4, "MMM09260": 4, "MMM09261": 4, "MMM02768": 5, "MMM02769": 5, "MMM02771": 5, "MMM02773": 5, "MMM02774": 5, "NOR00402": 3, "NOR00403": 3, "NOR00404": 3, "NOR00407": 3, "NOR04615": 6, "NOR04616": 6, "NOR04647": 6, "NOR42082": 4, "NOR06398": 6, "NOR06402": 6, "NOR06412": 6, "NOR06418": 6, "NOR06421": 6, "NOR06427": 6, "NOR97120": 6, "NOR97121": 6, "NOR06166": 4, "NOR06167": 4, "NOR34771": 4, "NOR34770": 4, "MSX134": 1, "MSX3030": 1, "MSX1234": 1, "MSX390100": 1, "MSX390200": 1, "MSX490100": 1, "MSX490200": 1, "MSX488046PB": 1, "MSX488046PBD": 1, "MSX488100PBD": 1, "MSX488016E": 1, "MSX488016P": 1, "MSXFXP2": 1, "MSXFX3030X1": 1, "RBNLD3": 1, "RBNLD5": 1, "RBNLD7": 1, "RBNLD9-TG": 1, "RBNLD9-TGKIT": 1, "RBN34288NI": 1, "RBN34788NI": 1, "RBN34788NI-H": 1, "RBN34998": 1, "RBNAC1234-4": 1, "RBNAC1234-4SL": 1, "RBNAC1234-9": 1, "BSHDAS3000-3": 1, "STG030420": 1, "FRE1234YF-200": 1, "SUVA134A-200": 1, "SEM15013": 6, "SEM15243": 6, "SEM15393": 6, "SEM29362": 6, "SEM29372": 6, "SEM29382": 6, "SEM29392": 6, "SEM29462": 6, "SEM29472": 6, "SEM29482": 6, "SEM29492": 6, "SEM39143": 6, "SEM39144-LV": 6, "SEM39673": 6, "SEM39683": 6, "SEM39853": 6, "SEM39863": 4, "SEM40773": 6, "SEM40923": 6, "SEM42013": 6, "SEM49133": 6, "SEM49143": 6, "SEM49153": 6, "SEM56650": 1, "SEM56670": 1, "SEM62213": 6, "SEM62223": 6, "SEM62233": 6, "SEM62243": 6, "SEM62253": 6, "SEM62263": 6, "SEM62273": 6, "SEM62283": 6, "SEM62293": 6, "SEM77763": 4, "SA6080": 4, "SA6120": 4, "SA6180": 4, "SA6240": 4, "SA6320": 4, "SA6400": 4, "SA6600": 4, "SA6800": 4, "SA26080": 4, "SA26120": 4, "SA26180": 4, "SA26240": 4, "SA26320": 4, "SA26400": 4, "SA26600": 4, "SA26800": 4, "SEM40561": 2, "SEM39592": 2, "SEM40482": 2, "SA21080": 2, "SA21120": 2, "SA21180": 2, "SA21240": 2, "SA21320": 2, "SA21400": 2, "SA1080": 2, "SA1120": 2, "SA1180": 2, "SA1240": 2, "SA1320": 2, "SA1400": 2, "EC520": 2, "EC530": 2, "EC550": 2, "EC5515": 2, "EC5517": 2, "EC800": 2, "ECA83": 6, "ECH5075": 6, "ECH8075": 6, "ECP35": 2, "ECR65": 2, "ECR75": 2, "ECR85": 2, "ECR98": 6, "ECS21": 2, "ECS25": 2, "ECS27": 2, "EH391": 6, "EPW115": 2, "JC7200/01": 2, "JC830": 2, "JH358": 6, "JH6028": 6, "JH7210/04": 6, "JH7220/04": 6, "JH7230/04": 6, "JH8370": 6, "JH8380": 6, "JH8390": 6, "JP354": 6, "JP355": 2, "JP356": 6, "JP361": 6, "JP365": 2, "JP367": 6, "JP390": 6, "JR554": 2, "JR555": 2, "JR556": 2, "SC310/01": 2, "SH311/04": 2, "SH312/04": 2, "SCA400": 6, "SL93LV": 6, "SLV4985": 6, "SLV73": 6, "SLV814": 6, "SLV840": 6, "SU470LV/04": 6, "SU481LV": 2, "SU485LV": 2, "SU487LV": 2, "SU4901": 5, "SU4902": 5, "SU4903": 6, "SUA1045": 6, "SUA470LV": 6, "SWX100": 1, "SWX350": 4, "SX103": 4, "SX1071": 6, "SX1072": 6, "SX2070": 5, "SX330": 4, "SXA1031": 6, "SXA1050": 6, "SXA1081": 6, "SXA840": 6, "T4900": 1, "T4910": 1, "VWM5556": 1, "AL84-0314": 10, "BLUEPSL": 3, "BLUEPSM": 3, "BLUEPSS": 3, "BLUEPSXL": 3, "BLUEPSXXL": 3, "DOX112": 2, "DOX113": 4, "DOX125": 8, "DOX249": 2, "DOX251": 4, "DOX251L": 2, "DOX273": 2, "DOX273L": 2, "VRW100": 2, "WMP2412": 4, "WMP2418": 4, "WMP2436": 4, "WMP246": 4, "HEN1305486": 3, "HEN1470999": 3, "HEN2264448": 10, "HEN2399541": 3, "HEN2399908": 3, "HEN2399909": 3, "HEN2469715": 3, "HEN2568797": 3, "HEN2568817": 12, "HEN2568818": 12, "HEN2568820": 12, "HEN2619275": 12, "HEN2816502": 4, "HEN2820041": 6, "HEN1434516": 3, "HEN1585815": 1, "SCA121202": 1, "SCA192480": 1, "CHC590248-5": 3, "CHC590266-5": 3, "CHC590269-5": 3, "CHC590353-5": 3, "MTN0002": 6, "MTN0901": 6, "MTN0903": 6, "MTN0908": 6, "MTN0954": 6, "MTN1041": 6, "MTN9010": 6, "MTN9011": 6, "DN106-L": 10, "DN106-M": 10, "DN106-XL": 10, "DN850BKEC-L": 10, "DN850BKEC-XL": 10, "DN850BKEC-M": 10, "CPM118": 3, "CPM136.55": 3, "CHC9705": 4};
@@ -1050,22 +1050,81 @@
     // ========================================
     // PASSWORD CHECK
     // ========================================
-    function checkPassword() {
+    let isTokenUser = false; // Track if user logged in with one-time token
+    
+    async function checkPassword() {
       const input = document.getElementById('passwordInput');
-      const password = input ? input.value : '';
+      const password = input ? input.value.trim() : '';
       
+      // Check regular password first
       if (password === CORRECT_PASSWORD) {
         isAuthenticated = true;
+        isTokenUser = false;
         sessionStorage.setItem('chc_authenticated', 'true');
         state.passwordError = false;
+        state.tokenError = false;
         render();
-      } else {
+        return;
+      }
+      
+      // Check if it looks like a token (CHC-XXXXX-XXXXX format)
+      if (password.toUpperCase().match(/^CHC-[A-Z0-9]{5}-[A-Z0-9]{5}$/)) {
+        await validateToken(password);
+        return;
+      }
+      
+      // Invalid password
+      state.passwordError = true;
+      state.tokenError = false;
+      render();
+      setTimeout(() => {
+        const form = document.getElementById('loginForm');
+        if (form) form.classList.add('shake');
+      }, 10);
+    }
+    
+    async function validateToken(token) {
+      state.tokenValidating = true;
+      render();
+      
+      try {
+        const response = await fetch('/api/validate-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token.toUpperCase() })
+        });
+        
+        const data = await response.json();
+        
+        if (data.valid) {
+          isAuthenticated = true;
+          isTokenUser = true;
+          sessionStorage.setItem('chc_authenticated', 'true');
+          sessionStorage.setItem('chc_token_user', 'true');
+          state.passwordError = false;
+          state.tokenError = false;
+          state.tokenValidating = false;
+          if (data.customerName) {
+            showToast('Welcome, ' + data.customerName + '!');
+          }
+          render();
+        } else {
+          state.passwordError = false;
+          state.tokenError = data.message || 'Invalid or expired token';
+          state.tokenValidating = false;
+          render();
+          setTimeout(() => {
+            const form = document.getElementById('loginForm');
+            if (form) form.classList.add('shake');
+          }, 10);
+        }
+      } catch (error) {
+        console.error('Token validation error:', error);
+        // If server unavailable, fall back to regular password check
         state.passwordError = true;
+        state.tokenError = false;
+        state.tokenValidating = false;
         render();
-        setTimeout(() => {
-          const form = document.getElementById('loginForm');
-          if (form) form.classList.add('shake');
-        }, 10);
       }
     }
 
@@ -1247,25 +1306,26 @@
               <p class="text-slate-400">Warehouse Sale 2026</p>
             </div>
             
-            <div id="loginForm" class="bg-white rounded-2xl shadow-2xl p-8 ${state.passwordError ? 'shake' : ''}">
+            <div id="loginForm" class="bg-white rounded-2xl shadow-2xl p-8 ${state.passwordError || state.tokenError ? 'shake' : ''}">
               <div class="text-center mb-6">
                 <div class="inline-flex items-center justify-center w-12 h-12 bg-slate-100 rounded-full mb-4">
                   <i class="fas fa-lock text-slate-600 text-xl"></i>
                 </div>
                 <h2 class="text-xl font-bold text-slate-900">Customer Access</h2>
-                <p class="text-slate-500 text-sm mt-1">Enter your password to view the catalog</p>
+                <p class="text-slate-500 text-sm mt-1">Enter your password or one-time access code</p>
               </div>
               
               <div class="space-y-4">
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-2">Password</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-2">Password or Access Code</label>
                   <div class="relative">
                     <input 
-                      type="password" 
+                      type="text" 
                       id="passwordInput" 
-                      placeholder="Enter customer password"
+                      placeholder="Password or CHC-XXXXX-XXXXX"
                       onkeypress="handlePasswordKeypress(event)"
-                      class="w-full px-4 py-3 border ${state.passwordError ? 'border-red-300 bg-red-50' : 'border-slate-200'} rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition-colors"
+                      class="w-full px-4 py-3 border ${state.passwordError || state.tokenError ? 'border-red-300 bg-red-50' : 'border-slate-200'} rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition-colors"
+                      ${state.tokenValidating ? 'disabled' : ''}
                     >
                     <i class="fas fa-key absolute right-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
                   </div>
@@ -1275,15 +1335,34 @@
                       Incorrect password. Please try again.
                     </p>
                   ` : ''}
+                  ${state.tokenError ? `
+                    <p class="mt-2 text-sm text-red-600 flex items-center gap-1">
+                      <i class="fas fa-exclamation-circle"></i>
+                      ${state.tokenError}
+                    </p>
+                  ` : ''}
                 </div>
                 
                 <button 
                   onclick="checkPassword()"
-                  class="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+                  class="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${state.tokenValidating ? 'opacity-75 cursor-not-allowed' : ''}"
+                  ${state.tokenValidating ? 'disabled' : ''}
                 >
-                  <span>Access Catalog</span>
-                  <i class="fas fa-arrow-right"></i>
+                  ${state.tokenValidating ? `
+                    <i class="fas fa-spinner animate-spin"></i>
+                    <span>Validating...</span>
+                  ` : `
+                    <span>Access Catalog</span>
+                    <i class="fas fa-arrow-right"></i>
+                  `}
                 </button>
+              </div>
+              
+              <div class="mt-6 pt-4 border-t border-slate-100">
+                <p class="text-xs text-slate-400 text-center">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  One-time access codes are valid for a single visit
+                </p>
               </div>
             </div>
             
@@ -1297,7 +1376,7 @@
             <div class="flex justify-center gap-4 mt-8">
               <div class="flex items-center gap-2 text-slate-400 text-sm">
                 <i class="fas fa-tags text-orange-500"></i>
-                <span>312 Products</span>
+                <span>454 Products</span>
               </div>
               <div class="flex items-center gap-2 text-slate-400 text-sm">
                 <i class="fas fa-percent text-orange-500"></i>

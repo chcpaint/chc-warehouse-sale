@@ -1192,6 +1192,142 @@ app.post('/api/auth/verify', async (req, res) => {
   }
 });
 
+// ========================================
+// ONE-TIME TOKEN SYSTEM (Temporary Access Codes)
+// ========================================
+
+// Public: Validate a one-time token (rate-limited like auth)
+app.post('/api/validate-token', async (req, res) => {
+  const ip = req.ip || req.connection.remoteAddress;
+
+  if (!checkRateLimit(ip, 10)) {
+    return res.status(429).json({ valid: false, message: 'Too many attempts. Please try again later.' });
+  }
+
+  recordAttempt(ip);
+
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ valid: false, message: 'Token is required' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .rpc('validate_and_use_token', {
+        p_token: token.toUpperCase().trim(),
+        p_ip: ip
+      });
+
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      const result = data[0];
+      if (result.valid) {
+        clearRateLimit(ip);
+        console.log(`Token auth success: ${token.toUpperCase().trim()} from ${ip}`);
+      } else {
+        console.log(`Token auth failed: ${token.toUpperCase().trim()} from ${ip} — ${result.message}`);
+      }
+      return res.json({
+        valid: result.valid,
+        message: result.message,
+        customerName: result.customer_name
+      });
+    }
+
+    return res.json({ valid: false, message: 'Invalid token' });
+
+  } catch (error) {
+    console.error('Token validation error:', error);
+    return res.status(500).json({ valid: false, message: 'Server error' });
+  }
+});
+
+// Admin: Generate a new token
+app.post('/api/admin/tokens/generate', authenticateAdmin, async (req, res) => {
+  const { customerName, customerEmail, expiresHours = 72, notes } = req.body;
+
+  try {
+    const { data, error } = await supabase
+      .rpc('generate_catalog_token', {
+        p_customer_name: sanitize(customerName) || null,
+        p_customer_email: sanitize(customerEmail) || null,
+        p_expires_hours: Math.min(Math.max(parseInt(expiresHours) || 72, 1), 8760), // 1 hour to 1 year
+        p_notes: sanitize(notes) || null
+      });
+
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      await auditLog('TOKEN_GENERATED', req.admin.id, {
+        token: data[0].token,
+        customer: customerName || 'anonymous',
+        expiresAt: data[0].expires_at
+      });
+      return res.json({
+        success: true,
+        token: data[0].token,
+        expiresAt: data[0].expires_at
+      });
+    }
+
+    return res.status(500).json({ error: 'Failed to generate token' });
+
+  } catch (error) {
+    console.error('Token generation error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Admin: List all tokens
+app.get('/api/admin/tokens', authenticateAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('token_status')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return res.json({ tokens: data || [] });
+
+  } catch (error) {
+    console.error('Token list error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Admin: Revoke a token
+app.post('/api/admin/tokens/revoke', authenticateAdmin, async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Token is required' });
+  }
+
+  try {
+    const { error } = await supabase
+      .from('catalog_tokens')
+      .update({ is_active: false })
+      .eq('token', token.toUpperCase().trim());
+
+    if (error) throw error;
+
+    await auditLog('TOKEN_REVOKED', req.admin.id, { token: token.toUpperCase().trim() });
+
+    return res.json({ success: true, message: 'Token revoked' });
+
+  } catch (error) {
+    console.error('Token revoke error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ========================================
+// CUSTOMER ORDERS
+// ========================================
+
 // Submit order (updated to include sale_id)
 app.post('/api/orders', async (req, res) => {
   try {
