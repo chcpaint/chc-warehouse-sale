@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHC Paint & Auto Body Supplies - B2B Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-gradient-to-br from-blue-900 via-blue-800 to-blue-700 min-h-screen flex items-center justify-center">
+    <div class="text-center px-4 max-w-2xl">
+        <img src="/assets/chc-logo.png" alt="CHC Paint & Auto Body Supplies" class="h-20 mx-auto mb-8" onerror="this.outerHTML='<h1 class=\'text-5xl font-bold text-white mb-8\'>CHC</h1>'">
+
+        <h2 class="text-3xl font-bold text-white mb-3">B2B Sales Platform</h2>
+        <p class="text-blue-200 text-lg mb-10">Access your company's exclusive product catalog, promotions, and ordering system.</p>
+
+        <div class="bg-white/10 backdrop-blur rounded-2xl p-8 border border-white/20">
+            <h3 class="text-xl font-semibold text-white mb-4">Access Your Store</h3>
+            <p class="text-blue-200 text-sm mb-6">Enter your company identifier to access your catalog.</p>
+
+            <div id="error-msg" class="hidden bg-red-500/20 border border-red-400/30 text-red-200 px-4 py-2 rounded-lg mb-4 text-sm"></div>
+
+            <form onsubmit="goToStore(event)" class="flex gap-3">
+                <input type="text" id="company-slug" placeholder="e.g., acme-auto"
+                    class="flex-1 px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-blue-200 focus:ring-2 focus:ring-white/50 focus:border-transparent text-lg"
+                    required>
+                <button type="submit" class="bg-white text-blue-800 font-bold px-6 py-3 rounded-lg hover:bg-blue-50 transition-colors">
+                    Go <i class="fas fa-arrow-right ml-1"></i>
+                </button>
+            </form>
+        </div>
+
+        <div class="mt-12 flex justify-center gap-8 text-blue-200/60 text-sm">
+            <a href="/admin" class="hover:text-white transition-colors"><i class="fas fa-lock mr-1"></i> Admin Portal</a>
+        </div>
+
+        <p class="text-blue-300/40 text-xs mt-8">&copy; 2026 CHC Paint & Auto Body Supplies. All rights reserved.</p>
+    </div>
+
+    <script>
+    async function goToStore(e) {
+        e.preventDefault();
+        const slug = document.getElementById('company-slug').value.trim().toLowerCase().replace(/\s+/g, '-');
+        const errorEl = document.getElementById('error-msg');
+        errorEl.classList.add('hidden');
+
+        try {
+            const resp = await fetch(`/api/store/${slug}/info`);
+            if (!resp.ok) {
+                errorEl.textContent = 'Company not found. Please check your identifier.';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            window.location.href = `/store/${slug}`;
+        } catch (err) {
+            errorEl.textContent = 'Connection error. Please try again.';
+            errorEl.classList.remove('hidden');
+        }
+    }
+    </script>
+</body>
+</html>

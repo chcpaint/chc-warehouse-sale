@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHC B2B Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        .tab-active { border-bottom: 3px solid #1e40af; color: #1e40af; font-weight: 600; }
+        .promo-badge { animation: pulse-badge 2s infinite; }
+        @keyframes pulse-badge { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+        .cart-count { animation: pop 0.3s ease; }
+        @keyframes pop { 0% { transform: scale(0.5); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+        .skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <!-- ============================================================ -->
+    <!-- LOGIN SCREEN -->
+    <!-- ============================================================ -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-blue-700">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4">
+            <!-- Dual Logo Area -->
+            <div class="flex items-center justify-center gap-4 mb-6">
+                <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-14 object-contain" onerror="this.style.display='none'">
+                <div class="h-10 w-px bg-gray-300" id="logo-divider" style="display:none"></div>
+                <img id="login-company-logo" src="" alt="" class="h-14 object-contain" style="display:none">
+            </div>
+            <h2 id="login-company-name" class="text-2xl font-bold text-center text-gray-800 mb-2">Welcome</h2>
+            <p class="text-gray-500 text-center mb-6">Enter your access code to continue</p>
+
+            <div id="login-error" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm"></div>
+
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Access Code</label>
+                    <input type="password" id="access-code" placeholder="Enter your company access code"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg" required>
+                </div>
+                <button type="submit" id="login-btn"
+                    class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors">
+                    <span id="login-btn-text">Access Catalog</span>
+                    <i id="login-spinner" class="fas fa-spinner fa-spin ml-2 hidden"></i>
+                </button>
+            </form>
+
+            <p class="text-center text-xs text-gray-400 mt-6">Powered by CHC Paint & Auto Body Supplies</p>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MAIN APPLICATION -->
+    <!-- ============================================================ -->
+    <div id="app" class="hidden">
+        <!-- HEADER with dual branding -->
+        <header class="bg-white shadow-sm border-b sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 py-3">
+                <div class="flex items-center justify-between">
+                    <!-- Dual Logo -->
+                    <div class="flex items-center gap-3">
+                        <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-10 object-contain" onerror="this.parentElement.innerHTML='<span class=\'font-bold text-blue-900 text-xl\'>CHC</span>'">
+                        <div class="h-8 w-px bg-gray-300" id="header-logo-divider" style="display:none"></div>
+                        <img id="header-company-logo" src="" alt="" class="h-10 object-contain" style="display:none">
+                        <span id="header-company-name" class="font-semibold text-gray-700 text-lg"></span>
+                    </div>
+
+                    <!-- Cart & User Info -->
+                    <div class="flex items-center gap-4">
+                        <button onclick="showTab('cart')" class="relative bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-2 rounded-lg transition-colors">
+                            <i class="fas fa-shopping-cart"></i>
+                            <span id="cart-badge" class="hidden absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center cart-count">0</span>
+                        </button>
+                        <button onclick="logout()" class="text-gray-400 hover:text-gray-600 text-sm">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Navigation Tabs -->
+                <nav class="flex gap-1 mt-3 -mb-px" id="nav-tabs">
+                    <button onclick="showTab('products')" data-tab="products"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all tab-active">
+                        <i class="fas fa-box mr-1"></i> Products
+                    </button>
+                    <button onclick="showTab('promotions')" data-tab="promotions"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-tags mr-1"></i> Promotions
+                    </button>
+                    <button onclick="showTab('cart')" data-tab="cart"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-shopping-cart mr-1"></i> Cart
+                    </button>
+                    <button onclick="showTab('orders')" data-tab="orders"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-receipt mr-1"></i> Order History
+                    </button>
+                </nav>
+            </div>
+        </header>
+
+        <!-- MAIN CONTENT -->
+        <main class="max-w-7xl mx-auto px-4 py-6">
+
+            <!-- ============ PRODUCTS TAB ============ -->
+            <section id="tab-products" class="fade-in">
+                <!-- Filters -->
+                <div class="bg-white rounded-xl shadow-sm border p-4 mb-6">
+                    <div class="flex flex-wrap gap-3 items-center">
+                        <div class="flex-1 min-w-[200px]">
+                            <div class="relative">
+                                <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                                <input type="text" id="search-input" placeholder="Search products..."
+                                    class="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    oninput="debounceSearch()">
+                            </div>
+                        </div>
+                        <select id="brand-filter" onchange="loadProducts()" class="px-3 py-2 border rounded-lg bg-white">
+                            <option value="">All Brands</option>
+                        </select>
+                        <select id="category-filter" onchange="loadProducts()" class="px-3 py-2 border rounded-lg bg-white">
+                            <option value="">All Categories</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Product Grid -->
+                <div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <!-- Products loaded dynamically -->
+                </div>
+
+                <!-- Pagination -->
+                <div id="pagination" class="flex justify-center gap-2 mt-6"></div>
+            </section>
+
+            <!-- ============ PROMOTIONS TAB ============ -->
+            <section id="tab-promotions" class="hidden fade-in">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800"><i class="fas fa-tags text-red-500 mr-2"></i>Current Promotions</h2>
+                    <p class="text-gray-500 mt-1">Special pricing on select products — limited time!</p>
+                </div>
+                <div id="promotions-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <!-- Promotions loaded dynamically -->
+                </div>
+                <div id="no-promotions" class="hidden text-center py-12 text-gray-400">
+                    <i class="fas fa-tags text-4xl mb-3"></i>
+                    <p class="text-lg">No active promotions right now.</p>
+                    <p class="text-sm">Check back soon for special deals!</p>
+                </div>
+            </section>
+
+            <!-- ============ CART TAB ============ -->
+            <section id="tab-cart" class="hidden fade-in">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-shopping-cart mr-2"></i>Your Cart</h2>
+                <div id="cart-empty" class="text-center py-12 text-gray-400">
+                    <i class="fas fa-shopping-cart text-4xl mb-3"></i>
+                    <p class="text-lg">Your cart is empty</p>
+                    <button onclick="showTab('products')" class="mt-3 text-blue-600 hover:underline">Browse products</button>
+                </div>
+                <div id="cart-content" class="hidden">
+                    <div id="cart-items" class="space-y-3 mb-6"></div>
+                    <div class="bg-white rounded-xl shadow-sm border p-6">
+                        <div class="flex justify-between text-xl font-bold mb-4">
+                            <span>Total:</span>
+                            <span id="cart-total">$0.00</span>
+                        </div>
+                        <button onclick="showCheckout()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors">
+                            Proceed to Checkout
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Checkout Form -->
+                <div id="checkout-form" class="hidden mt-6 bg-white rounded-xl shadow-sm border p-6 fade-in">
+                    <h3 class="text-xl font-bold mb-4">Checkout Details</h3>
+                    <form onsubmit="submitOrder(event)" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Contact Name *</label>
+                                <input type="text" id="checkout-name" required class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                                <input type="email" id="checkout-email" required class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                                <input type="tel" id="checkout-phone" class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Location / Branch</label>
+                                <input type="text" id="checkout-location" class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                            <textarea id="checkout-notes" rows="3" class="w-full px-3 py-2 border rounded-lg"></textarea>
+                        </div>
+                        <button type="submit" id="submit-order-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition-colors">
+                            <i class="fas fa-paper-plane mr-2"></i>Submit Order
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- ============ ORDERS TAB ============ -->
+            <section id="tab-orders" class="hidden fade-in">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-receipt mr-2"></i>Order History</h2>
+                <div id="orders-list" class="space-y-3"></div>
+                <div id="no-orders" class="hidden text-center py-12 text-gray-400">
+                    <i class="fas fa-receipt text-4xl mb-3"></i>
+                    <p class="text-lg">No orders yet.</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ORDER SUCCESS MODAL -->
+    <div id="order-success-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl p-8 max-w-md w-full text-center fade-in">
+            <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-check text-green-500 text-3xl"></i>
+            </div>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">Order Submitted!</h3>
+            <p class="text-gray-500 mb-2">Your order has been received and is being processed.</p>
+            <p class="font-mono text-lg font-bold text-blue-700 mb-4" id="order-confirmation-number"></p>
+            <button onclick="closeOrderModal()" class="bg-blue-700 hover:bg-blue-800 text-white px-6 py-2 rounded-lg">Continue Shopping</button>
+        </div>
+    </div>
+
+    <script>
+    // ============================================================
+    // STATE
+    // ============================================================
+    let state = {
+        token: null,
+        company: null,
+        slug: null,
+        products: [],
+        promotions: [],
+        cart: [],
+        filters: { brands: [], categories: [] },
+        currentPage: 1,
+        totalProducts: 0
+    };
+
+    const API_BASE = '/api';
+
+    // ============================================================
+    // INITIALIZATION
+    // ============================================================
+    document.addEventListener('DOMContentLoaded', () => {
+        // Extract slug from URL: /store/{slug}
+        const pathParts = window.location.pathname.split('/');
+        const storeIdx = pathParts.indexOf('store');
+        state.slug = storeIdx >= 0 ? pathParts[storeIdx + 1] : null;
+
+        if (!state.slug) {
+            window.location.href = '/';
+            return;
+        }
+
+        // Check for existing session
+        const savedToken = sessionStorage.getItem('chc_token');
+        const savedCompany = sessionStorage.getItem('chc_company');
+
+        if (savedToken && savedCompany) {
+            state.token = savedToken;
+            state.company = JSON.parse(savedCompany);
+            showApp();
+        } else {
+            loadCompanyInfo();
+        }
+    });
+
+    // ============================================================
+    // AUTH
+    // ============================================================
+    async function loadCompanyInfo() {
+        try {
+            const resp = await fetch(`${API_BASE}/store/${state.slug}/info`);
+            if (!resp.ok) {
+                document.getElementById('login-company-name').textContent = 'Store Not Found';
+                return;
+            }
+            const data = await resp.json();
+            const company = data.company;
+
+            document.getElementById('login-company-name').textContent = company.name;
+            if (company.logo_url) {
+                const logo = document.getElementById('login-company-logo');
+                logo.src = company.logo_url;
+                logo.alt = company.name;
+                logo.style.display = 'block';
+                document.getElementById('logo-divider').style.display = 'block';
+            }
+        } catch (err) {
+            console.error('Failed to load company info:', err);
+        }
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const code = document.getElementById('access-code').value;
+        const errorEl = document.getElementById('login-error');
+        const btn = document.getElementById('login-btn');
+        const spinner = document.getElementById('login-spinner');
+        const btnText = document.getElementById('login-btn-text');
+
+        errorEl.classList.add('hidden');
+        spinner.classList.remove('hidden');
+        btnText.textContent = 'Verifying...';
+        btn.disabled = true;
+
+        try {
+            const resp = await fetch(`${API_BASE}/auth/company-login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug: state.slug, access_code: code })
+            });
+
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                errorEl.textContent = data.error || 'Login failed.';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            state.token = data.token;
+            state.company = data.company;
+            sessionStorage.setItem('chc_token', data.token);
+            sessionStorage.setItem('chc_company', JSON.stringify(data.company));
+
+            showApp();
+
+        } catch (err) {
+            errorEl.textContent = 'Connection error. Please try again.';
+            errorEl.classList.remove('hidden');
+        } finally {
+            spinner.classList.add('hidden');
+            btnText.textContent = 'Access Catalog';
+            btn.disabled = false;
+        }
+    });
+
+    function logout() {
+        sessionStorage.removeItem('chc_token');
+        sessionStorage.removeItem('chc_company');
+        state.token = null;
+        state.company = null;
+        state.cart = [];
+        document.getElementById('app').classList.add('hidden');
+        document.getElementById('login-screen').classList.remove('hidden');
+    }
+
+    // ============================================================
+    // APP DISPLAY
+    // ============================================================
+    function showApp() {
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+
+        // Set header branding
+        document.getElementById('header-company-name').textContent = state.company.name;
+        if (state.company.logo_url) {
+            const logo = document.getElementById('header-company-logo');
+            logo.src = state.company.logo_url;
+            logo.alt = state.company.name;
+            logo.style.display = 'block';
+            document.getElementById('header-logo-divider').style.display = 'block';
+        }
+
+        // Load cart from sessionStorage
+        const savedCart = sessionStorage.getItem('chc_cart');
+        if (savedCart) state.cart = JSON.parse(savedCart);
+        updateCartBadge();
+
+        loadProducts();
+        loadPromotions();
+    }
+
+    function showTab(tab) {
+        document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.add('hidden'));
+        document.getElementById(`tab-${tab}`).classList.remove('hidden');
+
+        document.querySelectorAll('[data-tab]').forEach(el => el.classList.remove('tab-active'));
+        const tabBtn = document.querySelector(`[data-tab="${tab}"]`);
+        if (tabBtn) tabBtn.classList.add('tab-active');
+
+        if (tab === 'cart') renderCart();
+        if (tab === 'orders') loadOrders();
+    }
+
+    // ============================================================
+    // PRODUCTS
+    // ============================================================
+    let searchTimeout;
+    function debounceSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => loadProducts(), 300);
+    }
+
+    async function loadProducts() {
+        const grid = document.getElementById('products-grid');
+        grid.innerHTML = '<div class="col-span-full text-center py-8"><i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i></div>';
+
+        const brand = document.getElementById('brand-filter').value;
+        const category = document.getElementById('category-filter').value;
+        const search = document.getElementById('search-input').value;
+
+        try {
+            const params = new URLSearchParams({ page: state.currentPage, limit: 100 });
+            if (brand) params.set('brand', brand);
+            if (category) params.set('category', category);
+            if (search) params.set('search', search);
+
+            const resp = await apiFetch(`/store/${state.slug}/products?${params}`);
+            const data = await resp.json();
+
+            state.products = data.products;
+            state.totalProducts = data.total;
+
+            // Update filters
+            if (data.filters) {
+                updateFilterDropdown('brand-filter', data.filters.brands, 'All Brands');
+                updateFilterDropdown('category-filter', data.filters.categories, 'All Categories');
+            }
+
+            renderProducts();
+
+        } catch (err) {
+            grid.innerHTML = '<div class="col-span-full text-center py-8 text-red-500">Failed to load products.</div>';
+        }
+    }
+
+    function updateFilterDropdown(id, options, defaultLabel) {
+        const select = document.getElementById(id);
+        const current = select.value;
+        select.innerHTML = `<option value="">${defaultLabel}</option>`;
+        options.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt;
+            option.textContent = opt;
+            if (opt === current) option.selected = true;
+            select.appendChild(option);
+        });
+    }
+
+    function renderProducts() {
+        const grid = document.getElementById('products-grid');
+
+        if (!state.products.length) {
+            grid.innerHTML = '<div class="col-span-full text-center py-12 text-gray-400"><i class="fas fa-box-open text-4xl mb-3"></i><p>No products found.</p></div>';
+            return;
+        }
+
+        grid.innerHTML = state.products.map(p => {
+            const inCart = state.cart.find(c => c.product_id === p.id);
+            const qty = inCart ? inCart.quantity : 0;
+
+            return `
+            <div class="bg-white rounded-xl shadow-sm border hover:shadow-md transition-shadow p-4 fade-in">
+                <div class="flex justify-between items-start mb-2">
+                    <span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded">${escapeHtml(p.brand)}</span>
+                    ${p.category ? `<span class="text-xs text-gray-400">${escapeHtml(p.category)}</span>` : ''}
+                </div>
+                <h3 class="font-semibold text-gray-800 text-sm mb-1 leading-tight">${escapeHtml(p.name)}</h3>
+                ${p.sku ? `<p class="text-xs text-gray-400 mb-2">SKU: ${escapeHtml(p.sku)}</p>` : ''}
+                <div class="flex items-baseline gap-2 mb-3">
+                    <span class="text-xl font-bold text-gray-800">$${parseFloat(p.price).toFixed(2)}</span>
+                    ${p.previous_price ? `<span class="text-sm text-gray-400 line-through">$${parseFloat(p.previous_price).toFixed(2)}</span>` : ''}
+                    ${p.case_qty > 1 ? `<span class="text-xs text-gray-400">/ case of ${p.case_qty}</span>` : ''}
+                </div>
+                <div class="flex items-center gap-2">
+                    ${qty > 0 ? `
+                        <button onclick="updateCart('${p.id}', ${qty - 1})" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 font-bold">-</button>
+                        <span class="w-8 text-center font-semibold">${qty}</span>
+                        <button onclick="updateCart('${p.id}', ${qty + 1})" class="w-8 h-8 bg-blue-100 hover:bg-blue-200 rounded-lg text-blue-700 font-bold">+</button>
+                    ` : `
+                        <button onclick="addToCart('${p.id}')" class="flex-1 bg-blue-700 hover:bg-blue-800 text-white text-sm py-2 rounded-lg transition-colors">
+                            <i class="fas fa-plus mr-1"></i> Add to Cart
+                        </button>
+                    `}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // ============================================================
+    // PROMOTIONS
+    // ============================================================
+    async function loadPromotions() {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/promotions`);
+            const data = await resp.json();
+            state.promotions = data.promotions || [];
+            renderPromotions();
+        } catch (err) {
+            console.error('Failed to load promotions:', err);
+        }
+    }
+
+    function renderPromotions() {
+        const grid = document.getElementById('promotions-grid');
+        const noPromo = document.getElementById('no-promotions');
+
+        if (!state.promotions.length) {
+            grid.classList.add('hidden');
+            noPromo.classList.remove('hidden');
+            return;
+        }
+
+        grid.classList.remove('hidden');
+        noPromo.classList.add('hidden');
+
+        grid.innerHTML = state.promotions.map(p => {
+            const product = p.products;
+            if (!product) return '';
+            const endsAt = new Date(p.ends_at);
+            const daysLeft = Math.ceil((endsAt - new Date()) / (1000 * 60 * 60 * 24));
+
+            return `
+            <div class="bg-white rounded-xl shadow-sm border border-red-100 hover:shadow-md transition-shadow p-4 fade-in relative overflow-hidden">
+                <div class="absolute top-0 right-0 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-bl-lg promo-badge">
+                    ${p.savings_pct}% OFF
+                </div>
+                ${p.is_global ? '<span class="absolute top-0 left-0 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-br-lg">GLOBAL</span>' : ''}
+                <div class="mt-6">
+                    <span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded">${escapeHtml(product.brand)}</span>
+                    ${p.promo_label ? `<span class="ml-1 text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">${escapeHtml(p.promo_label)}</span>` : ''}
+                </div>
+                <h3 class="font-semibold text-gray-800 mt-2 leading-tight">${escapeHtml(product.name)}</h3>
+                ${product.sku ? `<p class="text-xs text-gray-400 mt-1">SKU: ${escapeHtml(product.sku)}</p>` : ''}
+                <div class="flex items-baseline gap-2 mt-3">
+                    <span class="text-2xl font-bold text-red-600">$${parseFloat(p.promo_price).toFixed(2)}</span>
+                    <span class="text-sm text-gray-400 line-through">$${parseFloat(product.price).toFixed(2)}</span>
+                    <span class="text-sm text-green-600 font-semibold">Save $${p.savings}</span>
+                </div>
+                <p class="text-xs text-gray-400 mt-2"><i class="fas fa-clock mr-1"></i>${daysLeft > 0 ? `${daysLeft} day${daysLeft > 1 ? 's' : ''} left` : 'Ends today!'}</p>
+                <button onclick="addToCart('${product.id}')" class="w-full mt-3 bg-red-600 hover:bg-red-700 text-white text-sm py-2 rounded-lg transition-colors">
+                    <i class="fas fa-plus mr-1"></i> Add to Cart at Promo Price
+                </button>
+            </div>`;
+        }).join('');
+    }
+
+    // ============================================================
+    // CART
+    // ============================================================
+    function addToCart(productId) {
+        const product = state.products.find(p => p.id === productId)
+            || state.promotions.find(p => p.products?.id === productId)?.products;
+        if (!product) return;
+
+        const existing = state.cart.find(c => c.product_id === productId);
+        if (existing) {
+            existing.quantity++;
+        } else {
+            // Check for active promo price
+            const promo = state.promotions.find(p => p.products?.id === productId);
+            state.cart.push({
+                product_id: productId,
+                name: product.name,
+                brand: product.brand,
+                sku: product.sku,
+                price: promo ? parseFloat(promo.promo_price) : parseFloat(product.price),
+                original_price: parseFloat(product.price),
+                is_promo: !!promo,
+                quantity: 1
+            });
+        }
+        saveCart();
+        renderProducts();
+    }
+
+    function updateCart(productId, qty) {
+        if (qty <= 0) {
+            state.cart = state.cart.filter(c => c.product_id !== productId);
+        } else {
+            const item = state.cart.find(c => c.product_id === productId);
+            if (item) item.quantity = qty;
+        }
+        saveCart();
+        renderProducts();
+        renderCart();
+    }
+
+    function saveCart() {
+        sessionStorage.setItem('chc_cart', JSON.stringify(state.cart));
+        updateCartBadge();
+    }
+
+    function updateCartBadge() {
+        const badge = document.getElementById('cart-badge');
+        const count = state.cart.reduce((sum, c) => sum + c.quantity, 0);
+        if (count > 0) {
+            badge.textContent = count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+
+    function renderCart() {
+        const empty = document.getElementById('cart-empty');
+        const content = document.getElementById('cart-content');
+        const itemsEl = document.getElementById('cart-items');
+        const checkout = document.getElementById('checkout-form');
+
+        if (!state.cart.length) {
+            empty.classList.remove('hidden');
+            content.classList.add('hidden');
+            checkout.classList.add('hidden');
+            return;
+        }
+
+        empty.classList.add('hidden');
+        content.classList.remove('hidden');
+
+        let total = 0;
+        itemsEl.innerHTML = state.cart.map(item => {
+            const subtotal = item.price * item.quantity;
+            total += subtotal;
+            return `
+            <div class="bg-white rounded-lg shadow-sm border p-4 flex items-center justify-between">
+                <div class="flex-1">
+                    <h4 class="font-semibold text-gray-800">${escapeHtml(item.name)}</h4>
+                    <p class="text-sm text-gray-400">${escapeHtml(item.brand)} ${item.sku ? '| ' + escapeHtml(item.sku) : ''}</p>
+                    <div class="flex items-baseline gap-2 mt-1">
+                        <span class="font-bold ${item.is_promo ? 'text-red-600' : 'text-gray-800'}">$${item.price.toFixed(2)}</span>
+                        ${item.is_promo ? `<span class="text-xs text-gray-400 line-through">$${item.original_price.toFixed(2)}</span><span class="text-xs text-red-500 font-semibold">PROMO</span>` : ''}
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 ml-4">
+                    <button onclick="updateCart('${item.product_id}', ${item.quantity - 1})" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-bold">-</button>
+                    <span class="w-8 text-center font-semibold">${item.quantity}</span>
+                    <button onclick="updateCart('${item.product_id}', ${item.quantity + 1})" class="w-8 h-8 bg-blue-100 hover:bg-blue-200 rounded text-blue-700 font-bold">+</button>
+                    <span class="ml-3 font-bold text-gray-800 w-20 text-right">$${subtotal.toFixed(2)}</span>
+                </div>
+            </div>`;
+        }).join('');
+
+        document.getElementById('cart-total').textContent = `$${total.toFixed(2)}`;
+    }
+
+    function showCheckout() {
+        document.getElementById('checkout-form').classList.remove('hidden');
+        document.getElementById('checkout-name').focus();
+    }
+
+    // ============================================================
+    // ORDERS
+    // ============================================================
+    async function submitOrder(e) {
+        e.preventDefault();
+        const btn = document.getElementById('submit-order-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Submitting...';
+
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/orders`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    contact_name: document.getElementById('checkout-name').value,
+                    contact_email: document.getElementById('checkout-email').value,
+                    contact_phone: document.getElementById('checkout-phone').value,
+                    location: document.getElementById('checkout-location').value,
+                    notes: document.getElementById('checkout-notes').value,
+                    items: state.cart.map(c => ({ product_id: c.product_id, quantity: c.quantity }))
+                })
+            });
+
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                alert(data.error || 'Order failed.');
+                return;
+            }
+
+            // Show success modal
+            document.getElementById('order-confirmation-number').textContent = data.order.order_number;
+            document.getElementById('order-success-modal').classList.remove('hidden');
+
+            // Clear cart
+            state.cart = [];
+            saveCart();
+            renderCart();
+
+        } catch (err) {
+            alert('Connection error. Please try again.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Submit Order';
+        }
+    }
+
+    function closeOrderModal() {
+        document.getElementById('order-success-modal').classList.add('hidden');
+        showTab('products');
+    }
+
+    async function loadOrders() {
+        const list = document.getElementById('orders-list');
+        const noOrders = document.getElementById('no-orders');
+
+        list.innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i></div>';
+
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/orders`);
+            const data = await resp.json();
+
+            if (!data.orders?.length) {
+                list.innerHTML = '';
+                noOrders.classList.remove('hidden');
+                return;
+            }
+
+            noOrders.classList.add('hidden');
+            const statusColors = {
+                pending: 'bg-yellow-100 text-yellow-800',
+                confirmed: 'bg-blue-100 text-blue-800',
+                processing: 'bg-purple-100 text-purple-800',
+                shipped: 'bg-indigo-100 text-indigo-800',
+                delivered: 'bg-green-100 text-green-800',
+                cancelled: 'bg-red-100 text-red-800'
+            };
+
+            list.innerHTML = data.orders.map(o => `
+                <div class="bg-white rounded-lg shadow-sm border p-4 fade-in">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="font-mono font-bold text-blue-700">${escapeHtml(o.order_number)}</p>
+                            <p class="text-sm text-gray-400">${new Date(o.created_at).toLocaleDateString()} - ${escapeHtml(o.contact_name)}</p>
+                        </div>
+                        <div class="text-right">
+                            <span class="px-2 py-1 rounded-full text-xs font-semibold ${statusColors[o.status] || 'bg-gray-100'}">${o.status.toUpperCase()}</span>
+                            <p class="font-bold text-gray-800 mt-1">$${parseFloat(o.total).toFixed(2)}</p>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-2">${(o.items || []).length} item${(o.items || []).length !== 1 ? 's' : ''}</p>
+                </div>
+            `).join('');
+
+        } catch (err) {
+            list.innerHTML = '<div class="text-center py-8 text-red-500">Failed to load orders.</div>';
+        }
+    }
+
+    // ============================================================
+    // UTILITIES
+    // ============================================================
+    function apiFetch(path, options = {}) {
+        return fetch(`${API_BASE}${path}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`,
+                ...(options.headers || {})
+            }
+        });
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    </script>
+</body>
+</html>

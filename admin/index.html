@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHC Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        .sidebar-link.active { background: rgba(59, 130, 246, 0.1); color: #2563eb; border-right: 3px solid #2563eb; }
+        .fade-in { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .modal-backdrop { background: rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+    <!-- ============================================================ -->
+    <!-- ADMIN LOGIN -->
+    <!-- ============================================================ -->
+    <div id="admin-login" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-700">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <i class="fas fa-shield-alt text-blue-600 text-2xl"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800">Admin Dashboard</h2>
+                <p class="text-gray-500 text-sm">CHC Paint & Auto Body Supplies</p>
+            </div>
+
+            <div id="admin-login-error" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm"></div>
+
+            <!-- Setup form (first admin only) -->
+            <div id="setup-form-container" class="hidden">
+                <p class="text-sm text-blue-600 bg-blue-50 p-3 rounded-lg mb-4"><i class="fas fa-info-circle mr-1"></i> First-time setup: Create your super admin account.</p>
+                <form id="setup-form" class="space-y-3">
+                    <input type="text" id="setup-name" placeholder="Full Name" class="w-full px-4 py-3 border rounded-lg" required>
+                    <input type="email" id="setup-email" placeholder="Email" class="w-full px-4 py-3 border rounded-lg" required>
+                    <input type="password" id="setup-password" placeholder="Password (8+ chars, mixed case + number)" class="w-full px-4 py-3 border rounded-lg" required>
+                    <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Create Admin Account</button>
+                </form>
+            </div>
+
+            <!-- Login form -->
+            <form id="admin-login-form" class="space-y-4">
+                <input type="email" id="admin-email" placeholder="Email" class="w-full px-4 py-3 border rounded-lg" required>
+                <input type="password" id="admin-password" placeholder="Password" class="w-full px-4 py-3 border rounded-lg" required>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">
+                    <span id="admin-login-text">Sign In</span>
+                    <i id="admin-login-spinner" class="fas fa-spinner fa-spin ml-2 hidden"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- ADMIN DASHBOARD -->
+    <!-- ============================================================ -->
+    <div id="admin-app" class="hidden flex min-h-screen">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-white shadow-lg border-r flex flex-col fixed h-full z-40">
+            <div class="p-4 border-b">
+                <img src="/assets/chc-logo.png" alt="CHC" class="h-10 mb-2" onerror="this.outerHTML='<span class=\'font-bold text-blue-900 text-xl\'>CHC Admin</span>'">
+                <p id="admin-welcome" class="text-sm text-gray-500"></p>
+            </div>
+
+            <nav class="flex-1 py-4">
+                <button onclick="adminNav('dashboard')" data-nav="dashboard" class="sidebar-link active w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-chart-bar w-5"></i> Dashboard
+                </button>
+                <button onclick="adminNav('companies')" data-nav="companies" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-building w-5"></i> Companies
+                </button>
+                <button onclick="adminNav('products')" data-nav="products" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-box w-5"></i> Products
+                </button>
+                <button onclick="adminNav('promotions')" data-nav="promotions" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-tags w-5"></i> Promotions
+                </button>
+                <button onclick="adminNav('orders')" data-nav="orders" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-receipt w-5"></i> Orders
+                </button>
+                <button onclick="adminNav('admins')" data-nav="admins" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-admins">
+                    <i class="fas fa-users-cog w-5"></i> Admin Users
+                </button>
+                <button onclick="adminNav('audit')" data-nav="audit" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-audit">
+                    <i class="fas fa-clipboard-list w-5"></i> Audit Log
+                </button>
+            </nav>
+
+            <div class="p-4 border-t">
+                <button onclick="adminLogout()" class="w-full text-left text-sm text-gray-500 hover:text-red-600">
+                    <i class="fas fa-sign-out-alt mr-2"></i> Sign Out
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="flex-1 ml-64">
+            <header class="bg-white shadow-sm border-b px-6 py-4 sticky top-0 z-30">
+                <h1 id="page-title" class="text-xl font-bold text-gray-800">Dashboard</h1>
+            </header>
+
+            <main class="p-6">
+                <!-- Dashboard -->
+                <section id="section-dashboard" class="fade-in">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm text-gray-500">Companies</p>
+                                    <p id="stat-companies" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                </div>
+                                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-building text-blue-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm text-gray-500">Products</p>
+                                    <p id="stat-products" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                </div>
+                                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-box text-green-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm text-gray-500">Active Promos</p>
+                                    <p id="stat-promos" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                </div>
+                                <div class="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-tags text-red-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm text-gray-500">Orders (Month)</p>
+                                    <p id="stat-orders" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                    <p id="stat-revenue" class="text-sm text-green-600 font-semibold mt-1"></p>
+                                </div>
+                                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-receipt text-purple-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Companies Management -->
+                <section id="section-companies" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <p class="text-gray-500">Manage customer companies on the platform.</p>
+                        <button onclick="showModal('company-modal')" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <i class="fas fa-plus mr-1"></i> Add Company
+                        </button>
+                    </div>
+                    <div id="companies-table-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Slug</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Contact</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="companies-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Products Management -->
+                <section id="section-products" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center gap-3">
+                            <p class="text-gray-500">Manage product catalogs.</p>
+                            <select id="admin-product-company" onchange="loadAdminProducts()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">Select Company</option>
+                            </select>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="showModal('upload-modal')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-upload mr-1"></i> Upload CSV
+                            </button>
+                            <button onclick="showModal('product-modal')" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-plus mr-1"></i> Add Product
+                            </button>
+                        </div>
+                    </div>
+                    <div id="products-table-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Product</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Brand</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">SKU</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Price</th>
+                                    <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Case Qty</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="products-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Promotions Management -->
+                <section id="section-promotions" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <p class="text-gray-500">Manage promotions (global and per-company).</p>
+                        <button onclick="showModal('promo-modal')" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <i class="fas fa-plus mr-1"></i> Create Promotion
+                        </button>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Product</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Label</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Promo Price</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Dates</th>
+                                    <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="promotions-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Orders Management -->
+                <section id="section-orders" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex gap-3 items-center">
+                            <select id="admin-order-company" onchange="loadAdminOrders()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">All Companies</option>
+                            </select>
+                            <select id="admin-order-status" onchange="loadAdminOrders()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">All Statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="confirmed">Confirmed</option>
+                                <option value="processing">Processing</option>
+                                <option value="shipped">Shipped</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Order #</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Contact</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Total</th>
+                                    <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Date</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orders-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Admin Users -->
+                <section id="section-admins" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <p class="text-gray-500">Manage admin user accounts.</p>
+                        <button onclick="showModal('admin-user-modal')" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <i class="fas fa-plus mr-1"></i> Add Admin
+                        </button>
+                    </div>
+                    <div id="admins-table-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Name</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Email</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Role</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Last Login</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admins-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Audit Log -->
+                <section id="section-audit" class="hidden fade-in">
+                    <div id="audit-log-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Time</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Admin</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Action</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MODALS -->
+    <!-- ============================================================ -->
+
+    <!-- Add Company Modal -->
+    <div id="company-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Add Company</h3>
+                <button onclick="hideModal('company-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="createCompany(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+                    <input type="text" id="new-company-name" required class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Access Code *</label>
+                    <input type="text" id="new-company-code" required class="w-full px-3 py-2 border rounded-lg" placeholder="Code the company will use to login">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
+                    <input type="email" id="new-company-email" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                    <input type="tel" id="new-company-phone" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                    <textarea id="new-company-address" rows="2" class="w-full px-3 py-2 border rounded-lg"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Company Logo</label>
+                    <input type="file" id="new-company-logo" accept="image/png,image/jpeg,image/gif,image/webp" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Create Company</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Upload Catalog Modal -->
+    <div id="upload-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Upload Catalog</h3>
+                <button onclick="hideModal('upload-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="uploadCatalog(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                    <select id="upload-company" required class="w-full px-3 py-2 border rounded-lg"></select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Catalog File (CSV or XLSX)</label>
+                    <input type="file" id="upload-file" accept=".csv,.xlsx,.xls" required class="w-full px-3 py-2 border rounded-lg">
+                    <p class="text-xs text-gray-400 mt-1">Required columns: Name, Brand, Price. Optional: SKU, Category, Description, Case Qty, Previous Price</p>
+                </div>
+                <div id="upload-progress" class="hidden">
+                    <div class="bg-blue-50 rounded-lg p-4 text-center">
+                        <i class="fas fa-spinner fa-spin text-blue-600 text-xl mb-2"></i>
+                        <p class="text-sm text-blue-700">Processing catalog...</p>
+                    </div>
+                </div>
+                <div id="upload-result" class="hidden"></div>
+                <button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg">Upload & Import</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create Promotion Modal -->
+    <div id="promo-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Create Promotion</h3>
+                <button onclick="hideModal('promo-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="createPromotion(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Company (leave empty for global)</label>
+                    <select id="promo-company" class="w-full px-3 py-2 border rounded-lg" onchange="loadPromoProducts()">
+                        <option value="">Global (all companies)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Product *</label>
+                    <select id="promo-product" required class="w-full px-3 py-2 border rounded-lg">
+                        <option value="">Select a product</option>
+                    </select>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Promo Price *</label>
+                        <input type="number" id="promo-price" step="0.01" min="0" required class="w-full px-3 py-2 border rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Label</label>
+                        <input type="text" id="promo-label" placeholder="e.g., Spring Sale" class="w-full px-3 py-2 border rounded-lg">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+                        <input type="datetime-local" id="promo-start" required class="w-full px-3 py-2 border rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+                        <input type="datetime-local" id="promo-end" required class="w-full px-3 py-2 border rounded-lg">
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg">Create Promotion</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Admin Modal -->
+    <div id="admin-user-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Add Admin User</h3>
+                <button onclick="hideModal('admin-user-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="createAdminUser(event)" class="space-y-4">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input type="text" id="new-admin-name" required class="w-full px-3 py-2 border rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                    <input type="email" id="new-admin-email" required class="w-full px-3 py-2 border rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Password *</label>
+                    <input type="password" id="new-admin-password" required minlength="8" class="w-full px-3 py-2 border rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                    <select id="new-admin-role" class="w-full px-3 py-2 border rounded-lg">
+                        <option value="company_admin">Company Admin</option>
+                        <option value="super_admin">Super Admin</option>
+                    </select></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Company (for Company Admin)</label>
+                    <select id="new-admin-company" class="w-full px-3 py-2 border rounded-lg">
+                        <option value="">None (Super Admin)</option>
+                    </select></div>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Create Admin</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    // ============================================================
+    // ADMIN STATE
+    // ============================================================
+    let admin = { token: null, user: null, companies: [] };
+    const API = '/api/admin';
+
+    // ============================================================
+    // ADMIN AUTH
+    // ============================================================
+    document.addEventListener('DOMContentLoaded', () => {
+        const saved = sessionStorage.getItem('chc_admin_token');
+        const savedUser = sessionStorage.getItem('chc_admin_user');
+        if (saved && savedUser) {
+            admin.token = saved;
+            admin.user = JSON.parse(savedUser);
+            showAdminApp();
+        }
+    });
+
+    document.getElementById('admin-login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errorEl = document.getElementById('admin-login-error');
+        errorEl.classList.add('hidden');
+        document.getElementById('admin-login-spinner').classList.remove('hidden');
+
+        try {
+            const resp = await fetch('/api/auth/admin-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: document.getElementById('admin-email').value,
+                    password: document.getElementById('admin-password').value
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { errorEl.textContent = data.error; errorEl.classList.remove('hidden'); return; }
+
+            admin.token = data.token;
+            admin.user = data.admin;
+            sessionStorage.setItem('chc_admin_token', data.token);
+            sessionStorage.setItem('chc_admin_user', JSON.stringify(data.admin));
+            showAdminApp();
+        } catch (err) {
+            errorEl.textContent = 'Connection error.';
+            errorEl.classList.remove('hidden');
+        } finally {
+            document.getElementById('admin-login-spinner').classList.add('hidden');
+        }
+    });
+
+    document.getElementById('setup-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errorEl = document.getElementById('admin-login-error');
+        errorEl.classList.add('hidden');
+
+        try {
+            const resp = await fetch('/api/auth/admin-setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: document.getElementById('setup-name').value,
+                    email: document.getElementById('setup-email').value,
+                    password: document.getElementById('setup-password').value
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { errorEl.textContent = data.error; errorEl.classList.remove('hidden'); return; }
+
+            admin.token = data.token;
+            admin.user = data.admin;
+            sessionStorage.setItem('chc_admin_token', data.token);
+            sessionStorage.setItem('chc_admin_user', JSON.stringify(data.admin));
+            showAdminApp();
+        } catch (err) {
+            errorEl.textContent = 'Setup failed.';
+            errorEl.classList.remove('hidden');
+        }
+    });
+
+    function adminLogout() {
+        sessionStorage.removeItem('chc_admin_token');
+        sessionStorage.removeItem('chc_admin_user');
+        admin = { token: null, user: null, companies: [] };
+        document.getElementById('admin-app').classList.add('hidden');
+        document.getElementById('admin-login').classList.remove('hidden');
+    }
+
+    // ============================================================
+    // ADMIN APP
+    // ============================================================
+    function showAdminApp() {
+        document.getElementById('admin-login').classList.add('hidden');
+        document.getElementById('admin-app').classList.remove('hidden');
+        document.getElementById('admin-welcome').textContent = `Welcome, ${admin.user.name}`;
+
+        // Hide super-admin-only nav items
+        if (admin.user.role !== 'super_admin') {
+            document.getElementById('nav-admins').classList.add('hidden');
+            document.getElementById('nav-audit').classList.add('hidden');
+        }
+
+        loadDashboard();
+        loadCompanies();
+    }
+
+    function adminNav(section) {
+        document.querySelectorAll('[id^="section-"]').forEach(el => el.classList.add('hidden'));
+        document.getElementById(`section-${section}`).classList.remove('hidden');
+        document.querySelectorAll('.sidebar-link').forEach(el => el.classList.remove('active'));
+        document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
+
+        const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products',
+            promotions: 'Promotions', orders: 'Orders', admins: 'Admin Users', audit: 'Audit Log' };
+        document.getElementById('page-title').textContent = titles[section] || section;
+
+        if (section === 'products') loadAdminProducts();
+        if (section === 'promotions') loadAdminPromotions();
+        if (section === 'orders') loadAdminOrders();
+        if (section === 'admins') loadAdminUsers();
+        if (section === 'audit') loadAuditLog();
+    }
+
+    // ============================================================
+    // API HELPERS
+    // ============================================================
+    function adminFetch(path, options = {}) {
+        return fetch(`${API}${path}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${admin.token}`,
+                ...(options.headers || {})
+            }
+        });
+    }
+
+    function adminFetchRaw(path, options = {}) {
+        return fetch(`${API}${path}`, {
+            ...options,
+            headers: {
+                'Authorization': `Bearer ${admin.token}`,
+                ...(options.headers || {})
+            }
+        });
+    }
+
+    function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
+    function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+    function esc(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+    const statusColors = {
+        pending: 'bg-yellow-100 text-yellow-800', confirmed: 'bg-blue-100 text-blue-800',
+        processing: 'bg-purple-100 text-purple-800', shipped: 'bg-indigo-100 text-indigo-800',
+        delivered: 'bg-green-100 text-green-800', cancelled: 'bg-red-100 text-red-800'
+    };
+
+    // ============================================================
+    // DASHBOARD
+    // ============================================================
+    async function loadDashboard() {
+        try {
+            const resp = await adminFetch('/stats');
+            const data = await resp.json();
+            document.getElementById('stat-companies').textContent = data.total_companies;
+            document.getElementById('stat-products').textContent = data.total_products;
+            document.getElementById('stat-promos').textContent = data.active_promotions;
+            document.getElementById('stat-orders').textContent = data.orders_this_month;
+            document.getElementById('stat-revenue').textContent = `$${parseFloat(data.revenue_this_month).toLocaleString()}`;
+        } catch (err) { console.error('Dashboard load failed:', err); }
+    }
+
+    // ============================================================
+    // COMPANIES
+    // ============================================================
+    async function loadCompanies() {
+        try {
+            const resp = await adminFetch('/companies');
+            const data = await resp.json();
+            admin.companies = data.companies || [];
+            renderCompaniesTable();
+            populateCompanyDropdowns();
+        } catch (err) { console.error('Companies load failed:', err); }
+    }
+
+    function renderCompaniesTable() {
+        const tbody = document.getElementById('companies-tbody');
+        if (!admin.companies.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No companies yet. Add your first company!</td></tr>';
+            return;
+        }
+        tbody.innerHTML = admin.companies.map(c => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-3">
+                    <div class="flex items-center gap-3">
+                        ${c.logo_url ? `<img src="${esc(c.logo_url)}" class="w-8 h-8 rounded object-contain bg-gray-100">` : '<div class="w-8 h-8 rounded bg-gray-200 flex items-center justify-center text-xs text-gray-500"><i class="fas fa-building"></i></div>'}
+                        <span class="font-semibold text-gray-800">${esc(c.name)}</span>
+                    </div>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-500 font-mono">${esc(c.slug)}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">${esc(c.contact_email || '-')}</td>
+                <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${c.is_active ? 'Active' : 'Inactive'}</span></td>
+                <td class="px-4 py-3 text-right">
+                    <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function populateCompanyDropdowns() {
+        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'new-admin-company'];
+        selectors.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const first = el.options[0].outerHTML;
+            el.innerHTML = first;
+            admin.companies.forEach(c => {
+                el.innerHTML += `<option value="${c.id}">${esc(c.name)}</option>`;
+            });
+        });
+    }
+
+    async function createCompany(e) {
+        e.preventDefault();
+        try {
+            const resp = await adminFetch('/companies', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: document.getElementById('new-company-name').value,
+                    access_code: document.getElementById('new-company-code').value,
+                    contact_email: document.getElementById('new-company-email').value,
+                    contact_phone: document.getElementById('new-company-phone').value,
+                    address: document.getElementById('new-company-address').value
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error); return; }
+
+            // Upload logo if provided
+            const logoFile = document.getElementById('new-company-logo').files[0];
+            if (logoFile) {
+                const fd = new FormData();
+                fd.append('logo', logoFile);
+                await adminFetchRaw(`/companies/${data.company.id}/logo`, { method: 'POST', body: fd });
+            }
+
+            alert(`Company created!\nStore URL: ${data.store_url}\nThe access code you entered is now active.`);
+            hideModal('company-modal');
+            loadCompanies();
+            loadDashboard();
+        } catch (err) { alert('Failed to create company.'); }
+    }
+
+    function uploadLogoFor(companyId) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/png,image/jpeg,image/gif,image/webp';
+        input.onchange = async () => {
+            const fd = new FormData();
+            fd.append('logo', input.files[0]);
+            try {
+                const resp = await adminFetchRaw(`/companies/${companyId}/logo`, { method: 'POST', body: fd });
+                if (resp.ok) { alert('Logo uploaded!'); loadCompanies(); }
+                else { const d = await resp.json(); alert(d.error); }
+            } catch (err) { alert('Upload failed.'); }
+        };
+        input.click();
+    }
+
+    // ============================================================
+    // PRODUCTS
+    // ============================================================
+    async function loadAdminProducts() {
+        const companyId = document.getElementById('admin-product-company').value;
+        const tbody = document.getElementById('products-tbody');
+        if (!companyId) { tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">Select a company to view products.</td></tr>'; return; }
+
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products?includeInactive=true&limit=500`);
+            const data = await resp.json();
+            tbody.innerHTML = (data.products || []).map(p => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 font-medium text-gray-800">${esc(p.name)}</td>
+                    <td class="px-4 py-3 text-sm text-gray-500">${esc(p.brand)}</td>
+                    <td class="px-4 py-3 text-sm text-gray-400 font-mono">${esc(p.sku || '-')}</td>
+                    <td class="px-4 py-3 text-right font-semibold">$${parseFloat(p.price).toFixed(2)}</td>
+                    <td class="px-4 py-3 text-center text-sm">${p.case_qty || 1}</td>
+                    <td class="px-4 py-3 text-right">
+                        <span class="px-2 py-1 rounded text-xs ${p.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${p.is_active ? 'Active' : 'Hidden'}</span>
+                    </td>
+                </tr>
+            `).join('') || '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No products. Upload a catalog CSV!</td></tr>';
+        } catch (err) { tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-red-400">Failed to load.</td></tr>'; }
+    }
+
+    async function uploadCatalog(e) {
+        e.preventDefault();
+        const companyId = document.getElementById('upload-company').value;
+        const file = document.getElementById('upload-file').files[0];
+        if (!companyId || !file) { alert('Select company and file.'); return; }
+
+        document.getElementById('upload-progress').classList.remove('hidden');
+        document.getElementById('upload-btn').disabled = true;
+
+        const fd = new FormData();
+        fd.append('catalog', file);
+
+        try {
+            const resp = await adminFetchRaw(`/companies/${companyId}/catalog-upload`, { method: 'POST', body: fd });
+            const data = await resp.json();
+
+            document.getElementById('upload-progress').classList.add('hidden');
+            const resultEl = document.getElementById('upload-result');
+            resultEl.classList.remove('hidden');
+
+            if (resp.ok) {
+                resultEl.innerHTML = `<div class="bg-green-50 p-4 rounded-lg"><p class="font-semibold text-green-800">Import Complete!</p><p class="text-sm text-green-700 mt-1">${data.inserted} inserted, ${data.updated} updated, ${data.errors} errors</p></div>`;
+                loadDashboard();
+            } else {
+                resultEl.innerHTML = `<div class="bg-red-50 p-4 rounded-lg"><p class="text-red-700">${data.error}</p></div>`;
+            }
+        } catch (err) {
+            document.getElementById('upload-progress').classList.add('hidden');
+            alert('Upload failed.');
+        } finally {
+            document.getElementById('upload-btn').disabled = false;
+        }
+    }
+
+    // ============================================================
+    // PROMOTIONS
+    // ============================================================
+    async function loadAdminPromotions() {
+        try {
+            const resp = await adminFetch('/promotions');
+            const data = await resp.json();
+            const tbody = document.getElementById('promotions-tbody');
+            tbody.innerHTML = (data.promotions || []).map(p => {
+                const now = new Date();
+                const isLive = p.is_active && new Date(p.starts_at) <= now && new Date(p.ends_at) >= now;
+                return `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 text-sm">${esc(p.products?.name || 'N/A')} <span class="text-xs text-gray-400">${esc(p.products?.brand || '')}</span></td>
+                    <td class="px-4 py-3 text-sm">${esc(p.promo_label || '-')}</td>
+                    <td class="px-4 py-3 text-sm">${p.company_id ? esc(p.companies?.name || 'Specific') : '<span class="text-yellow-600 font-semibold">GLOBAL</span>'}</td>
+                    <td class="px-4 py-3 text-right font-bold text-red-600">$${parseFloat(p.promo_price).toFixed(2)}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500">${new Date(p.starts_at).toLocaleDateString()} - ${new Date(p.ends_at).toLocaleDateString()}</td>
+                    <td class="px-4 py-3 text-center"><span class="px-2 py-1 rounded-full text-xs font-semibold ${isLive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}">${isLive ? 'Live' : 'Inactive'}</span></td>
+                    <td class="px-4 py-3 text-right"><button onclick="deletePromotion('${p.id}')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i></button></td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No promotions.</td></tr>';
+        } catch (err) { console.error('Promotions load failed:', err); }
+    }
+
+    async function loadPromoProducts() {
+        const companyId = document.getElementById('promo-company').value;
+        const select = document.getElementById('promo-product');
+        select.innerHTML = '<option value="">Select a product</option>';
+        if (!companyId) return;
+
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products?limit=500`);
+            const data = await resp.json();
+            (data.products || []).forEach(p => {
+                select.innerHTML += `<option value="${p.id}">${esc(p.brand)} - ${esc(p.name)} ($${parseFloat(p.price).toFixed(2)})</option>`;
+            });
+        } catch (err) { console.error(err); }
+    }
+
+    async function createPromotion(e) {
+        e.preventDefault();
+        try {
+            const resp = await adminFetch('/promotions', {
+                method: 'POST',
+                body: JSON.stringify({
+                    company_id: document.getElementById('promo-company').value || null,
+                    product_id: document.getElementById('promo-product').value,
+                    promo_price: document.getElementById('promo-price').value,
+                    promo_label: document.getElementById('promo-label').value,
+                    starts_at: new Date(document.getElementById('promo-start').value).toISOString(),
+                    ends_at: new Date(document.getElementById('promo-end').value).toISOString()
+                })
+            });
+            if (resp.ok) { hideModal('promo-modal'); loadAdminPromotions(); loadDashboard(); }
+            else { const d = await resp.json(); alert(d.error); }
+        } catch (err) { alert('Failed to create promotion.'); }
+    }
+
+    async function deletePromotion(id) {
+        if (!confirm('Delete this promotion?')) return;
+        try {
+            await adminFetch(`/promotions/${id}`, { method: 'DELETE' });
+            loadAdminPromotions();
+            loadDashboard();
+        } catch (err) { alert('Failed to delete.'); }
+    }
+
+    // ============================================================
+    // ORDERS
+    // ============================================================
+    async function loadAdminOrders() {
+        const companyId = document.getElementById('admin-order-company').value;
+        const status = document.getElementById('admin-order-status').value;
+        const params = new URLSearchParams();
+        if (companyId) params.set('company_id', companyId);
+        if (status) params.set('status', status);
+
+        try {
+            const resp = await adminFetch(`/orders?${params}`);
+            const data = await resp.json();
+            const tbody = document.getElementById('orders-tbody');
+            tbody.innerHTML = (data.orders || []).map(o => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 font-mono font-bold text-blue-700 text-sm">${esc(o.order_number)}</td>
+                    <td class="px-4 py-3 text-sm">${esc(o.companies?.name || o.company_name || '-')}</td>
+                    <td class="px-4 py-3 text-sm">${esc(o.contact_name)}<br><span class="text-xs text-gray-400">${esc(o.contact_email)}</span></td>
+                    <td class="px-4 py-3 text-right font-semibold">$${parseFloat(o.total).toFixed(2)}</td>
+                    <td class="px-4 py-3 text-center">
+                        <select onchange="updateOrderStatus('${o.id}', this.value)" class="text-xs px-2 py-1 rounded border ${statusColors[o.status] || ''}">
+                            ${['pending','confirmed','processing','shipped','delivered','cancelled'].map(s =>
+                                `<option value="${s}" ${s === o.status ? 'selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
+                            ).join('')}
+                        </select>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-500">${new Date(o.created_at).toLocaleDateString()}</td>
+                    <td class="px-4 py-3 text-right text-sm text-gray-400">${(o.items || []).length} items</td>
+                </tr>
+            `).join('') || '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No orders found.</td></tr>';
+        } catch (err) { console.error('Orders load failed:', err); }
+    }
+
+    async function updateOrderStatus(orderId, status) {
+        try {
+            await adminFetch(`/orders/${orderId}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+        } catch (err) { alert('Failed to update status.'); loadAdminOrders(); }
+    }
+
+    // ============================================================
+    // ADMIN USERS
+    // ============================================================
+    async function loadAdminUsers() {
+        try {
+            const resp = await adminFetch('/users');
+            const data = await resp.json();
+            const tbody = document.getElementById('admins-tbody');
+            tbody.innerHTML = (data.admins || []).map(a => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 font-medium">${esc(a.name)}</td>
+                    <td class="px-4 py-3 text-sm text-gray-500">${esc(a.email)}</td>
+                    <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${a.role === 'super_admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">${a.role}</span></td>
+                    <td class="px-4 py-3 text-sm text-gray-500">${esc(a.companies?.name || '-')}</td>
+                    <td class="px-4 py-3 text-sm text-gray-400">${a.last_login ? new Date(a.last_login).toLocaleString() : 'Never'}</td>
+                </tr>
+            `).join('') || '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No admin users.</td></tr>';
+        } catch (err) { console.error('Admin users load failed:', err); }
+    }
+
+    async function createAdminUser(e) {
+        e.preventDefault();
+        try {
+            const resp = await adminFetch('/users', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: document.getElementById('new-admin-name').value,
+                    email: document.getElementById('new-admin-email').value,
+                    password: document.getElementById('new-admin-password').value,
+                    role: document.getElementById('new-admin-role').value,
+                    company_id: document.getElementById('new-admin-company').value || null
+                })
+            });
+            if (resp.ok) { hideModal('admin-user-modal'); loadAdminUsers(); }
+            else { const d = await resp.json(); alert(d.error); }
+        } catch (err) { alert('Failed to create admin.'); }
+    }
+
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+    async function loadAuditLog() {
+        try {
+            const resp = await adminFetch('/audit-log');
+            const data = await resp.json();
+            const tbody = document.getElementById('audit-tbody');
+            tbody.innerHTML = (data.logs || []).map(l => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 text-xs text-gray-400">${new Date(l.created_at).toLocaleString()}</td>
+                    <td class="px-4 py-3 text-sm">${esc(l.admin_users?.name || '-')}</td>
+                    <td class="px-4 py-3 text-sm font-mono">${esc(l.action)}</td>
+                    <td class="px-4 py-3 text-xs text-gray-400">${JSON.stringify(l.details || {}).substring(0, 80)}</td>
+                </tr>
+            `).join('') || '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400">No audit log entries.</td></tr>';
+        } catch (err) { console.error('Audit log load failed:', err); }
+    }
+    </script>
+</body>
+</html>
