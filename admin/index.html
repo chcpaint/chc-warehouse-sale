@@ -183,6 +183,7 @@
 
                 <!-- Products Management -->
                 <section id="section-products" class="hidden fade-in">
+                    <!-- Top Bar: Company selector + actions -->
                     <div class="flex justify-between items-center mb-4">
                         <div class="flex items-center gap-3">
                             <p class="text-gray-500">Manage product catalogs.</p>
@@ -199,15 +200,70 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- Filter Bar -->
+                    <div id="products-filter-bar" class="hidden bg-white rounded-xl shadow-sm border p-4 mb-4">
+                        <div class="flex flex-wrap items-end gap-4">
+                            <!-- Brand Filter -->
+                            <div class="flex-1 min-w-[160px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Brand</label>
+                                <select id="filter-brand" onchange="applyProductFilters()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="">All Brands</option>
+                                </select>
+                            </div>
+                            <!-- Category Filter -->
+                            <div class="flex-1 min-w-[160px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Category</label>
+                                <select id="filter-category" onchange="applyProductFilters()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="">All Categories</option>
+                                </select>
+                            </div>
+                            <!-- Search -->
+                            <div class="flex-1 min-w-[200px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search (Name / SKU)</label>
+                                <input type="text" id="filter-search" placeholder="Type to search..." oninput="debounceProductFilter()" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            </div>
+                            <!-- Clear -->
+                            <div>
+                                <button onclick="clearProductFilters()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                                    <i class="fas fa-times mr-1"></i> Clear
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Product count + filter summary -->
+                        <div class="flex justify-between items-center mt-3 pt-3 border-t">
+                            <p id="filter-result-count" class="text-sm text-gray-500"></p>
+                        </div>
+                    </div>
+
+                    <!-- Bulk Actions Bar (appears when items selected) -->
+                    <div id="bulk-actions-bar" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span id="bulk-selected-count" class="text-sm font-semibold text-blue-800"></span>
+                            <button onclick="bulkDeleteSelected()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-trash mr-1"></i> Delete Selected
+                            </button>
+                            <button onclick="bulkDeleteFiltered()" id="btn-delete-filtered" class="hidden bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-trash-alt mr-1"></i> Delete All Filtered
+                            </button>
+                        </div>
+                        <button onclick="clearProductSelection()" class="text-blue-600 hover:text-blue-800 text-sm">
+                            <i class="fas fa-times mr-1"></i> Clear Selection
+                        </button>
+                    </div>
+
+                    <!-- Products Table -->
                     <div id="products-table-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
                         <table class="w-full">
                             <thead class="bg-gray-50 border-b">
                                 <tr>
+                                    <th class="px-4 py-3 w-10"><input type="checkbox" id="select-all-products" onchange="toggleSelectAllProducts()" class="w-4 h-4 rounded border-gray-300"></th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Product</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Brand</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">SKU</th>
                                     <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Price</th>
                                     <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Case Qty</th>
+                                    <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
                                     <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                                 </tr>
                             </thead>
@@ -817,27 +873,233 @@
     // ============================================================
     // PRODUCTS
     // ============================================================
+    // ============================================================
+    // PRODUCTS - State & Filtering
+    // ============================================================
+    let productState = { all: [], filtered: [], selected: new Set(), currentFilters: {} };
+    let filterDebounce = null;
+
     async function loadAdminProducts() {
         const companyId = document.getElementById('admin-product-company').value;
         const tbody = document.getElementById('products-tbody');
-        if (!companyId) { tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">Select a company to view products.</td></tr>'; return; }
+        const filterBar = document.getElementById('products-filter-bar');
+
+        if (!companyId) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Select a company to view products.</td></tr>';
+            filterBar.classList.add('hidden');
+            document.getElementById('bulk-actions-bar').classList.add('hidden');
+            return;
+        }
 
         try {
-            const resp = await adminFetch(`/companies/${companyId}/products?includeInactive=true&limit=500`);
+            const resp = await adminFetch(`/companies/${companyId}/products?includeInactive=true&limit=5000`);
             const data = await resp.json();
-            tbody.innerHTML = (data.products || []).map(p => `
-                <tr class="border-b hover:bg-gray-50">
-                    <td class="px-4 py-3 font-medium text-gray-800">${esc(p.name)}</td>
-                    <td class="px-4 py-3 text-sm text-gray-500">${esc(p.brand)}</td>
-                    <td class="px-4 py-3 text-sm text-gray-400 font-mono">${esc(p.sku || '-')}</td>
-                    <td class="px-4 py-3 text-right font-semibold">$${parseFloat(p.price).toFixed(2)}</td>
-                    <td class="px-4 py-3 text-center text-sm">${p.case_qty || 1}</td>
-                    <td class="px-4 py-3 text-right">
-                        <span class="px-2 py-1 rounded text-xs ${p.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${p.is_active ? 'Active' : 'Hidden'}</span>
-                    </td>
-                </tr>
-            `).join('') || '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No products. Upload a catalog CSV!</td></tr>';
-        } catch (err) { tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-red-400">Failed to load.</td></tr>'; }
+            productState.all = data.products || [];
+            productState.selected = new Set();
+            document.getElementById('select-all-products').checked = false;
+
+            // Load filter options
+            await loadProductFilters(companyId);
+            filterBar.classList.remove('hidden');
+
+            applyProductFilters();
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-red-400">Failed to load.</td></tr>';
+        }
+    }
+
+    async function loadProductFilters(companyId) {
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/filters`);
+            const data = await resp.json();
+
+            const brandSel = document.getElementById('filter-brand');
+            brandSel.innerHTML = '<option value="">All Brands (' + (data.brands || []).length + ')</option>' +
+                (data.brands || []).map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+
+            const catSel = document.getElementById('filter-category');
+            catSel.innerHTML = '<option value="">All Categories</option>' +
+                (data.categories || []).map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        } catch (err) { console.error('Filter load failed:', err); }
+    }
+
+    function debounceProductFilter() {
+        clearTimeout(filterDebounce);
+        filterDebounce = setTimeout(applyProductFilters, 300);
+    }
+
+    function applyProductFilters() {
+        const brand = document.getElementById('filter-brand').value;
+        const category = document.getElementById('filter-category').value;
+        const search = document.getElementById('filter-search').value.toLowerCase().trim();
+
+        productState.currentFilters = { brand, category, search };
+
+        productState.filtered = productState.all.filter(p => {
+            if (brand && p.brand !== brand) return false;
+            if (category && p.category !== category) return false;
+            if (search && !p.name.toLowerCase().includes(search) && !(p.sku || '').toLowerCase().includes(search)) return false;
+            return true;
+        });
+
+        renderProductsTable();
+        updateBulkBar();
+
+        const countEl = document.getElementById('filter-result-count');
+        const total = productState.all.length;
+        const shown = productState.filtered.length;
+        countEl.textContent = shown === total ? `${total} products` : `Showing ${shown} of ${total} products`;
+    }
+
+    function clearProductFilters() {
+        document.getElementById('filter-brand').value = '';
+        document.getElementById('filter-category').value = '';
+        document.getElementById('filter-search').value = '';
+        applyProductFilters();
+    }
+
+    function renderProductsTable() {
+        const tbody = document.getElementById('products-tbody');
+        const products = productState.filtered;
+
+        if (products.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No products match your filters.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = products.map(p => `
+            <tr class="border-b hover:bg-gray-50 ${productState.selected.has(p.id) ? 'bg-blue-50' : ''}">
+                <td class="px-4 py-3"><input type="checkbox" class="product-checkbox w-4 h-4 rounded border-gray-300" data-id="${p.id}" ${productState.selected.has(p.id) ? 'checked' : ''} onchange="toggleProductSelect('${p.id}')"></td>
+                <td class="px-4 py-3 font-medium text-gray-800">${esc(p.name)}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">${esc(p.brand)}</td>
+                <td class="px-4 py-3 text-sm text-gray-400 font-mono">${esc(p.sku || '-')}</td>
+                <td class="px-4 py-3 text-right font-semibold">${p.previous_price ? '<span class="text-xs text-gray-400 line-through mr-1">$' + parseFloat(p.previous_price).toFixed(2) + '</span>' : ''}$${parseFloat(p.price).toFixed(2)}</td>
+                <td class="px-4 py-3 text-center text-sm">${p.case_qty || 1}</td>
+                <td class="px-4 py-3 text-center"><span class="px-2 py-1 rounded text-xs font-semibold ${p.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${p.is_active ? 'Active' : 'Hidden'}</span></td>
+                <td class="px-4 py-3 text-right">
+                    <button onclick="toggleProductActive('${p.id}', ${!p.is_active})" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="${p.is_active ? 'Hide from catalog' : 'Show in catalog'}">
+                        <i class="fas ${p.is_active ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                    </button>
+                    <button onclick="deleteSingleProduct('${p.id}', '${esc(p.name).replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-600 text-sm" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // ============================================================
+    // PRODUCTS - Selection & Bulk Actions
+    // ============================================================
+    function toggleProductSelect(id) {
+        if (productState.selected.has(id)) {
+            productState.selected.delete(id);
+        } else {
+            productState.selected.add(id);
+        }
+        updateBulkBar();
+        // Update row highlight without full re-render
+        const row = document.querySelector(`[data-id="${id}"]`)?.closest('tr');
+        if (row) row.classList.toggle('bg-blue-50', productState.selected.has(id));
+        // Update select-all checkbox
+        document.getElementById('select-all-products').checked = productState.selected.size === productState.filtered.length && productState.filtered.length > 0;
+    }
+
+    function toggleSelectAllProducts() {
+        const checked = document.getElementById('select-all-products').checked;
+        productState.selected = new Set();
+        if (checked) {
+            productState.filtered.forEach(p => productState.selected.add(p.id));
+        }
+        renderProductsTable();
+        updateBulkBar();
+    }
+
+    function clearProductSelection() {
+        productState.selected = new Set();
+        document.getElementById('select-all-products').checked = false;
+        renderProductsTable();
+        updateBulkBar();
+    }
+
+    function updateBulkBar() {
+        const bar = document.getElementById('bulk-actions-bar');
+        const count = productState.selected.size;
+        if (count === 0) {
+            bar.classList.add('hidden');
+            return;
+        }
+        bar.classList.remove('hidden');
+        document.getElementById('bulk-selected-count').textContent = `${count} product${count > 1 ? 's' : ''} selected`;
+
+        // Show "Delete All Filtered" only when filters are active
+        const hasFilters = productState.currentFilters.brand || productState.currentFilters.category || productState.currentFilters.search;
+        document.getElementById('btn-delete-filtered').classList.toggle('hidden', !hasFilters);
+    }
+
+    async function bulkDeleteSelected() {
+        const count = productState.selected.size;
+        if (count === 0) return;
+        if (!confirm(`Delete ${count} selected product${count > 1 ? 's' : ''}? This cannot be undone.`)) return;
+
+        const companyId = document.getElementById('admin-product-company').value;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/bulk-delete`, {
+                method: 'POST',
+                body: JSON.stringify({ product_ids: [...productState.selected] })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            alert(`${data.count} products deleted.`);
+            loadAdminProducts();
+            loadDashboard();
+        } catch (err) { alert('Delete failed: ' + err.message); }
+    }
+
+    async function bulkDeleteFiltered() {
+        const count = productState.filtered.length;
+        const filters = productState.currentFilters;
+        const desc = [filters.brand, filters.category, filters.search].filter(Boolean).join(', ');
+        if (!confirm(`Delete ALL ${count} products matching "${desc}"? This cannot be undone.`)) return;
+
+        const companyId = document.getElementById('admin-product-company').value;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/bulk-delete`, {
+                method: 'POST',
+                body: JSON.stringify({ delete_all: true, filters })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            alert(`${data.count} products deleted.`);
+            loadAdminProducts();
+            loadDashboard();
+        } catch (err) { alert('Delete failed: ' + err.message); }
+    }
+
+    async function deleteSingleProduct(id, name) {
+        if (!confirm(`Delete "${name}"?`)) return;
+        const companyId = document.getElementById('admin-product-company').value;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/${id}`, { method: 'DELETE' });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            loadAdminProducts();
+            loadDashboard();
+        } catch (err) { alert('Delete failed: ' + err.message); }
+    }
+
+    async function toggleProductActive(id, active) {
+        const companyId = document.getElementById('admin-product-company').value;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ is_active: active })
+            });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            // Update local state
+            const p = productState.all.find(x => x.id === id);
+            if (p) p.is_active = active;
+            applyProductFilters();
+        } catch (err) { alert('Update failed: ' + err.message); }
     }
 
     async function uploadCatalog(e) {

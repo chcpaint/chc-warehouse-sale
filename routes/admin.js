@@ -417,6 +417,123 @@ router.put('/companies/:companyId/products/:productId', requireCompanyAccess, as
 });
 
 /**
+ * GET /api/admin/companies/:companyId/products/filters
+ * Get distinct brands and categories for filter UI
+ */
+router.get('/companies/:companyId/products/filters', requireCompanyAccess, async (req, res) => {
+    try {
+        const companyId = req.params.companyId;
+
+        const { data: brandData } = await supabaseAdmin
+            .from('products')
+            .select('brand')
+            .eq('company_id', companyId)
+            .order('brand');
+
+        const { data: categoryData } = await supabaseAdmin
+            .from('products')
+            .select('category')
+            .eq('company_id', companyId)
+            .not('category', 'is', null)
+            .order('category');
+
+        const brands = [...new Set((brandData || []).map(r => r.brand).filter(Boolean))];
+        const categories = [...new Set((categoryData || []).map(r => r.category).filter(Boolean))];
+
+        res.json({ brands, categories });
+    } catch (err) {
+        console.error('Product filters error:', err);
+        res.status(500).json({ error: 'Failed to load filters.' });
+    }
+});
+
+/**
+ * POST /api/admin/companies/:companyId/products/bulk-delete
+ * Delete multiple products by IDs
+ */
+router.post('/companies/:companyId/products/bulk-delete', requireCompanyAccess, async (req, res) => {
+    try {
+        const { product_ids, delete_all, filters } = req.body;
+        const companyId = req.params.companyId;
+
+        if (delete_all) {
+            // Delete all products matching current filters
+            let query = supabaseAdmin
+                .from('products')
+                .delete()
+                .eq('company_id', companyId);
+
+            if (filters) {
+                if (filters.brand) query = query.eq('brand', filters.brand);
+                if (filters.category) query = query.eq('category', filters.category);
+                if (filters.search) query = query.or(`name.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`);
+            }
+
+            const { data, error } = await query.select('id');
+            if (error) throw error;
+
+            const count = data ? data.length : 0;
+            await logAction(req.admin.id, 'products_bulk_deleted', 'product', null, {
+                company_id: companyId, count, filters: filters || 'all'
+            }, req.ip);
+
+            return res.json({ message: `${count} products deleted.`, count });
+        }
+
+        if (!product_ids || !Array.isArray(product_ids) || product_ids.length === 0) {
+            return res.status(400).json({ error: 'No product IDs provided.' });
+        }
+
+        if (product_ids.length > 500) {
+            return res.status(400).json({ error: 'Maximum 500 products per bulk delete.' });
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('products')
+            .delete()
+            .eq('company_id', companyId)
+            .in('id', product_ids)
+            .select('id');
+
+        if (error) throw error;
+
+        const count = data ? data.length : 0;
+        await logAction(req.admin.id, 'products_bulk_deleted', 'product', null, {
+            company_id: companyId, count, product_ids: product_ids.slice(0, 10)
+        }, req.ip);
+
+        res.json({ message: `${count} products deleted.`, count });
+
+    } catch (err) {
+        console.error('Bulk delete error:', err);
+        res.status(500).json({ error: 'Failed to delete products.' });
+    }
+});
+
+/**
+ * DELETE /api/admin/companies/:companyId/products/:productId
+ * Delete a single product
+ */
+router.delete('/companies/:companyId/products/:productId', requireCompanyAccess, async (req, res) => {
+    try {
+        const { error } = await supabaseAdmin
+            .from('products')
+            .delete()
+            .eq('id', req.params.productId)
+            .eq('company_id', req.params.companyId);
+
+        if (error) throw error;
+
+        await logAction(req.admin.id, 'product_deleted', 'product', req.params.productId, {}, req.ip);
+        res.json({ message: 'Product deleted.' });
+
+    } catch (err) {
+        console.error('Delete product error:', err);
+        res.status(500).json({ error: 'Failed to delete product.' });
+    }
+});
+
+/**
  * POST /api/admin/companies/:companyId/catalog-upload
  * Bulk upload products via CSV or XLSX
  */
