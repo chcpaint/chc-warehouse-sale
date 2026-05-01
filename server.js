@@ -13,6 +13,9 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy for Railway (required for rate limiting and correct IP detection)
+app.set('trust proxy', 1);
+
 // ============================================================
 // SECURITY MIDDLEWARE
 // ============================================================
@@ -36,7 +39,7 @@ app.use(helmet({
 // CORS
 app.use(cors({
     origin: process.env.NODE_ENV === 'production'
-        ? [process.env.APP_URL || 'https://chc-b2b-platform.up.railway.app']
+        ? [process.env.APP_URL || 'https://chc-warehouse-sale-production.up.railway.app']
         : '*',
     credentials: true
 }));
