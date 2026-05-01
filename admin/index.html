@@ -629,8 +629,24 @@
             document.getElementById('nav-branding').classList.add('hidden');
         }
 
+        // Load master logo from Supabase Storage
+        loadPlatformLogo();
+
         loadDashboard();
         loadCompanies();
+    }
+
+    async function loadPlatformLogo() {
+        try {
+            const resp = await fetch('/api/store/platform-logo');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.url) {
+                document.querySelectorAll('img[alt="CHC"]').forEach(img => {
+                    img.src = data.url;
+                });
+            }
+        } catch (err) { console.error('Platform logo load failed:', err); }
     }
 
     function adminNav(section) {
@@ -1031,16 +1047,20 @@
             const resp = await adminFetch('/branding/logo');
             const data = await resp.json();
             const infoEl = document.getElementById('branding-logo-info');
-            if (data.exists && data.size > 0) {
-                const sizeKB = (data.size / 1024).toFixed(1);
+            const img = document.getElementById('branding-logo-img');
+
+            if (data.exists && data.url) {
+                const sizeKB = data.size ? (data.size / 1024).toFixed(1) : '?';
                 const updated = data.updated ? new Date(data.updated).toLocaleDateString() : '';
                 infoEl.textContent = `${sizeKB} KB${updated ? ' · Updated ' + updated : ''}`;
+                img.src = data.url;
+                img.style.display = '';
+                img.nextElementSibling.style.display = 'none';
             } else {
                 infoEl.textContent = 'No logo uploaded yet';
+                img.style.display = 'none';
+                img.nextElementSibling.style.display = 'flex';
             }
-            // Force refresh the preview image
-            const img = document.getElementById('branding-logo-img');
-            img.src = '/assets/chc-logo.png?t=' + Date.now();
         } catch (err) { console.error('Branding info load failed:', err); }
     }
 
@@ -1090,15 +1110,17 @@
             statusEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Logo updated successfully! It will now appear on all storefronts.';
             statusEl.classList.remove('hidden');
 
-            // Refresh preview
+            // Refresh preview with the Supabase Storage URL
+            const logoUrl = data.url + '?t=' + Date.now();
             const img = document.getElementById('branding-logo-img');
-            img.src = '/assets/chc-logo.png?t=' + Date.now();
+            img.src = logoUrl;
             img.style.display = '';
             img.nextElementSibling.style.display = 'none';
 
             // Also refresh sidebar logo
-            const sidebarLogo = document.querySelector('aside img[alt="CHC"]');
-            if (sidebarLogo) sidebarLogo.src = '/assets/chc-logo.png?t=' + Date.now();
+            document.querySelectorAll('img[alt="CHC"]').forEach(el => {
+                el.src = logoUrl;
+            });
 
             clearMasterLogoFile();
             loadBrandingInfo();

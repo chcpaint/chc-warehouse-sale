@@ -6,6 +6,31 @@ const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
 const router = express.Router();
 
 /**
+ * GET /api/store/platform-logo
+ * Public - get the CHC master logo URL from Supabase Storage
+ */
+router.get('/platform-logo', async (req, res) => {
+    try {
+        const { data: files } = await supabaseAdmin.storage
+            .from('company-logos')
+            .list('platform', { limit: 1, search: 'master-logo' });
+
+        if (files && files.length > 0) {
+            const { data: urlData } = supabaseAdmin.storage
+                .from('company-logos')
+                .getPublicUrl('platform/master-logo.png');
+            return res.json({ url: urlData.publicUrl });
+        }
+
+        // Fallback to local asset
+        res.json({ url: '/assets/chc-logo.png' });
+    } catch (err) {
+        console.error('Platform logo error:', err);
+        res.json({ url: '/assets/chc-logo.png' });
+    }
+});
+
+/**
  * GET /api/store/:slug/info
  * Public - get company info for login page (name, logo)
  */

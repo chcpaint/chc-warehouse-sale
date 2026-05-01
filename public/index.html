@@ -38,6 +38,14 @@
     </div>
 
     <script>
+    // Load master logo from Supabase Storage
+    fetch('/api/store/platform-logo').then(r => r.json()).then(data => {
+        if (data.url) {
+            const img = document.querySelector('img[alt="CHC Paint & Auto Body Supplies"]');
+            if (img) img.src = data.url;
+        }
+    }).catch(() => {});
+
     async function goToStore(e) {
         e.preventDefault();
         const slug = document.getElementById('company-slug').value.trim().toLowerCase().replace(/\s+/g, '-');

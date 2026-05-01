@@ -264,6 +264,9 @@
             return;
         }
 
+        // Load CHC master logo from Supabase Storage
+        loadPlatformLogo();
+
         // Check for existing session
         const savedToken = sessionStorage.getItem('chc_token');
         const savedCompany = sessionStorage.getItem('chc_company');
@@ -276,6 +279,27 @@
             loadCompanyInfo();
         }
     });
+
+    // ============================================================
+    // PLATFORM LOGO
+    // ============================================================
+    async function loadPlatformLogo() {
+        try {
+            const resp = await fetch(`${API_BASE}/store/platform-logo`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.url) {
+                // Update all CHC master logo images
+                document.querySelectorAll('img[alt="CHC Paint"]').forEach(img => {
+                    img.src = data.url;
+                });
+                // Also update admin sidebar logo if present
+                document.querySelectorAll('img[alt="CHC"]').forEach(img => {
+                    img.src = data.url;
+                });
+            }
+        } catch (err) { console.error('Platform logo load failed:', err); }
+    }
 
     // ============================================================
     // AUTH

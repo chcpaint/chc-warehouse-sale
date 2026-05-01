@@ -2,8 +2,6 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const csv = require('csv-parser');
 const XLSX = require('xlsx');
-const fs = require('fs');
-const fspath = require('path');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess } = require('../middleware/auth');
@@ -255,18 +253,25 @@ router.post('/companies/:companyId/logo', requireCompanyAccess, logoUpload.singl
 
 /**
  * GET /api/admin/branding/logo
- * Get current master logo info
+ * Get current master logo info from Supabase Storage
  */
 router.get('/branding/logo', async (req, res) => {
     try {
-        const logoPath = fspath.join(__dirname, '..', 'public', 'assets', 'chc-logo.png');
-        const exists = fs.existsSync(logoPath);
-        const stats = exists ? fs.statSync(logoPath) : null;
+        const { data: urlData } = supabaseAdmin.storage
+            .from('company-logos')
+            .getPublicUrl('platform/master-logo.png');
+
+        // Check if the file actually exists by listing
+        const { data: files } = await supabaseAdmin.storage
+            .from('company-logos')
+            .list('platform', { limit: 1, search: 'master-logo' });
+
+        const exists = files && files.length > 0;
         res.json({
             exists,
-            url: '/assets/chc-logo.png',
-            size: stats ? stats.size : 0,
-            updated: stats ? stats.mtime.toISOString() : null
+            url: exists ? urlData.publicUrl + '?t=' + Date.now() : null,
+            size: exists && files[0].metadata ? files[0].metadata.size : 0,
+            updated: exists ? files[0].updated_at : null
         });
     } catch (err) {
         console.error('Branding logo info error:', err);
@@ -276,7 +281,7 @@ router.get('/branding/logo', async (req, res) => {
 
 /**
  * POST /api/admin/branding/logo
- * Upload/replace the CHC master logo (super_admin only)
+ * Upload/replace the CHC master logo to Supabase Storage (super_admin only)
  */
 router.post('/branding/logo', requireSuperAdmin, logoUpload.single('logo'), async (req, res) => {
     try {
@@ -284,26 +289,33 @@ router.post('/branding/logo', requireSuperAdmin, logoUpload.single('logo'), asyn
             return res.status(400).json({ error: 'No logo file provided.' });
         }
 
-        const assetsDir = fspath.join(__dirname, '..', 'public', 'assets');
+        const filePath = 'platform/master-logo.png';
 
-        // Ensure assets directory exists
-        if (!fs.existsSync(assetsDir)) {
-            fs.mkdirSync(assetsDir, { recursive: true });
-        }
+        // Upload to Supabase Storage (upsert to overwrite)
+        const { error: uploadError } = await supabaseAdmin.storage
+            .from('company-logos')
+            .upload(filePath, req.file.buffer, {
+                contentType: req.file.mimetype,
+                upsert: true
+            });
 
-        // Save as chc-logo.png (overwrite existing)
-        const logoPath = fspath.join(assetsDir, 'chc-logo.png');
-        fs.writeFileSync(logoPath, req.file.buffer);
+        if (uploadError) throw uploadError;
+
+        // Get public URL
+        const { data: urlData } = supabaseAdmin.storage
+            .from('company-logos')
+            .getPublicUrl(filePath);
 
         await logAction(req.admin.id, 'master_logo_uploaded', 'branding', null, {
             originalName: req.file.originalname,
             size: req.file.size,
-            mimetype: req.file.mimetype
+            mimetype: req.file.mimetype,
+            url: urlData.publicUrl
         }, req.ip);
 
         res.json({
             message: 'Master logo updated successfully.',
-            url: '/assets/chc-logo.png',
+            url: urlData.publicUrl,
             size: req.file.size
         });
 
