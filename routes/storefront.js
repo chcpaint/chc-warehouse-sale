@@ -2,6 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
+const { sendOrderNotification } = require('../utils/email');
 
 const router = express.Router();
 
@@ -322,8 +323,32 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             return res.status(500).json({ error: 'Failed to submit order.' });
         }
 
-        // TODO: Send email notification via Nodemailer
-        // Uses company's email_config for routing
+        // Send email notification (non-blocking — don't fail the order if email fails)
+        try {
+            // Get company's email_config for notification routing
+            const { data: companyData } = await supabaseAdmin
+                .from('companies')
+                .select('email_config, contact_email')
+                .eq('id', companyId)
+                .single();
+
+            const notificationEmail = companyData?.email_config?.notification_email || companyData?.contact_email;
+
+            if (notificationEmail) {
+                sendOrderNotification({
+                    to: notificationEmail,
+                    order: { ...order, items: verifiedItems },
+                    companyName: req.company.name,
+                    contactName: stripHtml(contact_name),
+                    contactEmail: stripHtml(contact_email),
+                    contactPhone: stripHtml(contact_phone || ''),
+                    location: stripHtml(location || ''),
+                    notes: stripHtml(notes || '')
+                }).catch(err => console.error('Order email failed (non-blocking):', err.message));
+            }
+        } catch (emailErr) {
+            console.error('Email lookup error (non-blocking):', emailErr.message);
+        }
 
         res.status(201).json({
             message: 'Order submitted successfully!',

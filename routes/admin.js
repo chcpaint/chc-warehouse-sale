@@ -84,7 +84,7 @@ router.get('/companies', async (req, res) => {
     try {
         let query = supabaseAdmin
             .from('companies')
-            .select('id, name, slug, logo_url, contact_email, is_active, created_at, updated_at')
+            .select('id, name, slug, logo_url, contact_email, email_config, is_active, created_at, updated_at')
             .order('name');
 
         if (req.admin.role !== 'super_admin') {
@@ -184,11 +184,21 @@ router.put('/companies/:companyId', requireCompanyAccess, async (req, res) => {
             filtered.slug = generateSlug(filtered.name);
         }
 
+        // Merge email_config with existing values instead of overwriting
+        if (filtered.email_config) {
+            const { data: existing } = await supabaseAdmin
+                .from('companies')
+                .select('email_config')
+                .eq('id', companyId)
+                .single();
+            filtered.email_config = { ...(existing?.email_config || {}), ...filtered.email_config };
+        }
+
         const { data, error } = await supabaseAdmin
             .from('companies')
             .update(filtered)
             .eq('id', companyId)
-            .select('id, name, slug, logo_url, contact_email, is_active')
+            .select('id, name, slug, logo_url, contact_email, email_config, is_active')
             .single();
 
         if (error) throw error;
