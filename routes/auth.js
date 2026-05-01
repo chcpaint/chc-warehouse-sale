@@ -200,4 +200,45 @@ router.post('/admin-setup', async (req, res) => {
     }
 });
 
+/**
+ * POST /api/auth/create-admin
+ * Temporary endpoint to create admin with server-side bcrypt
+ * REMOVE AFTER FIRST USE
+ */
+router.post('/create-admin', async (req, res) => {
+    try {
+        const secret = req.body.setup_secret;
+        if (secret !== 'CHC-TEMP-SETUP-2026') {
+            return res.status(403).json({ error: 'Invalid setup secret.' });
+        }
+
+        const { email, password, name } = req.body;
+        if (!email || !password || !name) {
+            return res.status(400).json({ error: 'Email, password, and name are required.' });
+        }
+
+        const passwordHash = await bcrypt.hash(password, 12);
+
+        const { data: admin, error } = await supabaseAdmin
+            .from('admin_users')
+            .upsert({
+                email: email.toLowerCase(),
+                password_hash: passwordHash,
+                name,
+                role: 'super_admin',
+                is_active: true
+            }, { onConflict: 'email' })
+            .select()
+            .single();
+
+        if (error) {
+            return res.status(500).json({ error: 'Failed to create admin.', detail: error.message });
+        }
+
+        res.json({ message: 'Admin created', email: admin.email });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
