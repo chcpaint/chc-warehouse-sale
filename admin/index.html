@@ -86,6 +86,10 @@
                 <button onclick="adminNav('audit')" data-nav="audit" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-audit">
                     <i class="fas fa-clipboard-list w-5"></i> Audit Log
                 </button>
+                <div class="border-t my-2"></div>
+                <button onclick="adminNav('branding')" data-nav="branding" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-branding">
+                    <i class="fas fa-paint-brush w-5"></i> Branding
+                </button>
             </nav>
 
             <div class="p-4 border-t">
@@ -312,6 +316,67 @@
                             </thead>
                             <tbody id="audit-tbody"></tbody>
                         </table>
+                    </div>
+                </section>
+
+                <!-- Branding -->
+                <section id="section-branding" class="hidden fade-in">
+                    <div class="max-w-2xl">
+                        <!-- Master Logo -->
+                        <div class="bg-white rounded-xl shadow-sm border p-6 mb-6">
+                            <h3 class="text-lg font-bold text-gray-800 mb-1">CHC Master Logo</h3>
+                            <p class="text-sm text-gray-500 mb-6">This logo appears on every storefront header and login screen across all companies.</p>
+
+                            <div class="flex items-start gap-6">
+                                <!-- Logo Preview -->
+                                <div class="flex-shrink-0">
+                                    <div id="branding-logo-preview" class="w-48 h-32 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center overflow-hidden">
+                                        <img id="branding-logo-img" src="/assets/chc-logo.png" alt="CHC Logo" class="max-w-full max-h-full object-contain p-2" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                                        <div class="text-center text-gray-400" style="display:none">
+                                            <i class="fas fa-image text-3xl mb-1"></i>
+                                            <p class="text-xs">No logo uploaded</p>
+                                        </div>
+                                    </div>
+                                    <p id="branding-logo-info" class="text-xs text-gray-400 mt-2 text-center"></p>
+                                </div>
+
+                                <!-- Upload Controls -->
+                                <div class="flex-1">
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Upload New Logo</label>
+                                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 transition-colors cursor-pointer" onclick="document.getElementById('branding-logo-file').click()">
+                                        <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+                                        <p class="text-sm text-gray-600">Click to select an image</p>
+                                        <p class="text-xs text-gray-400 mt-1">PNG, JPG, or WebP (max 2MB)</p>
+                                        <input type="file" id="branding-logo-file" accept=".png,.jpg,.jpeg,.webp" class="hidden" onchange="previewMasterLogo(this)">
+                                    </div>
+
+                                    <!-- Selected file preview -->
+                                    <div id="branding-file-selected" class="hidden mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check-circle text-blue-600"></i>
+                                            <span id="branding-file-name" class="text-sm text-blue-800"></span>
+                                        </div>
+                                        <button onclick="clearMasterLogoFile()" class="text-blue-600 hover:text-blue-800"><i class="fas fa-times"></i></button>
+                                    </div>
+
+                                    <button onclick="uploadMasterLogo()" id="branding-upload-btn" class="mt-4 bg-blue-700 hover:bg-blue-800 text-white font-semibold px-6 py-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed w-full" disabled>
+                                        <i class="fas fa-upload mr-2"></i> Upload Logo
+                                    </button>
+
+                                    <div id="branding-upload-status" class="hidden mt-3 text-sm rounded-lg px-4 py-2"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- How it works info -->
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-5">
+                            <h4 class="font-semibold text-blue-800 mb-2"><i class="fas fa-info-circle mr-1"></i> How Branding Works</h4>
+                            <ul class="text-sm text-blue-700 space-y-1.5">
+                                <li><i class="fas fa-check text-blue-500 mr-2"></i> <strong>CHC Master Logo</strong> appears on every storefront as the main brand.</li>
+                                <li><i class="fas fa-check text-blue-500 mr-2"></i> <strong>Company Logo</strong> is set per-company in the Companies section and appears alongside the master logo.</li>
+                                <li><i class="fas fa-check text-blue-500 mr-2"></i> If a company has no logo uploaded, their company name is displayed instead.</li>
+                            </ul>
+                        </div>
                     </div>
                 </section>
             </main>
@@ -561,6 +626,7 @@
         if (admin.user.role !== 'super_admin') {
             document.getElementById('nav-admins').classList.add('hidden');
             document.getElementById('nav-audit').classList.add('hidden');
+            document.getElementById('nav-branding').classList.add('hidden');
         }
 
         loadDashboard();
@@ -574,7 +640,7 @@
         document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products',
-            promotions: 'Promotions', orders: 'Orders', admins: 'Admin Users', audit: 'Audit Log' };
+            promotions: 'Promotions', orders: 'Orders', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
         if (section === 'products') loadAdminProducts();
@@ -582,6 +648,7 @@
         if (section === 'orders') loadAdminOrders();
         if (section === 'admins') loadAdminUsers();
         if (section === 'audit') loadAuditLog();
+        if (section === 'branding') loadBrandingInfo();
     }
 
     // ============================================================
@@ -954,6 +1021,96 @@
                 </tr>
             `).join('') || '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400">No audit log entries.</td></tr>';
         } catch (err) { console.error('Audit log load failed:', err); }
+    }
+
+    // ============================================================
+    // BRANDING
+    // ============================================================
+    async function loadBrandingInfo() {
+        try {
+            const resp = await adminFetch('/branding/logo');
+            const data = await resp.json();
+            const infoEl = document.getElementById('branding-logo-info');
+            if (data.exists && data.size > 0) {
+                const sizeKB = (data.size / 1024).toFixed(1);
+                const updated = data.updated ? new Date(data.updated).toLocaleDateString() : '';
+                infoEl.textContent = `${sizeKB} KB${updated ? ' · Updated ' + updated : ''}`;
+            } else {
+                infoEl.textContent = 'No logo uploaded yet';
+            }
+            // Force refresh the preview image
+            const img = document.getElementById('branding-logo-img');
+            img.src = '/assets/chc-logo.png?t=' + Date.now();
+        } catch (err) { console.error('Branding info load failed:', err); }
+    }
+
+    function previewMasterLogo(input) {
+        const file = input.files[0];
+        if (!file) return;
+        const selectedEl = document.getElementById('branding-file-selected');
+        const nameEl = document.getElementById('branding-file-name');
+        const uploadBtn = document.getElementById('branding-upload-btn');
+
+        nameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        selectedEl.classList.remove('hidden');
+        uploadBtn.disabled = false;
+    }
+
+    function clearMasterLogoFile() {
+        document.getElementById('branding-logo-file').value = '';
+        document.getElementById('branding-file-selected').classList.add('hidden');
+        document.getElementById('branding-upload-btn').disabled = true;
+    }
+
+    async function uploadMasterLogo() {
+        const fileInput = document.getElementById('branding-logo-file');
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        const btn = document.getElementById('branding-upload-btn');
+        const statusEl = document.getElementById('branding-upload-status');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Uploading...';
+        statusEl.classList.add('hidden');
+
+        try {
+            const formData = new FormData();
+            formData.append('logo', file);
+
+            const resp = await adminFetchRaw('/branding/logo', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Upload failed');
+
+            // Success
+            statusEl.className = 'mt-3 text-sm rounded-lg px-4 py-2 bg-green-50 border border-green-200 text-green-700';
+            statusEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Logo updated successfully! It will now appear on all storefronts.';
+            statusEl.classList.remove('hidden');
+
+            // Refresh preview
+            const img = document.getElementById('branding-logo-img');
+            img.src = '/assets/chc-logo.png?t=' + Date.now();
+            img.style.display = '';
+            img.nextElementSibling.style.display = 'none';
+
+            // Also refresh sidebar logo
+            const sidebarLogo = document.querySelector('aside img[alt="CHC"]');
+            if (sidebarLogo) sidebarLogo.src = '/assets/chc-logo.png?t=' + Date.now();
+
+            clearMasterLogoFile();
+            loadBrandingInfo();
+
+        } catch (err) {
+            statusEl.className = 'mt-3 text-sm rounded-lg px-4 py-2 bg-red-50 border border-red-200 text-red-700';
+            statusEl.innerHTML = `<i class="fas fa-exclamation-circle mr-1"></i> ${esc(err.message)}`;
+            statusEl.classList.remove('hidden');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-upload mr-2"></i> Upload Logo';
+        }
     }
     </script>
 </body>

@@ -2,6 +2,8 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const csv = require('csv-parser');
 const XLSX = require('xlsx');
+const fs = require('fs');
+const fspath = require('path');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess } = require('../middleware/auth');
@@ -244,6 +246,70 @@ router.post('/companies/:companyId/logo', requireCompanyAccess, logoUpload.singl
     } catch (err) {
         console.error('Logo upload error:', err);
         res.status(500).json({ error: 'Failed to upload logo.' });
+    }
+});
+
+// ============================================================
+// BRANDING (CHC Master Logo)
+// ============================================================
+
+/**
+ * GET /api/admin/branding/logo
+ * Get current master logo info
+ */
+router.get('/branding/logo', async (req, res) => {
+    try {
+        const logoPath = fspath.join(__dirname, '..', 'public', 'assets', 'chc-logo.png');
+        const exists = fs.existsSync(logoPath);
+        const stats = exists ? fs.statSync(logoPath) : null;
+        res.json({
+            exists,
+            url: '/assets/chc-logo.png',
+            size: stats ? stats.size : 0,
+            updated: stats ? stats.mtime.toISOString() : null
+        });
+    } catch (err) {
+        console.error('Branding logo info error:', err);
+        res.status(500).json({ error: 'Failed to get logo info.' });
+    }
+});
+
+/**
+ * POST /api/admin/branding/logo
+ * Upload/replace the CHC master logo (super_admin only)
+ */
+router.post('/branding/logo', requireSuperAdmin, logoUpload.single('logo'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No logo file provided.' });
+        }
+
+        const assetsDir = fspath.join(__dirname, '..', 'public', 'assets');
+
+        // Ensure assets directory exists
+        if (!fs.existsSync(assetsDir)) {
+            fs.mkdirSync(assetsDir, { recursive: true });
+        }
+
+        // Save as chc-logo.png (overwrite existing)
+        const logoPath = fspath.join(assetsDir, 'chc-logo.png');
+        fs.writeFileSync(logoPath, req.file.buffer);
+
+        await logAction(req.admin.id, 'master_logo_uploaded', 'branding', null, {
+            originalName: req.file.originalname,
+            size: req.file.size,
+            mimetype: req.file.mimetype
+        }, req.ip);
+
+        res.json({
+            message: 'Master logo updated successfully.',
+            url: '/assets/chc-logo.png',
+            size: req.file.size
+        });
+
+    } catch (err) {
+        console.error('Master logo upload error:', err);
+        res.status(500).json({ error: 'Failed to upload master logo.' });
     }
 });
 
