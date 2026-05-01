@@ -899,22 +899,48 @@ function parseCSV(buffer) {
 
 function parseExcel(buffer) {
     const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    return XLSX.utils.sheet_to_json(sheet);
+    const allRows = [];
+
+    // Sheets to skip (internal/reference data, not product catalogs)
+    const skipSheets = ['itemswb11926', 'lastcost'];
+
+    for (const sheetName of workbook.SheetNames) {
+        if (skipSheets.includes(sheetName.trim().toLowerCase())) continue;
+
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet);
+
+        // Use sheet name as brand if no brand column exists
+        const brandFromSheet = sheetName.trim();
+
+        for (const row of rows) {
+            // Skip empty rows (no SKU and no item name)
+            const sku = row['SKU'] || row['sku'] || row['Item #'] || row['item_number'];
+            const name = row['Item Name'] || row['item_name'] || row['Name'] || row['name'] || row['Product'];
+            if (!sku && !name) continue;
+            if (!name || String(name).trim() === '') continue;
+
+            // Inject sheet name as brand if not present
+            if (!row['Brand'] && !row['brand'] && !row['Manufacturer']) {
+                row['_sheet_brand'] = brandFromSheet;
+            }
+            allRows.push(row);
+        }
+    }
+    return allRows;
 }
 
 function normalizeProductRow(row) {
     // Flexible column name mapping
     const mappings = {
-        brand: ['brand', 'manufacturer', 'mfg', 'make'],
-        name: ['name', 'product', 'product_name', 'productname', 'description', 'item'],
-        sku: ['sku', 'item_number', 'itemnumber', 'item_no', 'part_number', 'partnumber', 'part_no', 'upc'],
+        brand: ['brand', 'manufacturer', 'mfg', 'make', '_sheet_brand'],
+        name: ['item_name', 'name', 'product', 'product_name', 'productname', 'description', 'item'],
+        sku: ['sku', 'item_#', 'item_number', 'itemnumber', 'item_no', 'part_number', 'partnumber', 'part_no', 'upc'],
         description: ['description', 'desc', 'details', 'product_description'],
-        category: ['category', 'cat', 'type', 'product_type', 'group'],
-        price: ['price', 'sale_price', 'saleprice', 'unit_price', 'cost'],
-        previous_price: ['previous_price', 'previousprice', 'regular_price', 'regularprice', 'msrp', 'list_price', 'listprice', 'was_price'],
-        case_qty: ['case_qty', 'caseqty', 'case_quantity', 'casequantity', 'qty_per_case', 'pack_size', 'packsize'],
+        category: ['category', 'cat', 'type', 'product_type', 'group', 'custom_list_#1'],
+        price: ['warehouse_sale_price', 'price', 'sale_price', 'saleprice', 'unit_price', 'selling_price'],
+        previous_price: ['ae_selling_price', 'previous_price', 'previousprice', 'regular_price', 'regularprice', 'msrp', 'list_price', 'listprice', 'was_price', 'current_price'],
+        case_qty: ['case_quantity', 'case_qty', 'caseqty', 'casequantity', 'qty_per_case', 'pack_size', 'packsize'],
         unit: ['unit', 'uom', 'unit_of_measure'],
         image_url: ['image_url', 'imageurl', 'image', 'photo', 'picture']
     };
@@ -927,8 +953,9 @@ function normalizeProductRow(row) {
 
     for (const [field, aliases] of Object.entries(mappings)) {
         for (const alias of aliases) {
-            if (lowerRow[alias] !== undefined && lowerRow[alias] !== '') {
-                normalized[field] = lowerRow[alias];
+            const val = lowerRow[alias];
+            if (val !== undefined && val !== null && String(val).trim() !== '') {
+                normalized[field] = val;
                 break;
             }
         }
@@ -937,7 +964,16 @@ function normalizeProductRow(row) {
     // Validate required fields
     if (!normalized.name) throw new Error('Missing product name');
     if (!normalized.brand) normalized.brand = 'Uncategorized';
-    if (!normalized.price || isNaN(parseFloat(normalized.price))) throw new Error('Invalid or missing price');
+
+    // Price: try warehouse sale price first, then fall back to AE selling / regular price
+    if (!normalized.price || isNaN(parseFloat(normalized.price))) {
+        // Try previous_price as fallback (AE Selling Price)
+        if (normalized.previous_price && !isNaN(parseFloat(normalized.previous_price))) {
+            normalized.price = normalized.previous_price;
+        } else {
+            throw new Error('Invalid or missing price');
+        }
+    }
 
     // Type conversions
     normalized.price = parseFloat(normalized.price);
