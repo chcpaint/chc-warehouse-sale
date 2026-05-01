@@ -375,7 +375,7 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const { data: orders, error } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, total, status, created_at, items')
+            .select('id, order_number, contact_name, contact_email, total, status, location, created_at, items')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(50);
