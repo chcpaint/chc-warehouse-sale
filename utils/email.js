@@ -57,7 +57,7 @@ async function sendOrderNotification(options) {
         return { sent: false, reason: 'no_recipient' };
     }
 
-    const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER;
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER;
 
     // Build line items HTML
     const itemsHtml = (order.items || []).map(item => `
