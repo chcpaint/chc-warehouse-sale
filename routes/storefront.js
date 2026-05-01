@@ -185,6 +185,29 @@ router.get('/:slug/promotions', requireCompanyAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/store/:slug/locations
+ * Get company locations for order form dropdown
+ */
+router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('company_locations')
+            .select('id, name, city, address')
+            .eq('company_id', req.company.id)
+            .eq('is_active', true)
+            .order('sort_order')
+            .order('city')
+            .order('name');
+
+        if (error) throw error;
+        res.json({ locations: data || [] });
+    } catch (err) {
+        console.error('Store locations error:', err);
+        res.status(500).json({ error: 'Failed to load locations.' });
+    }
+});
+
+/**
  * POST /api/store/:slug/orders
  * Submit a new order
  */

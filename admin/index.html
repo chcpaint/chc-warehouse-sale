@@ -322,6 +322,7 @@
                                 <tr>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Order #</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Location</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Contact</th>
                                     <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Total</th>
                                     <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
@@ -442,6 +443,46 @@
     <!-- ============================================================ -->
     <!-- MODALS -->
     <!-- ============================================================ -->
+
+    <!-- Locations Modal -->
+    <div id="locations-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-map-marker-alt text-blue-500 mr-2"></i> Locations — <span id="locations-company-name"></span></h3>
+                <button onclick="hideModal('locations-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+
+            <!-- Add single location -->
+            <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                <p class="text-sm font-semibold text-gray-700 mb-3">Add Location</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <input type="text" id="loc-name" placeholder="Location name *" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="loc-city" placeholder="City" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="loc-address" placeholder="Full address" class="px-3 py-2 border rounded-lg text-sm col-span-2">
+                    <input type="text" id="loc-contact" placeholder="Contact name" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="loc-phone" placeholder="Phone" class="px-3 py-2 border rounded-lg text-sm">
+                </div>
+                <button onclick="addLocation()" class="mt-3 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                    <i class="fas fa-plus mr-1"></i> Add Location
+                </button>
+            </div>
+
+            <!-- Bulk add -->
+            <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                <p class="text-sm font-semibold text-gray-700 mb-2">Bulk Add Locations</p>
+                <p class="text-xs text-gray-500 mb-2">Paste one location per line (Name | City | Address)</p>
+                <textarea id="loc-bulk" rows="4" placeholder="Ottawa East | Ottawa | 123 Main St&#10;Ottawa West | Ottawa | 456 Bank St&#10;Gatineau | Gatineau&#10;Airport" class="w-full px-3 py-2 border rounded-lg text-sm font-mono"></textarea>
+                <button onclick="bulkAddLocations()" class="mt-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                    <i class="fas fa-list mr-1"></i> Add All
+                </button>
+            </div>
+
+            <!-- Locations list -->
+            <div id="locations-list" class="space-y-2">
+                <p class="text-center text-gray-400 py-4">Loading...</p>
+            </div>
+        </div>
+    </div>
 
     <!-- Add Company Modal -->
     <div id="company-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
@@ -803,6 +844,7 @@
                 <td class="px-4 py-3 text-sm text-gray-500">${esc(c.contact_email || '-')}</td>
                 <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${c.is_active ? 'Active' : 'Inactive'}</span></td>
                 <td class="px-4 py-3 text-right">
+                    <button onclick="openLocationsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-blue-500 hover:text-blue-700 text-sm mr-3" title="Manage locations"><i class="fas fa-map-marker-alt"></i></button>
                     <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
                 </td>
@@ -868,6 +910,120 @@
             } catch (err) { alert('Upload failed.'); }
         };
         input.click();
+    }
+
+    // ============================================================
+    // LOCATIONS
+    // ============================================================
+    let locationsCompanyId = null;
+
+    function openLocationsModal(companyId, companyName) {
+        locationsCompanyId = companyId;
+        document.getElementById('locations-company-name').textContent = companyName;
+        showModal('locations-modal');
+        loadLocations();
+    }
+
+    async function loadLocations() {
+        const container = document.getElementById('locations-list');
+        container.innerHTML = '<p class="text-center text-gray-400 py-4"><i class="fas fa-spinner fa-spin mr-1"></i> Loading...</p>';
+
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations`);
+            const data = await resp.json();
+            const locs = data.locations || [];
+
+            if (locs.length === 0) {
+                container.innerHTML = '<p class="text-center text-gray-400 py-6">No locations yet. Add your first one above.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <p class="text-sm font-semibold text-gray-600">${locs.length} location${locs.length > 1 ? 's' : ''}</p>
+                </div>
+            ` + locs.map(l => `
+                <div class="flex items-center justify-between bg-white border rounded-lg px-4 py-3 hover:bg-gray-50">
+                    <div>
+                        <p class="font-medium text-gray-800">${esc(l.name)}</p>
+                        <p class="text-sm text-gray-500">
+                            ${l.city ? '<i class="fas fa-city mr-1 text-gray-400"></i>' + esc(l.city) : ''}
+                            ${l.address ? ' — ' + esc(l.address) : ''}
+                        </p>
+                        ${l.contact_name || l.contact_phone ? `<p class="text-xs text-gray-400 mt-1">${esc(l.contact_name || '')} ${l.contact_phone ? '· ' + esc(l.contact_phone) : ''}</p>` : ''}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="deleteLocation('${l.id}', '${esc(l.name).replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-600 text-sm" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (err) {
+            container.innerHTML = '<p class="text-center text-red-400 py-4">Failed to load locations.</p>';
+        }
+    }
+
+    async function addLocation() {
+        const name = document.getElementById('loc-name').value.trim();
+        if (!name) { alert('Location name is required.'); return; }
+
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    city: document.getElementById('loc-city').value.trim(),
+                    address: document.getElementById('loc-address').value.trim(),
+                    contact_name: document.getElementById('loc-contact').value.trim(),
+                    contact_phone: document.getElementById('loc-phone').value.trim()
+                })
+            });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+
+            // Clear inputs
+            ['loc-name', 'loc-city', 'loc-address', 'loc-contact', 'loc-phone'].forEach(id => document.getElementById(id).value = '');
+            loadLocations();
+        } catch (err) { alert('Failed to add location: ' + err.message); }
+    }
+
+    async function bulkAddLocations() {
+        const text = document.getElementById('loc-bulk').value.trim();
+        if (!text) { alert('Paste at least one location.'); return; }
+
+        const lines = text.split('\n').filter(l => l.trim());
+        const locations = lines.map(line => {
+            const parts = line.split('|').map(p => p.trim());
+            return {
+                name: parts[0] || '',
+                city: parts[1] || '',
+                address: parts[2] || ''
+            };
+        }).filter(l => l.name);
+
+        if (locations.length === 0) { alert('No valid locations found.'); return; }
+
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/bulk`, {
+                method: 'POST',
+                body: JSON.stringify({ locations })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+
+            alert(`${data.count} locations added.`);
+            document.getElementById('loc-bulk').value = '';
+            loadLocations();
+        } catch (err) { alert('Failed to add locations: ' + err.message); }
+    }
+
+    async function deleteLocation(id, name) {
+        if (!confirm(`Delete location "${name}"?`)) return;
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/${id}`, { method: 'DELETE' });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            loadLocations();
+        } catch (err) { alert('Failed to delete: ' + err.message); }
     }
 
     // ============================================================
@@ -1222,6 +1378,7 @@
                 <tr class="border-b hover:bg-gray-50">
                     <td class="px-4 py-3 font-mono font-bold text-blue-700 text-sm">${esc(o.order_number)}</td>
                     <td class="px-4 py-3 text-sm">${esc(o.companies?.name || o.company_name || '-')}</td>
+                    <td class="px-4 py-3 text-sm">${o.location ? '<i class="fas fa-map-marker-alt text-blue-400 mr-1"></i>' + esc(o.location) : '<span class="text-gray-300">—</span>'}</td>
                     <td class="px-4 py-3 text-sm">${esc(o.contact_name)}<br><span class="text-xs text-gray-400">${esc(o.contact_email)}</span></td>
                     <td class="px-4 py-3 text-right font-semibold">$${parseFloat(o.total).toFixed(2)}</td>
                     <td class="px-4 py-3 text-center">
@@ -1234,7 +1391,7 @@
                     <td class="px-4 py-3 text-sm text-gray-500">${new Date(o.created_at).toLocaleDateString()}</td>
                     <td class="px-4 py-3 text-right text-sm text-gray-400">${(o.items || []).length} items</td>
                 </tr>
-            `).join('') || '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No orders found.</td></tr>';
+            `).join('') || '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No orders found.</td></tr>';
         } catch (err) { console.error('Orders load failed:', err); }
     }
 

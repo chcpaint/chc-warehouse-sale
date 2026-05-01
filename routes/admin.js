@@ -326,6 +326,147 @@ router.post('/branding/logo', requireSuperAdmin, logoUpload.single('logo'), asyn
 });
 
 // ============================================================
+// COMPANY LOCATIONS MANAGEMENT
+// ============================================================
+
+/**
+ * GET /api/admin/companies/:companyId/locations
+ */
+router.get('/companies/:companyId/locations', requireCompanyAccess, async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('company_locations')
+            .select('*')
+            .eq('company_id', req.params.companyId)
+            .order('sort_order')
+            .order('city')
+            .order('name');
+
+        if (error) throw error;
+        res.json({ locations: data || [] });
+    } catch (err) {
+        console.error('Locations list error:', err);
+        res.status(500).json({ error: 'Failed to load locations.' });
+    }
+});
+
+/**
+ * POST /api/admin/companies/:companyId/locations
+ * Create a single location
+ */
+router.post('/companies/:companyId/locations', requireCompanyAccess, async (req, res) => {
+    try {
+        const location = sanitizeObject(req.body);
+        location.company_id = req.params.companyId;
+
+        if (!location.name) {
+            return res.status(400).json({ error: 'Location name is required.' });
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('company_locations')
+            .insert(location)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        await logAction(req.admin.id, 'location_created', 'location', data.id, { name: data.name, city: data.city }, req.ip);
+        res.status(201).json({ location: data });
+    } catch (err) {
+        console.error('Create location error:', err);
+        res.status(500).json({ error: 'Failed to create location.' });
+    }
+});
+
+/**
+ * POST /api/admin/companies/:companyId/locations/bulk
+ * Create multiple locations at once
+ */
+router.post('/companies/:companyId/locations/bulk', requireCompanyAccess, async (req, res) => {
+    try {
+        const { locations } = req.body;
+        if (!locations || !Array.isArray(locations) || locations.length === 0) {
+            return res.status(400).json({ error: 'No locations provided.' });
+        }
+
+        const companyId = req.params.companyId;
+        const records = locations
+            .map(l => typeof l === 'string' ? { name: l.trim() } : sanitizeObject(l))
+            .filter(l => l.name)
+            .map(l => ({ ...l, company_id: companyId }));
+
+        if (records.length === 0) {
+            return res.status(400).json({ error: 'No valid locations found.' });
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('company_locations')
+            .insert(records)
+            .select();
+
+        if (error) throw error;
+
+        await logAction(req.admin.id, 'locations_bulk_created', 'location', null, {
+            company_id: companyId, count: data.length
+        }, req.ip);
+
+        res.status(201).json({ locations: data, count: data.length });
+    } catch (err) {
+        console.error('Bulk create locations error:', err);
+        res.status(500).json({ error: 'Failed to create locations.' });
+    }
+});
+
+/**
+ * PUT /api/admin/companies/:companyId/locations/:locationId
+ */
+router.put('/companies/:companyId/locations/:locationId', requireCompanyAccess, async (req, res) => {
+    try {
+        const updates = sanitizeObject(req.body);
+        delete updates.id;
+        delete updates.company_id;
+
+        const { data, error } = await supabaseAdmin
+            .from('company_locations')
+            .update(updates)
+            .eq('id', req.params.locationId)
+            .eq('company_id', req.params.companyId)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        await logAction(req.admin.id, 'location_updated', 'location', data.id, updates, req.ip);
+        res.json({ location: data });
+    } catch (err) {
+        console.error('Update location error:', err);
+        res.status(500).json({ error: 'Failed to update location.' });
+    }
+});
+
+/**
+ * DELETE /api/admin/companies/:companyId/locations/:locationId
+ */
+router.delete('/companies/:companyId/locations/:locationId', requireCompanyAccess, async (req, res) => {
+    try {
+        const { error } = await supabaseAdmin
+            .from('company_locations')
+            .delete()
+            .eq('id', req.params.locationId)
+            .eq('company_id', req.params.companyId);
+
+        if (error) throw error;
+
+        await logAction(req.admin.id, 'location_deleted', 'location', req.params.locationId, {}, req.ip);
+        res.json({ message: 'Location deleted.' });
+    } catch (err) {
+        console.error('Delete location error:', err);
+        res.status(500).json({ error: 'Failed to delete location.' });
+    }
+});
+
+// ============================================================
 // CATALOG / PRODUCT MANAGEMENT
 // ============================================================
 
