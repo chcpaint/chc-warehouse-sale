@@ -426,29 +426,38 @@
             console.log('[Locations] API response status:', resp.status);
 
             if (!resp.ok) {
-                console.error('[Locations] API returned error:', resp.status, resp.statusText);
+                const errText = await resp.text();
+                console.error('[Locations] API error:', resp.status, errText);
+                // DEBUG: show error on page
+                const lbl = document.querySelector('label[for="location-search"]') || document.getElementById('location-search')?.parentElement?.querySelector('label');
+                if (lbl) lbl.innerHTML = `Location / Branch * <span class="text-red-500 text-xs">(API ${resp.status})</span>`;
                 return;
             }
 
             const data = await resp.json();
-            console.log('[Locations] Received', (data.locations || []).length, 'locations');
-            allLocations = data.locations || [];
+            const locs = data.locations || [];
+            console.log('[Locations] Received', locs.length, 'locations', JSON.stringify(locs.slice(0,2)));
+            allLocations = locs;
             locationsLoaded = true;
 
             if (allLocations.length === 0) {
-                // No locations configured — show text input instead
-                // but keep the dropdown structure intact in case of retry
                 document.getElementById('location-search').placeholder = 'Enter your location';
                 document.getElementById('location-chevron').style.display = 'none';
+                // DEBUG: show count on page
+                const lbl = document.querySelector('label[for="location-search"]') || document.getElementById('location-search')?.parentElement?.parentElement?.querySelector('label');
+                if (lbl) lbl.innerHTML = 'Location / Branch * <span class="text-orange-500 text-xs">(0 locations returned)</span>';
                 return;
             }
 
             // Show the searchable dropdown
-            document.getElementById('location-search').placeholder = 'Search locations...';
+            document.getElementById('location-search').placeholder = `Search ${allLocations.length} locations...`;
             document.getElementById('location-chevron').style.display = '';
             renderLocationDropdown(allLocations);
         } catch (err) {
             console.error('[Locations] Load failed:', err);
+            // DEBUG: show error on page
+            const lbl = document.querySelector('label[for="location-search"]') || document.getElementById('location-search')?.parentElement?.parentElement?.querySelector('label');
+            if (lbl) lbl.innerHTML = `Location / Branch * <span class="text-red-500 text-xs">(${err.message})</span>`;
         }
     }
 
