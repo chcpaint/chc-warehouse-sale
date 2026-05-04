@@ -39,7 +39,7 @@ app.use(helmet({
 // CORS
 app.use(cors({
     origin: process.env.NODE_ENV === 'production'
-        ? [process.env.APP_URL || 'https://chc-warehouse-sale-production.up.railway.app']
+        ? [process.env.APP_URL || 'https://chc-sale-console-production.up.railway.app']
         : '*',
     credentials: true
 }));
