@@ -191,6 +191,7 @@ router.get('/:slug/promotions', requireCompanyAuth, async (req, res) => {
  */
 router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
     try {
+        console.log(`[Locations API] Fetching for company_id: ${req.company.id}, slug: ${req.params.slug}`);
         const { data, error } = await supabaseAdmin
             .from('company_locations')
             .select('id, name, city, address')
@@ -200,10 +201,14 @@ router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
             .order('city')
             .order('name');
 
-        if (error) throw error;
+        if (error) {
+            console.error('[Locations API] Supabase error:', error);
+            throw error;
+        }
+        console.log(`[Locations API] Returning ${(data || []).length} locations`);
         res.json({ locations: data || [] });
     } catch (err) {
-        console.error('Store locations error:', err);
+        console.error('[Locations API] Error:', err);
         res.status(500).json({ error: 'Failed to load locations.' });
     }
 });
