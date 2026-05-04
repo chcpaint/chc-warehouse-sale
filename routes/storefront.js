@@ -7,6 +7,52 @@ const { sendOrderNotification } = require('../utils/email');
 const router = express.Router();
 
 /**
+ * GET /api/store/debug-locations
+ * TEMPORARY - diagnose why locations return empty
+ */
+router.get('/debug-locations', async (req, res) => {
+    try {
+        const supaUrl = process.env.SUPABASE_URL || 'NOT SET';
+
+        // Check if table exists
+        const { data: allLocs, error: allErr } = await supabaseAdmin
+            .from('company_locations')
+            .select('id, company_id, name, city, is_active')
+            .limit(5);
+
+        // Check companies
+        const { data: companies, error: compErr } = await supabaseAdmin
+            .from('companies')
+            .select('id, name, slug')
+            .eq('slug', 'assured');
+
+        const companyId = companies?.[0]?.id;
+        let matchingLocs = null;
+        if (companyId) {
+            const { data } = await supabaseAdmin
+                .from('company_locations')
+                .select('id, name, city')
+                .eq('company_id', companyId)
+                .eq('is_active', true)
+                .limit(5);
+            matchingLocs = data;
+        }
+
+        res.json({
+            supabase_url_prefix: supaUrl.substring(0, 30) + '...',
+            all_locations_sample: allLocs,
+            all_locations_error: allErr?.message || null,
+            assured_company: companies?.[0] || null,
+            company_error: compErr?.message || null,
+            matching_locations_count: matchingLocs?.length || 0,
+            matching_locations_sample: matchingLocs
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
  * GET /api/store/platform-logo
  * Public - get the CHC master logo URL from Supabase Storage
  */
