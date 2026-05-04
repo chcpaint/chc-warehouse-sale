@@ -7,147 +7,6 @@ const { sendOrderNotification } = require('../utils/email');
 const router = express.Router();
 
 /**
- * POST /api/store/seed-locations
- * TEMPORARY - seed Assured locations into the correct Supabase
- * REMOVE AFTER USE
- */
-router.post('/seed-locations', async (req, res) => {
-    try {
-        const secret = req.body.setup_secret;
-        if (secret !== 'CHC-TEMP-SETUP-2026') {
-            return res.status(403).json({ error: 'Invalid secret.' });
-        }
-
-        // Look up Assured company in THIS database
-        const { data: company } = await supabaseAdmin
-            .from('companies')
-            .select('id, name, slug')
-            .eq('slug', 'assured')
-            .single();
-
-        if (!company) {
-            return res.status(404).json({ error: 'Assured company not found.' });
-        }
-
-        const companyId = company.id;
-
-        // Clear existing locations for this company first
-        await supabaseAdmin.from('company_locations').delete().eq('company_id', companyId);
-
-        // All 80 Assured locations
-        const locations = [
-            { name: "Assured - Ajax", city: "Ajax" },
-            { name: "Assured - Aurora", city: "Aurora" },
-            { name: "Assured - Barrie (Bayfield)", city: "Barrie" },
-            { name: "Assured - Barrie (Dunlop)", city: "Barrie" },
-            { name: "Assured - Bolton", city: "Bolton" },
-            { name: "Assured - Bowmanville", city: "Bowmanville" },
-            { name: "Assured - Brampton (Chrysler)", city: "Brampton" },
-            { name: "Assured - Brampton (Coventry)", city: "Brampton" },
-            { name: "Assured - Brampton (Glidden)", city: "Brampton" },
-            { name: "Assured - Brantford", city: "Brantford" },
-            { name: "Assured - Burlington (Brant)", city: "Burlington" },
-            { name: "Assured - Burlington (Mainway)", city: "Burlington" },
-            { name: "Assured - Cambridge (Hespeler)", city: "Cambridge" },
-            { name: "Assured - Cambridge (Sheldon)", city: "Cambridge" },
-            { name: "Assured - Concord", city: "Concord" },
-            { name: "Assured - East York", city: "East York" },
-            { name: "Assured - Etobicoke (Belfield)", city: "Etobicoke" },
-            { name: "Assured - Etobicoke (Westmore)", city: "Etobicoke" },
-            { name: "Assured - Georgetown", city: "Georgetown" },
-            { name: "Assured - Grimsby", city: "Grimsby" },
-            { name: "Assured - Guelph", city: "Guelph" },
-            { name: "Assured - Hamilton (Barton)", city: "Hamilton" },
-            { name: "Assured - Hamilton (Centennial)", city: "Hamilton" },
-            { name: "Assured - Hamilton (Kenora)", city: "Hamilton" },
-            { name: "Assured - Hamilton (Upper James)", city: "Hamilton" },
-            { name: "Assured - Hamilton (Upper Wellington)", city: "Hamilton" },
-            { name: "Assured - Innisfil", city: "Innisfil" },
-            { name: "Assured - Kanata", city: "Kanata" },
-            { name: "Assured - Kingston (Dalton)", city: "Kingston" },
-            { name: "Assured - Kingston (Fortune)", city: "Kingston" },
-            { name: "Assured - Kitchener (Bingemans)", city: "Kitchener" },
-            { name: "Assured - Kitchener (Victoria)", city: "Kitchener" },
-            { name: "Assured - Lindsay", city: "Lindsay" },
-            { name: "Assured - London (Clarke)", city: "London" },
-            { name: "Assured - London (Pond Mills)", city: "London" },
-            { name: "Assured - London (Wharncliffe)", city: "London" },
-            { name: "Assured - Markham", city: "Markham" },
-            { name: "Assured - Milton", city: "Milton" },
-            { name: "Assured - Mississauga (Argentia)", city: "Mississauga" },
-            { name: "Assured - Mississauga (Dundas)", city: "Mississauga" },
-            { name: "Assured - Mississauga (Lakeshore)", city: "Mississauga" },
-            { name: "Assured - Mississauga (Mavis)", city: "Mississauga" },
-            { name: "Assured - Newmarket", city: "Newmarket" },
-            { name: "Assured - Niagara Falls", city: "Niagara Falls" },
-            { name: "Assured - North York (Dufferin)", city: "North York" },
-            { name: "Assured - North York (Magnetic)", city: "North York" },
-            { name: "Assured - Oakville (Speers)", city: "Oakville" },
-            { name: "Assured - Oakville (Wyecroft)", city: "Oakville" },
-            { name: "Assured - Orangeville", city: "Orangeville" },
-            { name: "Assured - Orillia", city: "Orillia" },
-            { name: "Assured - Oshawa (Bond)", city: "Oshawa" },
-            { name: "Assured - Oshawa (Wentworth)", city: "Oshawa" },
-            { name: "Assured - Ottawa (Bantree)", city: "Ottawa" },
-            { name: "Assured - Ottawa (Citigate)", city: "Ottawa" },
-            { name: "Assured - Ottawa (Merivale)", city: "Ottawa" },
-            { name: "Assured - Peterborough", city: "Peterborough" },
-            { name: "Assured - Pickering", city: "Pickering" },
-            { name: "Assured - Richmond Hill", city: "Richmond Hill" },
-            { name: "Assured - Sarnia", city: "Sarnia" },
-            { name: "Assured - Scarborough (Birchmount)", city: "Scarborough" },
-            { name: "Assured - Scarborough (Milner)", city: "Scarborough" },
-            { name: "Assured - St. Catharines (Bunting)", city: "St. Catharines" },
-            { name: "Assured - St. Catharines (Eastchester)", city: "St. Catharines" },
-            { name: "Assured - Stoney Creek", city: "Stoney Creek" },
-            { name: "Assured - Sudbury", city: "Sudbury" },
-            { name: "Assured - Thunder Bay", city: "Thunder Bay" },
-            { name: "Assured - Toronto (Danforth)", city: "Toronto" },
-            { name: "Assured - Toronto (Dufferin)", city: "Toronto" },
-            { name: "Assured - Toronto (Dupont)", city: "Toronto" },
-            { name: "Assured - Toronto (Kennedy)", city: "Toronto" },
-            { name: "Assured - Toronto (Lake Shore)", city: "Toronto" },
-            { name: "Assured - Vaughan", city: "Vaughan" },
-            { name: "Assured - Waterloo", city: "Waterloo" },
-            { name: "Assured - Welland", city: "Welland" },
-            { name: "Assured - Whitby", city: "Whitby" },
-            { name: "Assured - Windsor (Division)", city: "Windsor" },
-            { name: "Assured - Windsor (Walker)", city: "Windsor" },
-            { name: "Assured - Woodbridge", city: "Woodbridge" },
-            { name: "Assured - Woodstock", city: "Woodstock" },
-            { name: "Assured - York", city: "York" }
-        ];
-
-        const rows = locations.map((loc, i) => ({
-            company_id: companyId,
-            name: loc.name,
-            city: loc.city,
-            address: '',
-            sort_order: i,
-            is_active: true
-        }));
-
-        const { data: inserted, error } = await supabaseAdmin
-            .from('company_locations')
-            .insert(rows)
-            .select('id');
-
-        if (error) {
-            return res.status(500).json({ error: 'Insert failed', detail: error.message });
-        }
-
-        res.json({
-            message: 'Locations seeded',
-            company_id: companyId,
-            company_name: company.name,
-            count: inserted.length
-        });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
  * GET /api/store/platform-logo
  * Public - get the CHC master logo URL from Supabase Storage
  */
@@ -332,7 +191,6 @@ router.get('/:slug/promotions', requireCompanyAuth, async (req, res) => {
  */
 router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
     try {
-        console.log(`[Locations API] Fetching for company_id: ${req.company.id}, slug: ${req.params.slug}`);
         const { data, error } = await supabaseAdmin
             .from('company_locations')
             .select('id, name, city, address')
@@ -342,11 +200,7 @@ router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
             .order('city')
             .order('name');
 
-        if (error) {
-            console.error('[Locations API] Supabase error:', error);
-            throw error;
-        }
-        console.log(`[Locations API] Returning ${(data || []).length} locations`);
+        if (error) throw error;
         res.json({ locations: data || [] });
     } catch (err) {
         console.error('[Locations API] Error:', err);

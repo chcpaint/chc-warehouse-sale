@@ -200,43 +200,4 @@ router.post('/admin-setup', async (req, res) => {
     }
 });
 
-/**
- * POST /api/auth/reset-admin-pw
- * Temporary endpoint to reset admin password using server-side bcrypt
- * REMOVE AFTER USE
- */
-router.post('/reset-admin-pw', async (req, res) => {
-    try {
-        const secret = req.body.setup_secret;
-        if (secret !== 'CHC-TEMP-SETUP-2026') {
-            return res.status(403).json({ error: 'Invalid setup secret.' });
-        }
-
-        const { email, password } = req.body;
-        if (!email || !password) {
-            return res.status(400).json({ error: 'Email and password are required.' });
-        }
-
-        const passwordHash = await bcrypt.hash(password, 12);
-        console.log('[TEMP] Resetting password for', email, '- hash prefix:', passwordHash.substring(0, 15));
-
-        const { data, error } = await supabaseAdmin
-            .from('admin_users')
-            .update({ password_hash: passwordHash })
-            .eq('email', email.toLowerCase())
-            .select('id, email')
-            .single();
-
-        if (error || !data) {
-            return res.status(500).json({ error: 'Failed to reset password.', detail: error?.message });
-        }
-
-        // Verify immediately
-        const valid = await bcrypt.compare(password, passwordHash);
-        res.json({ message: 'Password reset', email: data.email, verified: valid });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
 module.exports = router;
