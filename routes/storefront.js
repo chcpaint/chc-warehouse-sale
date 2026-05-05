@@ -399,31 +399,4 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     }
 });
 
-/**
- * GET /api/store/add-po-column
- * TEMPORARY - Add po_number column to orders table
- */
-router.get('/add-po-column', async (req, res) => {
-    try {
-        const { error } = await supabaseAdmin.rpc('exec_sql', {
-            query: "ALTER TABLE orders ADD COLUMN IF NOT EXISTS po_number TEXT;"
-        });
-        // If rpc doesn't exist, try raw query via rest
-        if (error) {
-            // Try direct insert to see if column exists
-            const { error: testErr } = await supabaseAdmin
-                .from('orders')
-                .select('po_number')
-                .limit(1);
-            if (testErr && testErr.message.includes('po_number')) {
-                return res.json({ status: 'column_missing', note: 'Need to add po_number column manually in Supabase SQL editor', sql: 'ALTER TABLE orders ADD COLUMN IF NOT EXISTS po_number TEXT;' });
-            }
-            return res.json({ status: 'column_exists_or_check', testError: testErr?.message || 'none' });
-        }
-        res.json({ status: 'column_added' });
-    } catch (err) {
-        res.json({ status: 'error', error: err.message });
-    }
-});
-
 module.exports = router;
