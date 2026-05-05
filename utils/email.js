@@ -1,38 +1,30 @@
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 
 /**
- * Create a reusable SMTP transporter from environment variables.
- * Returns null if SMTP is not configured.
+ * Initialize SendGrid with API key.
+ * Uses SENDGRID_API_KEY env var, or falls back to SMTP_PASS (which is the API key for SendGrid SMTP).
  */
-function createTransporter() {
-    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-    if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-        console.warn('Email: SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS env vars.');
-        return null;
+function initSendGrid() {
+    const apiKey = process.env.SENDGRID_API_KEY || process.env.SMTP_PASS;
+    if (!apiKey) {
+        console.warn('Email: No SendGrid API key. Set SENDGRID_API_KEY or SMTP_PASS.');
+        return false;
     }
-
-    return nodemailer.createTransport({
-        host: SMTP_HOST,
-        port: parseInt(SMTP_PORT) || 587,
-        secure: parseInt(SMTP_PORT) === 465,
-        auth: {
-            user: SMTP_USER,
-            pass: SMTP_PASS
-        }
-    });
+    sgMail.setApiKey(apiKey);
+    return true;
 }
 
-let transporter = null;
+let initialized = false;
 
-function getTransporter() {
-    if (!transporter) {
-        transporter = createTransporter();
+function ensureInit() {
+    if (!initialized) {
+        initialized = initSendGrid();
     }
-    return transporter;
+    return initialized;
 }
 
 /**
- * Send an order notification email.
+ * Send an order notification email via SendGrid Web API.
  * @param {Object} options
  * @param {string} options.to - Recipient email address
  * @param {Object} options.order - Order object (id, order_number, total, items, etc.)
@@ -44,10 +36,9 @@ function getTransporter() {
  * @param {string} options.notes - Order notes (optional)
  */
 async function sendOrderNotification(options) {
-    const transport = getTransporter();
-    if (!transport) {
-        console.warn('Email: Skipping order notification — SMTP not configured.');
-        return { sent: false, reason: 'smtp_not_configured' };
+    if (!ensureInit()) {
+        console.warn('Email: Skipping order notification — SendGrid not configured.');
+        return { sent: false, reason: 'not_configured' };
     }
 
     const { to, order, companyName, contactName, contactEmail, contactPhone, location, notes } = options;
@@ -57,7 +48,7 @@ async function sendOrderNotification(options) {
         return { sent: false, reason: 'no_recipient' };
     }
 
-    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER;
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
 
     // Build line items HTML
     const itemsHtml = (order.items || []).map(item => `
@@ -116,9 +107,9 @@ async function sendOrderNotification(options) {
     const text = `New Order #${order.order_number || order.id}\nCompany: ${companyName}\nOrdered by: ${contactName} (${contactEmail})${location ? `\nLocation: ${location}` : ''}\n\nItems:\n${textItems}\n\nTotal: $${Number(order.total).toFixed(2)}${notes ? `\n\nNotes: ${notes}` : ''}`;
 
     try {
-        await transport.sendMail({
-            from: fromAddress,
+        await sgMail.send({
             to,
+            from: fromAddress,
             subject: `New Order #${order.order_number || order.id} from ${companyName}`,
             text,
             html
@@ -126,8 +117,32 @@ async function sendOrderNotification(options) {
         console.log(`Email: Order notification sent to ${to} for order ${order.order_number || order.id}`);
         return { sent: true };
     } catch (err) {
-        console.error('Email: Failed to send order notification:', err.message);
-        return { sent: false, reason: 'send_failed', error: err.message };
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Email: Failed to send order notification:', errMsg);
+        return { sent: false, reason: 'send_failed', error: errMsg };
+    }
+}
+
+/**
+ * Send a test email to verify configuration.
+ */
+async function sendTestEmail(toAddress) {
+    if (!ensureInit()) {
+        return { sent: false, reason: 'not_configured' };
+    }
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    try {
+        await sgMail.send({
+            to: toAddress,
+            from: fromAddress,
+            subject: 'CHC Platform - Email Test ' + new Date().toISOString(),
+            text: 'If you receive this, SendGrid Web API email is working!',
+            html: '<h2>CHC Email Test</h2><p>SendGrid Web API delivery is working correctly.</p>'
+        });
+        return { sent: true, from: fromAddress, to: toAddress };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        return { sent: false, error: errMsg, code: err.code };
     }
 }
 
@@ -137,4 +152,4 @@ function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendOrderNotification, getTransporter };
+module.exports = { sendOrderNotification, sendTestEmail };

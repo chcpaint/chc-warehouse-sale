@@ -395,59 +395,27 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
 
 /**
  * GET /api/store/test-email
- * TEMPORARY - Test SMTP config and connection
- * ?mode=env (default) - just show env vars
- * ?mode=verify - test SMTP connection (10s timeout)
- * ?mode=send - actually send test email
+ * TEMPORARY - Test SendGrid Web API email delivery
  */
 router.get('/test-email', async (req, res) => {
-    const mode = req.query.mode || 'env';
-    const env = {
-        SMTP_HOST: process.env.SMTP_HOST || 'NOT SET',
-        SMTP_PORT: process.env.SMTP_PORT || 'NOT SET',
-        SMTP_USER: process.env.SMTP_USER || 'NOT SET',
-        SMTP_PASS: process.env.SMTP_PASS ? `SET (${process.env.SMTP_PASS.substring(0, 8)}...)` : 'NOT SET',
-        SMTP_FROM: process.env.SMTP_FROM || 'NOT SET',
-        EMAIL_FROM: process.env.EMAIL_FROM || 'NOT SET',
-        resolved_from: process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER || 'NONE'
-    };
-
-    if (mode === 'env') {
-        return res.json({ status: 'ok', mode: 'env', env });
-    }
-
     try {
-        const nodemailer = require('nodemailer');
-        const transport = nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: parseInt(process.env.SMTP_PORT) || 587,
-            secure: parseInt(process.env.SMTP_PORT) === 465,
-            auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 10000
-        });
+        const { sendTestEmail } = require('../utils/email');
+        const apiKey = process.env.SENDGRID_API_KEY || process.env.SMTP_PASS;
+        const env = {
+            SENDGRID_API_KEY: process.env.SENDGRID_API_KEY ? `SET (${process.env.SENDGRID_API_KEY.substring(0, 8)}...)` : 'NOT SET',
+            SMTP_PASS_as_fallback: process.env.SMTP_PASS ? `SET (${process.env.SMTP_PASS.substring(0, 8)}...)` : 'NOT SET',
+            SMTP_FROM: process.env.SMTP_FROM || 'NOT SET',
+            resolved_key: apiKey ? 'YES' : 'NO'
+        };
 
-        if (mode === 'verify') {
-            const ok = await transport.verify();
-            return res.json({ status: 'smtp_ok', verified: ok, env });
+        if (req.query.mode === 'send') {
+            const result = await sendTestEmail('adamberube@me.com');
+            return res.json({ ...result, env });
         }
 
-        if (mode === 'send') {
-            const fromAddr = process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER;
-            const result = await transport.sendMail({
-                from: fromAddr,
-                to: 'adamberube@me.com',
-                subject: 'CHC Platform - SMTP Test ' + new Date().toISOString(),
-                text: 'SMTP is working!',
-                html: '<h2>CHC SMTP Test</h2><p>Email delivery is working.</p>'
-            });
-            return res.json({ status: 'sent', messageId: result.messageId, from: fromAddr, env });
-        }
-
-        res.json({ status: 'unknown_mode', mode });
+        res.json({ status: 'ok', method: 'SendGrid Web API', env });
     } catch (err) {
-        res.json({ status: 'error', error: err.message, code: err.code, env });
+        res.json({ status: 'error', error: err.message });
     }
 });
 
