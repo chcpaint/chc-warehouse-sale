@@ -395,72 +395,59 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
 
 /**
  * GET /api/store/test-email
- * TEMPORARY - Test SMTP connection and send a test email
+ * TEMPORARY - Test SMTP config and connection
+ * ?mode=env (default) - just show env vars
+ * ?mode=verify - test SMTP connection (10s timeout)
+ * ?mode=send - actually send test email
  */
 router.get('/test-email', async (req, res) => {
+    const mode = req.query.mode || 'env';
+    const env = {
+        SMTP_HOST: process.env.SMTP_HOST || 'NOT SET',
+        SMTP_PORT: process.env.SMTP_PORT || 'NOT SET',
+        SMTP_USER: process.env.SMTP_USER || 'NOT SET',
+        SMTP_PASS: process.env.SMTP_PASS ? `SET (${process.env.SMTP_PASS.substring(0, 8)}...)` : 'NOT SET',
+        SMTP_FROM: process.env.SMTP_FROM || 'NOT SET',
+        EMAIL_FROM: process.env.EMAIL_FROM || 'NOT SET',
+        resolved_from: process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER || 'NONE'
+    };
+
+    if (mode === 'env') {
+        return res.json({ status: 'ok', mode: 'env', env });
+    }
+
     try {
-        const { getTransporter } = require('../utils/email');
-        const transport = getTransporter();
-
-        if (!transport) {
-            return res.json({
-                status: 'error',
-                message: 'SMTP not configured',
-                env: {
-                    SMTP_HOST: process.env.SMTP_HOST || 'NOT SET',
-                    SMTP_PORT: process.env.SMTP_PORT || 'NOT SET',
-                    SMTP_USER: process.env.SMTP_USER ? 'SET' : 'NOT SET',
-                    SMTP_PASS: process.env.SMTP_PASS ? `SET (${process.env.SMTP_PASS.substring(0, 6)}...)` : 'NOT SET',
-                    SMTP_FROM: process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER || 'NOT SET'
-                }
-            });
-        }
-
-        // Test SMTP connection first
-        let verifyResult;
-        try {
-            verifyResult = await transport.verify();
-        } catch (verifyErr) {
-            return res.json({
-                status: 'smtp_connection_failed',
-                error: verifyErr.message,
-                code: verifyErr.code,
-                env: {
-                    SMTP_HOST: process.env.SMTP_HOST,
-                    SMTP_PORT: process.env.SMTP_PORT,
-                    SMTP_USER: process.env.SMTP_USER ? 'SET' : 'NOT SET',
-                    SMTP_PASS: process.env.SMTP_PASS ? `SET (${process.env.SMTP_PASS.substring(0, 6)}...)` : 'NOT SET',
-                    SMTP_FROM: process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER || 'NOT SET'
-                }
-            });
-        }
-
-        // Send a test email
-        const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER;
-        const testTo = 'adamberube@me.com';
-
-        const result = await transport.sendMail({
-            from: fromAddress,
-            to: testTo,
-            subject: 'CHC Platform - SMTP Test',
-            text: 'If you receive this, SMTP is working correctly!',
-            html: '<h2>CHC SMTP Test</h2><p>If you receive this email, your SendGrid SMTP configuration is working correctly.</p>'
+        const nodemailer = require('nodemailer');
+        const transport = nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: parseInt(process.env.SMTP_PORT) || 587,
+            secure: parseInt(process.env.SMTP_PORT) === 465,
+            auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 10000
         });
 
-        res.json({
-            status: 'success',
-            message: `Test email sent to ${testTo}`,
-            messageId: result.messageId,
-            from: fromAddress,
-            smtpVerified: verifyResult
-        });
+        if (mode === 'verify') {
+            const ok = await transport.verify();
+            return res.json({ status: 'smtp_ok', verified: ok, env });
+        }
 
+        if (mode === 'send') {
+            const fromAddr = process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER;
+            const result = await transport.sendMail({
+                from: fromAddr,
+                to: 'adamberube@me.com',
+                subject: 'CHC Platform - SMTP Test ' + new Date().toISOString(),
+                text: 'SMTP is working!',
+                html: '<h2>CHC SMTP Test</h2><p>Email delivery is working.</p>'
+            });
+            return res.json({ status: 'sent', messageId: result.messageId, from: fromAddr, env });
+        }
+
+        res.json({ status: 'unknown_mode', mode });
     } catch (err) {
-        res.json({
-            status: 'send_failed',
-            error: err.message,
-            code: err.code || 'unknown'
-        });
+        res.json({ status: 'error', error: err.message, code: err.code, env });
     }
 });
 
