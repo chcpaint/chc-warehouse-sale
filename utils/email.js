@@ -41,7 +41,7 @@ async function sendOrderNotification(options) {
         return { sent: false, reason: 'not_configured' };
     }
 
-    const { to, order, companyName, contactName, contactEmail, contactPhone, location, notes } = options;
+    const { to, order, companyName, contactName, contactEmail, contactPhone, poNumber, location, notes } = options;
 
     if (!to) {
         console.warn('Email: No notification email configured for this company.');
@@ -69,6 +69,10 @@ async function sendOrderNotification(options) {
         </div>
         <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
             <h3 style="color: #374151; margin-top: 0;">Company: ${escHtml(companyName)}</h3>
+
+            ${poNumber ? `<div style="margin-bottom: 15px; padding: 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;">
+                <strong style="font-size: 16px; color: #1e40af;">PO #: ${escHtml(poNumber)}</strong>
+            </div>` : ''}
 
             <table style="width: 100%; margin-bottom: 15px;">
                 <tr><td style="padding: 4px 0; color: #6b7280;">Ordered by:</td><td style="padding: 4px 0;">${escHtml(contactName)}</td></tr>
@@ -104,7 +108,7 @@ async function sendOrderNotification(options) {
     </div>`;
 
     const textItems = (order.items || []).map(i => `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = $${Number(i.subtotal).toFixed(2)}`).join('\n');
-    const text = `New Order #${order.order_number || order.id}\nCompany: ${companyName}\nOrdered by: ${contactName} (${contactEmail})${location ? `\nLocation: ${location}` : ''}\n\nItems:\n${textItems}\n\nTotal: $${Number(order.total).toFixed(2)}${notes ? `\n\nNotes: ${notes}` : ''}`;
+    const text = `New Order #${order.order_number || order.id}\nCompany: ${companyName}${poNumber ? `\nPO #: ${poNumber}` : ''}\nOrdered by: ${contactName} (${contactEmail})${location ? `\nLocation: ${location}` : ''}\n\nItems:\n${textItems}\n\nTotal: $${Number(order.total).toFixed(2)}${notes ? `\n\nNotes: ${notes}` : ''}`;
 
     try {
         await sgMail.send({

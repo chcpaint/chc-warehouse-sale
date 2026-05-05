@@ -217,12 +217,16 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         const companyId = req.company.id;
         const {
             contact_name, contact_email, contact_phone,
-            location, items, notes
+            po_number, location, items, notes
         } = sanitizeObject(req.body);
 
         // Validate required fields
         if (!contact_name || !contact_email || !items || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ error: 'Contact name, email, and at least one item are required.' });
+        }
+
+        if (!po_number || !po_number.trim()) {
+            return res.status(400).json({ error: 'PO Number is required.' });
         }
 
         if (!isValidUUID(companyId)) {
@@ -307,6 +311,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 contact_email: stripHtml(contact_email),
                 contact_phone: stripHtml(contact_phone || ''),
                 company_name: req.company.name,
+                po_number: stripHtml(po_number),
                 location: stripHtml(location || ''),
                 items: verifiedItems,
                 subtotal,
@@ -342,6 +347,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                     contactName: stripHtml(contact_name),
                     contactEmail: stripHtml(contact_email),
                     contactPhone: stripHtml(contact_phone || ''),
+                    poNumber: stripHtml(po_number),
                     location: stripHtml(location || ''),
                     notes: stripHtml(notes || '')
                 }).catch(err => console.error('Order email failed (non-blocking):', err.message));
@@ -390,6 +396,33 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     } catch (err) {
         console.error('Orders error:', err);
         res.status(500).json({ error: 'Failed to load orders.' });
+    }
+});
+
+/**
+ * GET /api/store/add-po-column
+ * TEMPORARY - Add po_number column to orders table
+ */
+router.get('/add-po-column', async (req, res) => {
+    try {
+        const { error } = await supabaseAdmin.rpc('exec_sql', {
+            query: "ALTER TABLE orders ADD COLUMN IF NOT EXISTS po_number TEXT;"
+        });
+        // If rpc doesn't exist, try raw query via rest
+        if (error) {
+            // Try direct insert to see if column exists
+            const { error: testErr } = await supabaseAdmin
+                .from('orders')
+                .select('po_number')
+                .limit(1);
+            if (testErr && testErr.message.includes('po_number')) {
+                return res.json({ status: 'column_missing', note: 'Need to add po_number column manually in Supabase SQL editor', sql: 'ALTER TABLE orders ADD COLUMN IF NOT EXISTS po_number TEXT;' });
+            }
+            return res.json({ status: 'column_exists_or_check', testError: testErr?.message || 'none' });
+        }
+        res.json({ status: 'column_added' });
+    } catch (err) {
+        res.json({ status: 'error', error: err.message });
     }
 });
 
