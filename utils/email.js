@@ -110,7 +110,7 @@ async function sendOrderNotification(options) {
         await sgMail.send({
             to,
             from: fromAddress,
-            subject: `New Order #${order.order_number || order.id} from ${companyName}`,
+            subject: `${companyName} Ordering, ${order.order_number || order.id}${location ? ', ' + location : ''}`,
             text,
             html
         });
