@@ -393,30 +393,4 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     }
 });
 
-/**
- * GET /api/store/test-email
- * TEMPORARY - Test SendGrid Web API email delivery
- */
-router.get('/test-email', async (req, res) => {
-    try {
-        const { sendTestEmail } = require('../utils/email');
-        const apiKey = process.env.SENDGRID_API_KEY || process.env.SMTP_PASS;
-        const env = {
-            SENDGRID_API_KEY: process.env.SENDGRID_API_KEY ? `SET (${process.env.SENDGRID_API_KEY.substring(0, 8)}...)` : 'NOT SET',
-            SMTP_PASS_as_fallback: process.env.SMTP_PASS ? `SET (${process.env.SMTP_PASS.substring(0, 8)}...)` : 'NOT SET',
-            SMTP_FROM: process.env.SMTP_FROM || 'NOT SET',
-            resolved_key: apiKey ? 'YES' : 'NO'
-        };
-
-        if (req.query.mode === 'send') {
-            const result = await sendTestEmail('adamberube@me.com');
-            return res.json({ ...result, env });
-        }
-
-        res.json({ status: 'ok', method: 'SendGrid Web API', env });
-    } catch (err) {
-        res.json({ status: 'error', error: err.message });
-    }
-});
-
 module.exports = router;
