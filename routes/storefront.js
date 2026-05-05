@@ -7,40 +7,6 @@ const { sendOrderNotification } = require('../utils/email');
 const router = express.Router();
 
 /**
- * GET /api/store/check-email-config
- * TEMPORARY - verify email configuration
- * REMOVE AFTER USE
- */
-router.get('/check-email-config', async (req, res) => {
-    try {
-        // Check SMTP env vars (don't expose actual values)
-        const smtpStatus = {
-            SMTP_HOST: !!process.env.SMTP_HOST,
-            SMTP_PORT: process.env.SMTP_PORT || 'not set (defaults to 587)',
-            SMTP_USER: !!process.env.SMTP_USER,
-            SMTP_PASS: !!process.env.SMTP_PASS,
-            SMTP_FROM: process.env.SMTP_FROM || process.env.EMAIL_FROM || 'not set (will use SMTP_USER)',
-        };
-
-        // Check Assured's email config in the database
-        const { data: company } = await supabaseAdmin
-            .from('companies')
-            .select('id, name, slug, email_config, contact_email')
-            .eq('slug', 'assured')
-            .single();
-
-        res.json({
-            smtp_configured: smtpStatus,
-            assured_email_config: company?.email_config || null,
-            assured_contact_email: company?.contact_email || null,
-            notification_would_go_to: company?.email_config?.notification_email || company?.contact_email || 'NOWHERE - no email configured'
-        });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
  * GET /api/store/platform-logo
  * Public - get the CHC master logo URL from Supabase Storage
  */
