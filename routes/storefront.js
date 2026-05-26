@@ -56,38 +56,120 @@ router.get('/:slug/info', async (req, res) => {
 });
 
 /**
- * GET /api/store/:slug/debug-categories
- * TEMPORARY - check category data for a company
+ * POST /api/store/:slug/backfill-categories
+ * TEMPORARY - populate category column from known SKU mapping
  */
-router.get('/:slug/debug-categories', requireCompanyAuth, async (req, res) => {
+router.post('/:slug/backfill-categories', requireCompanyAuth, async (req, res) => {
     try {
         const companyId = req.company.id;
-        const { data: sample } = await supabaseAdmin
-            .from('products')
-            .select('id, brand, category, name')
-            .eq('company_id', companyId)
-            .eq('is_active', true)
-            .limit(20);
 
-        const { data: allCats } = await supabaseAdmin
-            .from('products')
-            .select('category')
-            .eq('company_id', companyId)
-            .eq('is_active', true);
+        // SKU → category mapping from the original product data
+        const skuCategoryMap = {
+            // 3M - Abrasives & Sanding
+            "MMM02021": "Abrasives & Sanding", "MMM02022": "Abrasives & Sanding", "MMM02023": "Abrasives & Sanding",
+            "MMM02035": "Abrasives & Sanding", "MMM02036": "Abrasives & Sanding", "MMM02038": "Abrasives & Sanding",
+            "MMM02044": "Abrasives & Sanding", "MMM02045": "Abrasives & Sanding", "MMM02085": "Abrasives & Sanding",
+            "MMM02087": "Abrasives & Sanding", "MMM30662": "Abrasives & Sanding", "MMM30666": "Abrasives & Sanding",
+            "MMM31370": "Abrasives & Sanding", "MMM31371": "Abrasives & Sanding", "MMM31372": "Abrasives & Sanding",
+            "MMM31373": "Abrasives & Sanding", "MMM33538": "Abrasives & Sanding", "MMM33539": "Abrasives & Sanding",
+            "MMM36170": "Abrasives & Sanding", "MMM36172": "Abrasives & Sanding", "MMM36174": "Abrasives & Sanding",
+            "MMM36176": "Abrasives & Sanding", "MMM36180": "Abrasives & Sanding",
+            // 3M - Polishing & Compounding
+            "MMM05706": "Polishing & Compounding", "MMM05707": "Polishing & Compounding", "MMM05708": "Polishing & Compounding",
+            "MMM06068": "Polishing & Compounding", "MMM06094": "Polishing & Compounding", "MMM33279": "Polishing & Compounding",
+            "MMM36060": "Polishing & Compounding",
+            // 3M - Body Fillers & Repair
+            "MMM01131": "Body Fillers & Repair", "MMM04240": "Body Fillers & Repair", "MMM04247": "Body Fillers & Repair",
+            "MMM04248": "Body Fillers & Repair", "MMM05887": "Body Fillers & Repair", "MMM05860": "Body Fillers & Repair",
+            "MMM05861": "Body Fillers & Repair", "MMM20382": "Body Fillers & Repair",
+            // 3M - Adhesives & Seam Sealers
+            "MMM07333": "Adhesives & Seam Sealers", "MMM08115": "Adhesives & Seam Sealers", "MMM08194": "Adhesives & Seam Sealers",
+            "MMM08308": "Adhesives & Seam Sealers", "MMM08323": "Adhesives & Seam Sealers", "MMM08522": "Adhesives & Seam Sealers",
+            "MMM08524": "Adhesives & Seam Sealers", "MMM08526": "Adhesives & Seam Sealers", "MMM08528": "Adhesives & Seam Sealers",
+            "MMM08852": "Adhesives & Seam Sealers", "MMM06382": "Adhesives & Seam Sealers", "MMM06383": "Adhesives & Seam Sealers",
+            "MMM06386": "Adhesives & Seam Sealers",
+            // 3M - Masking & Surface Protection
+            "MMM06349": "Masking & Surface Protection", "MMM06652": "Masking & Surface Protection", "MMM06654": "Masking & Surface Protection",
+            "MMM06656": "Masking & Surface Protection", "MMM06718": "Masking & Surface Protection", "MMM06724": "Masking & Surface Protection",
+            "MMM26334": "Masking & Surface Protection", "MMM26338": "Masking & Surface Protection", "MMM36852": "Masking & Surface Protection",
+            "MMM05916": "Masking & Surface Protection", "MMM05917": "Masking & Surface Protection", "MMM07847": "Masking & Surface Protection",
+            "MMM07848": "Masking & Surface Protection",
+            // 3M - Spray Guns & PPS Systems
+            "MMM26000": "Spray Guns & PPS Systems", "MMM26024": "Spray Guns & PPS Systems", "MMM26112": "Spray Guns & PPS Systems",
+            "MMM26114": "Spray Guns & PPS Systems", "MMM26163": "Spray Guns & PPS Systems", "MMM26164": "Spray Guns & PPS Systems",
+            "MMM26301": "Spray Guns & PPS Systems", "MMM26689": "Spray Guns & PPS Systems", "MMM26832": "Spray Guns & PPS Systems",
+            "MMM26712": "Spray Guns & PPS Systems", "MMM26713": "Spray Guns & PPS Systems", "MMM26714": "Spray Guns & PPS Systems",
+            // SEM - Seam Sealers
+            "SEM29362": "Seam Sealers", "SEM29372": "Seam Sealers", "SEM29382": "Seam Sealers", "SEM29392": "Seam Sealers",
+            "SEM29462": "Seam Sealers", "SEM29472": "Seam Sealers", "SEM29482": "Seam Sealers", "SEM29492": "Seam Sealers",
+            // SEM - Primers & Coatings
+            "SEM39143": "Primers & Coatings", "SEM39144-LV": "Primers & Coatings", "SEM39673": "Primers & Coatings",
+            "SEM39683": "Primers & Coatings", "SEM39863": "Primers & Coatings", "SEM40773": "Primers & Coatings",
+            "SEM62213": "Primers & Coatings", "SEM62243": "Primers & Coatings",
+            // SEM - Body Fillers & Glazes
+            "SEM40561": "Body Fillers & Glazes", "SEM39592": "Body Fillers & Glazes", "SEM40482": "Body Fillers & Glazes",
+            // SEM - Bed Liners & Protective Coatings
+            "SEM56650": "Bed Liners & Protective Coatings", "SEM56670": "Bed Liners & Protective Coatings",
+            // SEM - Abrasives
+            "SA6080": "Abrasives", "SA6120": "Abrasives", "SA6180": "Abrasives",
+            "SA6240": "Abrasives", "SA6320": "Abrasives", "SA6400": "Abrasives",
+            // SEM - Aerosols & Specialty
+            "SEM61993": "Aerosols & Specialty",
+            // PPG - Clearcoats
+            "EC520": "Clearcoats", "EC530": "Clearcoats", "EC550": "Clearcoats",
+            "UT500": "Clearcoats", "UT501": "Clearcoats", "UT502": "Clearcoats",
+            // PPG - Base Coats
+            "BC600": "Base Coats", "BC700": "Base Coats", "BT100": "Base Coats", "BT200": "Base Coats",
+            // PPG - Primers & Surfacers
+            "AP200": "Primers & Surfacers", "AP300": "Primers & Surfacers", "EP400": "Primers & Surfacers", "EP500": "Primers & Surfacers",
+            // Tamco - Clearcoats
+            "TAM900": "Clearcoats", "TAM950": "Clearcoats",
+            // Tamco - Base Coats
+            "TAM100": "Base Coats", "TAM200": "Base Coats",
+            // Tamco - Primers
+            "TAM500": "Primers", "TAM600": "Primers",
+            // Henkel - Adhesives & Sealants
+            "HEN2568787": "Adhesives & Sealants", "HEN2568797": "Adhesives & Sealants", "HEN2568817": "Adhesives & Sealants",
+            "HEN2568818": "Adhesives & Sealants", "HEN2816502": "Adhesives & Sealants", "HEN2820041": "Adhesives & Sealants",
+            "HEN1434516": "Adhesives & Sealants", "HEN1585815": "Adhesives & Sealants",
+        };
 
-        const catValues = (allCats || []).map(c => c.category);
-        const unique = [...new Set(catValues)];
-        const nullCount = catValues.filter(c => c === null).length;
-        const emptyCount = catValues.filter(c => c === '').length;
-        const realCount = catValues.filter(c => c && c.trim()).length;
+        // Fetch all products for this company
+        const { data: products } = await supabaseAdmin
+            .from('products')
+            .select('id, sku, category')
+            .eq('company_id', companyId);
+
+        let updated = 0;
+        let skipped = 0;
+        let notFound = 0;
+        const errors = [];
+
+        for (const product of (products || [])) {
+            const category = skuCategoryMap[product.sku];
+            if (category && product.category !== category) {
+                const { error } = await supabaseAdmin
+                    .from('products')
+                    .update({ category })
+                    .eq('id', product.id);
+                if (error) {
+                    errors.push({ sku: product.sku, error: error.message });
+                } else {
+                    updated++;
+                }
+            } else if (category) {
+                skipped++;
+            } else {
+                notFound++;
+            }
+        }
 
         res.json({
-            total_products: catValues.length,
-            null_categories: nullCount,
-            empty_string_categories: emptyCount,
-            real_categories: realCount,
-            unique_values: unique,
-            sample_products: sample
+            total_products: (products || []).length,
+            updated,
+            skipped_already_correct: skipped,
+            no_category_mapping: notFound,
+            errors
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
