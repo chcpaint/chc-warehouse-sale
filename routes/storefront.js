@@ -96,7 +96,7 @@ router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
             .eq('is_active', true)
             .order('brand');
 
-        const uniqueBrands = [...new Set(brands?.map(b => b.brand) || [])];
+        const uniqueBrands = [...new Set((brands?.map(b => b.brand) || []).filter(Boolean))];
 
         const { data: categories } = await supabaseAdmin
             .from('products')
@@ -104,9 +104,10 @@ router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
             .eq('company_id', companyId)
             .eq('is_active', true)
             .not('category', 'is', null)
+            .neq('category', '')
             .order('category');
 
-        const uniqueCategories = [...new Set(categories?.map(c => c.category) || [])];
+        const uniqueCategories = [...new Set((categories?.map(c => c.category) || []).filter(Boolean))];
 
         res.json({
             products,
