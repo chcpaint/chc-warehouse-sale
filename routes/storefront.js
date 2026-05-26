@@ -56,6 +56,45 @@ router.get('/:slug/info', async (req, res) => {
 });
 
 /**
+ * GET /api/store/:slug/debug-categories
+ * TEMPORARY - check category data for a company
+ */
+router.get('/:slug/debug-categories', requireCompanyAuth, async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const { data: sample } = await supabaseAdmin
+            .from('products')
+            .select('id, brand, category, name')
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .limit(20);
+
+        const { data: allCats } = await supabaseAdmin
+            .from('products')
+            .select('category')
+            .eq('company_id', companyId)
+            .eq('is_active', true);
+
+        const catValues = (allCats || []).map(c => c.category);
+        const unique = [...new Set(catValues)];
+        const nullCount = catValues.filter(c => c === null).length;
+        const emptyCount = catValues.filter(c => c === '').length;
+        const realCount = catValues.filter(c => c && c.trim()).length;
+
+        res.json({
+            total_products: catValues.length,
+            null_categories: nullCount,
+            empty_string_categories: emptyCount,
+            real_categories: realCount,
+            unique_values: unique,
+            sample_products: sample
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
  * GET /api/store/:slug/products
  * Get product catalog for authenticated company
  */
