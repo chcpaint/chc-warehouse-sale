@@ -301,10 +301,13 @@
 
                 <!-- Orders Management -->
                 <section id="section-orders" class="hidden fade-in">
-                    <div class="flex justify-between items-center mb-4">
-                        <div class="flex gap-3 items-center">
-                            <select id="admin-order-company" onchange="loadAdminOrders()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                    <div class="flex justify-between items-center mb-4 flex-wrap gap-3">
+                        <div class="flex gap-3 items-center flex-wrap">
+                            <select id="admin-order-company" onchange="onOrderCompanyChange()" class="px-3 py-1 border rounded-lg text-sm bg-white">
                                 <option value="">All Companies</option>
+                            </select>
+                            <select id="admin-order-location" onchange="loadAdminOrders()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">All Locations</option>
                             </select>
                             <select id="admin-order-status" onchange="loadAdminOrders()" class="px-3 py-1 border rounded-lg text-sm bg-white">
                                 <option value="">All Statuses</option>
@@ -316,6 +319,32 @@
                                 <option value="cancelled">Cancelled</option>
                             </select>
                         </div>
+                        <div class="flex gap-2 items-center">
+                            <button onclick="toggleLocationSummary()" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
+                                <i class="fas fa-chart-bar mr-1"></i> By Location
+                            </button>
+                            <button onclick="exportOrders()" class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm">
+                                <i class="fas fa-file-csv mr-1"></i> Export CSV
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Per-location summary -->
+                    <div id="location-summary-panel" class="hidden bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                        <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
+                            <span class="text-sm font-semibold text-gray-700">Orders &amp; Revenue by Location</span>
+                            <span id="location-summary-meta" class="text-xs text-gray-400"></span>
+                        </div>
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Location</th>
+                                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Orders</th>
+                                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody id="location-summary-tbody"></tbody>
+                        </table>
                     </div>
                     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
                         <table class="w-full">
@@ -1400,12 +1429,16 @@
     // ============================================================
     // ORDERS
     // ============================================================
+    let orderLocationFilterLoaded = false;
     async function loadAdminOrders() {
+        if (!orderLocationFilterLoaded) await refreshOrderLocationFilter();
         const companyId = document.getElementById('admin-order-company').value;
         const status = document.getElementById('admin-order-status').value;
+        const locationId = document.getElementById('admin-order-location')?.value || '';
         const params = new URLSearchParams();
         if (companyId) params.set('company_id', companyId);
         if (status) params.set('status', status);
+        if (locationId) params.set('location_id', locationId);
 
         try {
             const resp = await adminFetch(`/orders?${params}`);
@@ -1436,6 +1469,87 @@
         try {
             await adminFetch(`/orders/${orderId}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
         } catch (err) { alert('Failed to update status.'); loadAdminOrders(); }
+    }
+
+    async function onOrderCompanyChange() {
+        const sel = document.getElementById('admin-order-location');
+        if (sel) sel.value = '';
+        await refreshOrderLocationFilter();
+        loadAdminOrders();
+        const panel = document.getElementById('location-summary-panel');
+        if (panel && !panel.classList.contains('hidden')) loadLocationSummary();
+    }
+
+    async function refreshOrderLocationFilter() {
+        const companyId = document.getElementById('admin-order-company').value;
+        const sel = document.getElementById('admin-order-location');
+        if (!sel) return;
+        try {
+            let locations = [];
+            if (companyId) {
+                const resp = await adminFetch(`/companies/${companyId}/locations`);
+                const data = await resp.json();
+                locations = (data.locations || []).map(l => ({ id: l.id, name: l.name }));
+            } else {
+                const resp = await adminFetch('/reports/by-location');
+                const data = await resp.json();
+                locations = (data.report || []).filter(r => r.location_id).map(r => ({ id: r.location_id, name: r.location }));
+            }
+            locations.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+            sel.innerHTML = '<option value="">All Locations</option>' +
+                locations.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('');
+            orderLocationFilterLoaded = true;
+        } catch (err) { console.error('Location filter load failed:', err); }
+    }
+
+    function toggleLocationSummary() {
+        const panel = document.getElementById('location-summary-panel');
+        panel.classList.toggle('hidden');
+        if (!panel.classList.contains('hidden')) loadLocationSummary();
+    }
+
+    async function loadLocationSummary() {
+        const companyId = document.getElementById('admin-order-company').value;
+        const status = document.getElementById('admin-order-status').value;
+        const params = new URLSearchParams();
+        if (companyId) params.set('company_id', companyId);
+        if (status) params.set('status', status);
+        try {
+            const resp = await adminFetch(`/reports/by-location?${params}`);
+            const data = await resp.json();
+            const rows = (data.report || []);
+            const tbody = document.getElementById('location-summary-tbody');
+            tbody.innerHTML = rows.map(r => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-2 text-sm">${esc(r.location)}</td>
+                    <td class="px-4 py-2 text-right text-sm">${r.order_count}</td>
+                    <td class="px-4 py-2 text-right text-sm font-semibold">$${parseFloat(r.revenue).toFixed(2)}</td>
+                </tr>
+            `).join('') || '<tr><td colspan="3" class="px-4 py-6 text-center text-gray-400">No orders found.</td></tr>';
+            const meta = document.getElementById('location-summary-meta');
+            if (meta) meta.textContent = `${data.total_locations || rows.length} location(s)`;
+        } catch (err) { console.error('Location summary failed:', err); }
+    }
+
+    async function exportOrders() {
+        const companyId = document.getElementById('admin-order-company').value;
+        const status = document.getElementById('admin-order-status').value;
+        const locationId = document.getElementById('admin-order-location')?.value || '';
+        const params = new URLSearchParams();
+        if (companyId) params.set('company_id', companyId);
+        if (status) params.set('status', status);
+        if (locationId) params.set('location_id', locationId);
+        try {
+            const resp = await adminFetchRaw(`/orders/export?${params}`);
+            if (!resp.ok) { alert('Export failed.'); return; }
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `orders-export-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) { alert('Export failed.'); }
     }
 
     // ============================================================
