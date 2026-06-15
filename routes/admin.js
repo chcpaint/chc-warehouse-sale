@@ -696,19 +696,8 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
 
         const { companyId } = req.params;
         const ext = req.file.originalname.split('.').pop().toLowerCase();
-
-        // Log the upload
-        const { data: upload } = await supabaseAdmin
-            .from('catalog_uploads')
-            .insert({
-                company_id: companyId,
-                admin_id: req.admin.id,
-                filename: req.file.originalname,
-                file_type: ext,
-                status: 'processing'
-            })
-            .select()
-            .single();
+        // Preview mode (dry run): analyze and report, write nothing.
+        const dryRun = ['1', 'true', 'yes'].includes(String(req.body.dry_run || req.query.preview || '').toLowerCase());
 
         let rows = [];
         const errors = [];
@@ -725,7 +714,6 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         if (rows.length === 0) {
             return res.status(400).json({ error: 'No data rows found in the file.' });
         }
-
         if (rows.length > 10000) {
             return res.status(400).json({ error: 'Maximum 10,000 rows per upload.' });
         }
@@ -741,53 +729,73 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         }).filter(Boolean);
 
         // Upsert products (by SKU if available, otherwise insert new)
-        let inserted = 0, updated = 0;
+        let inserted = 0, updated = 0, priceChanges = 0, skipped = 0;
+        const sampleChanges = [];
 
         for (const row of normalizedRows) {
             row.company_id = companyId;
 
+            // Skip rows with no positive price (e.g. blank/0 in source) — keep existing price untouched
+            if (!(Number(row.price) > 0)) { skipped++; continue; }
+
+            let existing = null;
             if (row.sku) {
-                // Try to find existing product by SKU
-                const { data: existing } = await supabaseAdmin
+                const { data } = await supabaseAdmin
                     .from('products')
-                    .select('id')
+                    .select('id, price')
                     .eq('company_id', companyId)
                     .eq('sku', row.sku)
-                    .single();
+                    .maybeSingle();
+                existing = data || null;
+            }
 
-                if (existing) {
-                    await supabaseAdmin.from('products').update(row).eq('id', existing.id);
-                    updated++;
-                } else {
-                    await supabaseAdmin.from('products').insert(row);
-                    inserted++;
+            if (existing) {
+                const changed = Math.round(Number(existing.price) * 100) !== Math.round(Number(row.price) * 100);
+                if (changed) {
+                    priceChanges++;
+                    if (sampleChanges.length < 15) {
+                        sampleChanges.push({ sku: row.sku, name: row.name, old_price: Number(existing.price), new_price: Number(row.price) });
+                    }
                 }
+                updated++;
+                if (!dryRun) await supabaseAdmin.from('products').update(row).eq('id', existing.id);
             } else {
-                await supabaseAdmin.from('products').insert(row);
                 inserted++;
+                if (!dryRun) await supabaseAdmin.from('products').insert(row);
             }
         }
 
-        // Update upload record
-        await supabaseAdmin
-            .from('catalog_uploads')
-            .update({
-                row_count: normalizedRows.length,
-                status: errors.length > 0 ? 'completed_with_errors' : 'completed',
-                error_details: errors
-            })
-            .eq('id', upload.id);
+        // Only record the upload + audit entry when actually importing
+        if (!dryRun) {
+            const { data: upload } = await supabaseAdmin
+                .from('catalog_uploads')
+                .insert({
+                    company_id: companyId,
+                    admin_id: req.admin.id,
+                    filename: req.file.originalname,
+                    file_type: ext,
+                    row_count: normalizedRows.length,
+                    status: errors.length > 0 ? 'completed_with_errors' : 'completed',
+                    error_details: errors
+                })
+                .select()
+                .single();
 
-        await logAction(req.admin.id, 'catalog_uploaded', 'company', companyId, {
-            filename: req.file.originalname, inserted, updated, errors: errors.length
-        }, req.ip);
+            await logAction(req.admin.id, 'catalog_uploaded', 'company', companyId, {
+                filename: req.file.originalname, inserted, updated, price_changes: priceChanges, skipped, errors: errors.length
+            }, req.ip);
+        }
 
         res.json({
-            message: 'Catalog upload processed.',
+            preview: dryRun,
+            message: dryRun ? 'Preview only — no changes were written.' : 'Catalog upload processed.',
             inserted,
             updated,
+            price_changes: priceChanges,
+            skipped,
             errors: errors.length,
-            error_details: errors.slice(0, 20) // Show first 20 errors
+            error_details: errors.slice(0, 20),
+            sample_changes: sampleChanges
         });
 
     } catch (err) {
@@ -1292,8 +1300,8 @@ function normalizeProductRow(row) {
         sku: ['sku', 'item_#', 'item_number', 'itemnumber', 'item_no', 'part_number', 'partnumber', 'part_no', 'upc'],
         description: ['description', 'desc', 'details', 'product_description'],
         category: ['category', 'cat', 'type', 'product_type', 'group', 'custom_list_#1'],
-        price: ['warehouse_sale_price', 'price', 'sale_price', 'saleprice', 'unit_price', 'selling_price'],
-        previous_price: ['ae_selling_price', 'previous_price', 'previousprice', 'regular_price', 'regularprice', 'msrp', 'list_price', 'listprice', 'was_price', 'current_price'],
+        price: ['warehouse_sale_price', 'price', 'sale_price', 'saleprice', 'unit_price', 'selling_price', 'ae_selling_price', 'current_price'],
+        previous_price: ['previous_price', 'previousprice', 'regular_price', 'regularprice', 'msrp', 'list_price', 'listprice', 'was_price'],
         case_qty: ['case_quantity', 'case_qty', 'caseqty', 'casequantity', 'qty_per_case', 'pack_size', 'packsize'],
         unit: ['unit', 'uom', 'unit_of_measure'],
         image_url: ['image_url', 'imageurl', 'image', 'photo', 'picture']
@@ -1319,9 +1327,8 @@ function normalizeProductRow(row) {
     if (!normalized.name) throw new Error('Missing product name');
     if (!normalized.brand) normalized.brand = 'Uncategorized';
 
-    // Price: try warehouse sale price first, then fall back to AE selling / regular price
-    if (!normalized.price || isNaN(parseFloat(normalized.price))) {
-        // Try previous_price as fallback (AE Selling Price)
+    // Price required; allow 0 through (the import step skips non-positive prices).
+    if (normalized.price === undefined || normalized.price === null || String(normalized.price).trim() === '' || isNaN(parseFloat(normalized.price))) {
         if (normalized.previous_price && !isNaN(parseFloat(normalized.previous_price))) {
             normalized.price = normalized.previous_price;
         } else {
