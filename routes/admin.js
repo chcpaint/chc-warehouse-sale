@@ -958,11 +958,11 @@ router.delete('/promotions/:promotionId', async (req, res) => {
  */
 router.get('/orders', async (req, res) => {
     try {
-        const { company_id, status, from_date, to_date, page = 1, limit = 50 } = req.query;
+        const { company_id, status, from_date, to_date, location_id, page = 1, limit = 50 } = req.query;
 
         let query = supabaseAdmin
             .from('orders')
-            .select(`*, companies (id, name)`, { count: 'exact' })
+            .select(`*, companies (id, name), company_locations (id, name)`, { count: 'exact' })
             .order('created_at', { ascending: false });
 
         if (req.admin.role !== 'super_admin') {
@@ -972,6 +972,7 @@ router.get('/orders', async (req, res) => {
         }
 
         if (status) query = query.eq('status', status);
+        if (location_id) query = query.eq('location_id', location_id);
         if (from_date) query = query.gte('created_at', from_date);
         if (to_date) query = query.lte('created_at', to_date);
 
@@ -986,6 +987,91 @@ router.get('/orders', async (req, res) => {
     } catch (err) {
         console.error('Admin orders error:', err);
         res.status(500).json({ error: 'Failed to load orders.' });
+    }
+});
+
+/**
+ * GET /api/admin/orders/export
+ * CSV export of orders. Respects role scoping and the same filters as GET /orders.
+ */
+router.get('/orders/export', async (req, res) => {
+    try {
+        const { company_id, status, from_date, to_date, location_id } = req.query;
+        let query = supabaseAdmin
+            .from('orders')
+            .select('order_number, created_at, company_name, location, po_number, contact_name, contact_email, contact_phone, status, subtotal, total, items, companies(name), company_locations(name)')
+            .order('created_at', { ascending: false });
+
+        if (req.admin.role !== 'super_admin') query = query.eq('company_id', req.admin.company_id);
+        else if (company_id) query = query.eq('company_id', company_id);
+        if (status) query = query.eq('status', status);
+        if (location_id) query = query.eq('location_id', location_id);
+        if (from_date) query = query.gte('created_at', from_date);
+        if (to_date) query = query.lte('created_at', to_date);
+
+        const { data, error } = await query.limit(10000);
+        if (error) throw error;
+
+        const esc = (v) => {
+            if (v === null || v === undefined) v = '';
+            v = String(v);
+            return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+        };
+        const headers = ['Order #', 'Date', 'Company', 'Location', 'PO Number', 'Contact', 'Email', 'Phone', 'Status', 'Item Count', 'Subtotal', 'Total'];
+        const rows = (data || []).map(o => {
+            const itemCount = Array.isArray(o.items) ? o.items.reduce((n, i) => n + (parseInt(i.quantity) || 0), 0) : '';
+            const locName = (o.company_locations && o.company_locations.name) || o.location || '';
+            const compName = (o.companies && o.companies.name) || o.company_name || '';
+            return [o.order_number, o.created_at, compName, locName, o.po_number, o.contact_name, o.contact_email, o.contact_phone, o.status, itemCount, o.subtotal, o.total].map(esc).join(',');
+        });
+        const csvText = [headers.map(esc).join(','), ...rows].join('\n');
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="orders-export-${new Date().toISOString().slice(0, 10)}.csv"`);
+        res.send(csvText);
+    } catch (err) {
+        console.error('Orders export error:', err);
+        res.status(500).json({ error: 'Failed to export orders.' });
+    }
+});
+
+/**
+ * GET /api/admin/reports/by-location
+ * Per-location order count + revenue. Respects role scoping and date/company/status filters.
+ */
+router.get('/reports/by-location', async (req, res) => {
+    try {
+        const { company_id, from_date, to_date, status } = req.query;
+        let query = supabaseAdmin
+            .from('orders')
+            .select('total, location, location_id, company_locations(name)');
+
+        if (req.admin.role !== 'super_admin') query = query.eq('company_id', req.admin.company_id);
+        else if (company_id) query = query.eq('company_id', company_id);
+        if (status) query = query.eq('status', status);
+        if (from_date) query = query.gte('created_at', from_date);
+        if (to_date) query = query.lte('created_at', to_date);
+
+        const { data, error } = await query.limit(10000);
+        if (error) throw error;
+
+        const map = new Map();
+        for (const o of (data || [])) {
+            const key = o.location_id || 'unassigned';
+            const name = (o.company_locations && o.company_locations.name) || o.location || 'Unassigned';
+            const cur = map.get(key) || { location_id: o.location_id || null, location: name, order_count: 0, revenue: 0 };
+            cur.order_count += 1;
+            cur.revenue += parseFloat(o.total || 0);
+            map.set(key, cur);
+        }
+        const report = Array.from(map.values())
+            .map(r => ({ ...r, revenue: Math.round(r.revenue * 100) / 100 }))
+            .sort((a, b) => b.revenue - a.revenue);
+
+        res.json({ report, total_locations: report.length });
+    } catch (err) {
+        console.error('By-location report error:', err);
+        res.status(500).json({ error: 'Failed to build location report.' });
     }
 });
 

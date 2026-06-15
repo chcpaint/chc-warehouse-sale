@@ -219,7 +219,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         const companyId = req.company.id;
         const {
             contact_name, contact_email, contact_phone,
-            po_number, location, items, notes
+            po_number, location, location_id, items, notes
         } = sanitizeObject(req.body);
 
         // Validate required fields
@@ -234,6 +234,23 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         if (!isValidUUID(companyId)) {
             return res.status(400).json({ error: 'Invalid company identifier.' });
         }
+
+        // Location is required and must be a real, active location belonging to this company.
+        // We resolve the authoritative name from the DB and never trust client-supplied text.
+        if (!location_id || !isValidUUID(location_id)) {
+            return res.status(400).json({ error: 'Please select your location before submitting your order.' });
+        }
+        const { data: locationRow, error: locationLookupError } = await supabaseAdmin
+            .from('company_locations')
+            .select('id, name')
+            .eq('id', location_id)
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .single();
+        if (locationLookupError || !locationRow) {
+            return res.status(400).json({ error: 'Selected location is not valid for this account.' });
+        }
+        const resolvedLocationName = locationRow.name;
 
         // Validate item quantities
         for (const item of items) {
@@ -314,7 +331,8 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 contact_phone: stripHtml(contact_phone || ''),
                 company_name: req.company.name,
                 po_number: stripHtml(po_number),
-                location: stripHtml(location || ''),
+                location: resolvedLocationName,
+                location_id: locationRow.id,
                 items: verifiedItems,
                 subtotal,
                 total,
@@ -350,7 +368,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                     contactEmail: stripHtml(contact_email),
                     contactPhone: stripHtml(contact_phone || ''),
                     poNumber: stripHtml(po_number),
-                    location: stripHtml(location || ''),
+                    location: resolvedLocationName,
                     notes: stripHtml(notes || '')
                 }).catch(err => console.error('Order email failed (non-blocking):', err.message));
             }
@@ -383,7 +401,7 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const { data: orders, error } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, contact_email, total, status, location, created_at, items')
+            .select('id, order_number, contact_name, contact_email, total, status, location, location_id, created_at, items')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(50);
