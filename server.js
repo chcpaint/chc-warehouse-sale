@@ -44,6 +44,45 @@ app.use(cors({
     credentials: true
 }));
 
+// ============================================================
+// STRIPE WEBHOOK (raw body required for signature verification)
+// Registered BEFORE express.json so the raw payload is intact.
+// Inert until STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are configured.
+// ============================================================
+const { getStripe: _getStripe } = require('./utils/payments');
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+    const stripe = _getStripe();
+    const secret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!stripe || !secret) {
+        return res.status(503).json({ error: 'Payments webhook not configured.' });
+    }
+    let event;
+    try {
+        event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], secret);
+    } catch (err) {
+        console.error('Stripe webhook signature verification failed:', err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+    try {
+        const { supabaseAdmin } = require('./utils/supabase');
+        if (event.type === 'payment_intent.succeeded') {
+            const pi = event.data.object;
+            await supabaseAdmin.from('orders').update({
+                payment_status: 'paid',
+                amount_paid: (pi.amount_received || pi.amount || 0) / 100,
+                paid_at: new Date().toISOString()
+            }).eq('payment_intent_id', pi.id);
+        } else if (event.type === 'payment_intent.payment_failed') {
+            await supabaseAdmin.from('orders').update({ payment_status: 'failed' })
+                .eq('payment_intent_id', event.data.object.id);
+        }
+        res.json({ received: true });
+    } catch (err) {
+        console.error('Stripe webhook handler error:', err);
+        res.status(500).json({ error: 'Webhook handling failed.' });
+    }
+});
+
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));

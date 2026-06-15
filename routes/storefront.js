@@ -3,6 +3,7 @@ const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
 const { sendOrderNotification } = require('../utils/email');
+const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 
 const router = express.Router();
 
@@ -416,6 +417,85 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     } catch (err) {
         console.error('Orders error:', err);
         res.status(500).json({ error: 'Failed to load orders.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/payments/config
+ * Tells the storefront whether online card payment is available for this tenant.
+ * Returns { enabled:false } unless Stripe keys are configured AND the company opted in.
+ */
+router.get('/:slug/payments/config', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: company } = await supabaseAdmin
+            .from('companies')
+            .select('settings')
+            .eq('id', req.company.id)
+            .single();
+        res.json(publicPaymentConfig(company));
+    } catch (err) {
+        console.error('Payment config error:', err);
+        res.json({ enabled: false, provider: 'stripe', publishable_key: null });
+    }
+});
+
+/**
+ * POST /api/store/:slug/payments/create-intent
+ * Pre-wired Stripe PaymentIntent creation for an existing order.
+ * INERT until Stripe keys + the company payments flag are enabled — returns 503 otherwise.
+ * Body: { order_id }
+ */
+router.post('/:slug/payments/create-intent', requireCompanyAuth, async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const { order_id } = req.body || {};
+
+        const { data: company } = await supabaseAdmin
+            .from('companies')
+            .select('settings')
+            .eq('id', companyId)
+            .single();
+
+        if (!paymentsEnabled(company)) {
+            return res.status(503).json({ error: 'Online payments are not enabled for this account.' });
+        }
+        if (!order_id || !isValidUUID(order_id)) {
+            return res.status(400).json({ error: 'A valid order_id is required.' });
+        }
+
+        // Always price from the server-side order, never the client.
+        const { data: order, error: orderErr } = await supabaseAdmin
+            .from('orders')
+            .select('id, total, order_number, payment_status')
+            .eq('id', order_id)
+            .eq('company_id', companyId)
+            .single();
+        if (orderErr || !order) {
+            return res.status(404).json({ error: 'Order not found.' });
+        }
+        if (order.payment_status === 'paid') {
+            return res.status(409).json({ error: 'This order has already been paid.' });
+        }
+
+        const stripe = getStripe();
+        const intent = await stripe.paymentIntents.create({
+            amount: Math.round(parseFloat(order.total) * 100), // cents
+            currency: 'cad',
+            metadata: { order_id: order.id, order_number: order.order_number, company_id: companyId },
+            automatic_payment_methods: { enabled: true }
+        });
+
+        await supabaseAdmin
+            .from('orders')
+            .update({ payment_provider: 'stripe', payment_intent_id: intent.id, payment_status: 'pending' })
+            .eq('id', order.id);
+
+        // TODO (activation): confirm payment client-side with Stripe.js using this client_secret,
+        // then rely on the /api/webhooks/stripe handler to mark the order 'paid'.
+        res.json({ client_secret: intent.client_secret });
+    } catch (err) {
+        console.error('Create payment intent error:', err);
+        res.status(500).json({ error: 'Failed to start payment.' });
     }
 });
 
