@@ -24,7 +24,6 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "nodemailer": "^6.9.8",
-    "stripe": "^17.7.0",
     "xlsx": "^0.18.5"
   }
 }
