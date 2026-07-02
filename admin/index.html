@@ -548,6 +548,11 @@
                     <p class="text-xs text-gray-400 mt-1">Leave blank to use the contact email above</p>
                 </div>
                 <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Manager Notification Emails</label>
+                    <textarea id="new-company-manager-emails" rows="2" class="w-full px-3 py-2 border rounded-lg" placeholder="manager1@company.com, manager2@company.com"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">Comma or line separated. Each manager is emailed on every order (with full order details &amp; PO).</p>
+                </div>
+                <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Company Logo</label>
                     <input type="file" id="new-company-logo" accept="image/png,image/jpeg,image/gif,image/webp" class="w-full px-3 py-2 border rounded-lg">
                 </div>
@@ -885,6 +890,7 @@
                 <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${c.is_active ? 'Active' : 'Inactive'}</span></td>
                 <td class="px-4 py-3 text-right">
                     <button onclick="editNotificationEmail('${c.id}', '${esc(c.email_config?.notification_email || c.contact_email || '').replace(/'/g, "\\'")}')" class="text-orange-500 hover:text-orange-700 text-sm mr-3" title="Change order notification email"><i class="fas fa-envelope"></i></button>
+                    <button onclick="manageManagerEmails('${c.id}', '${esc((c.email_config?.manager_emails || []).join(', ')).replace(/'/g, "\\'")}')" class="text-purple-500 hover:text-purple-700 text-sm mr-3" title="Manager notification emails (${(c.email_config?.manager_emails || []).length})"><i class="fas fa-users"></i></button>
                     <button onclick="openLocationsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-blue-500 hover:text-blue-700 text-sm mr-3" title="Manage locations"><i class="fas fa-map-marker-alt"></i></button>
                     <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
@@ -910,6 +916,10 @@
         e.preventDefault();
         try {
             const notificationEmail = document.getElementById('new-company-notification-email').value.trim();
+            const managerEmails = parseEmailList(document.getElementById('new-company-manager-emails').value);
+            const emailConfig = {};
+            if (notificationEmail) emailConfig.notification_email = notificationEmail;
+            if (managerEmails.length) emailConfig.manager_emails = managerEmails;
             const resp = await adminFetch('/companies', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -918,7 +928,7 @@
                     contact_email: document.getElementById('new-company-email').value,
                     contact_phone: document.getElementById('new-company-phone').value,
                     address: document.getElementById('new-company-address').value,
-                    email_config: notificationEmail ? { notification_email: notificationEmail } : {}
+                    email_config: emailConfig
                 })
             });
             const data = await resp.json();
@@ -958,6 +968,30 @@
     // ============================================================
     // NOTIFICATION EMAIL
     // ============================================================
+    function parseEmailList(raw) {
+        return [...new Set((raw || '').split(/[\s,;]+/).map(e => e.trim().toLowerCase())
+            .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))];
+    }
+
+    async function manageManagerEmails(companyId, currentCsv) {
+        const raw = prompt('Manager emails to notify on every order (comma separated). These managers receive the full order details + PO:', currentCsv || '');
+        if (raw === null) return; // cancelled
+        const list = parseEmailList(raw);
+        try {
+            const resp = await adminFetch(`/companies/${companyId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ email_config: { manager_emails: list } })
+            });
+            if (resp.ok) {
+                alert(list.length ? `Saved ${list.length} manager email(s).` : 'Manager emails cleared.');
+                loadCompanies();
+            } else {
+                const d = await resp.json();
+                alert(d.error || 'Failed to update.');
+            }
+        } catch (err) { alert('Failed to update manager emails.'); }
+    }
+
     async function editNotificationEmail(companyId, currentEmail) {
         const newEmail = prompt('Enter the email address for order notifications:', currentEmail);
         if (newEmail === null) return; // cancelled
