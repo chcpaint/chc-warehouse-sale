@@ -1059,6 +1059,15 @@
         URL.revokeObjectURL(url);
     }
 
+    async function downloadInvoice(orderId) {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/orders/${orderId}/invoice`);
+            const data = await resp.json();
+            if (!resp.ok || !data.url) { alert(data.error || 'Invoice not available.'); return; }
+            window.open(data.url, '_blank');
+        } catch (err) { alert('Failed to download invoice.'); }
+    }
+
     async function loadOrders() {
         const list = document.getElementById('orders-list');
         const noOrders = document.getElementById('no-orders');
@@ -1112,7 +1121,10 @@
                         </div>
                         <div class="flex justify-between items-center mt-2">
                             <p class="text-sm text-gray-500">${items.length} item${items.length !== 1 ? 's' : ''}</p>
-                            <p class="text-xs text-blue-500"><i class="fas fa-chevron-down mr-1" id="order-chevron-${idx}"></i>View Details</p>
+                            <div class="flex items-center gap-3">
+                                ${o.invoice_filename ? `<button onclick="event.stopPropagation(); downloadInvoice('${o.id}')" class="text-xs font-semibold text-green-600 hover:text-green-800"><i class="fas fa-file-invoice-dollar mr-1"></i>Download Invoice</button>` : ''}
+                                <p class="text-xs text-blue-500"><i class="fas fa-chevron-down mr-1" id="order-chevron-${idx}"></i>View Details</p>
+                            </div>
                         </div>
                     </div>
                     <div id="order-detail-${idx}" class="hidden border-t">
