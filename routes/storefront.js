@@ -358,11 +358,19 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 .eq('id', companyId)
                 .single();
 
-            const notificationEmail = companyData?.email_config?.notification_email || companyData?.contact_email;
+            // Notify the company notification/contact email plus every configured manager.
+            const cfg = companyData?.email_config || {};
+            const managerEmails = Array.isArray(cfg.manager_emails) ? cfg.manager_emails : [];
+            const baseEmail = cfg.notification_email || companyData?.contact_email;
+            const recipients = [...new Set(
+                [...(baseEmail ? [baseEmail] : []), ...managerEmails]
+                    .map(e => String(e || '').trim().toLowerCase())
+                    .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+            )];
 
-            if (notificationEmail) {
+            if (recipients.length) {
                 sendOrderNotification({
-                    to: notificationEmail,
+                    to: recipients,
                     order: { ...order, items: verifiedItems },
                     companyName: req.company.name,
                     contactName: stripHtml(contact_name),
