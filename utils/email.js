@@ -43,7 +43,9 @@ async function sendOrderNotification(options) {
 
     const { to, order, companyName, contactName, contactEmail, contactPhone, poNumber, location, notes } = options;
 
-    if (!to) {
+    // `to` may be a single address or an array of manager addresses
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) {
         console.warn('Email: No notification email configured for this company.');
         return { sent: false, reason: 'no_recipient' };
     }
@@ -112,13 +114,13 @@ async function sendOrderNotification(options) {
 
     try {
         await sgMail.send({
-            to,
+            to: recipients,
             from: fromAddress,
             subject: `${companyName} Ordering, ${order.order_number || order.id}${location ? ', ' + location : ''}`,
             text,
             html
         });
-        console.log(`Email: Order notification sent to ${to} for order ${order.order_number || order.id}`);
+        console.log(`Email: Order notification sent to ${recipients.join(', ')} for order ${order.order_number || order.id}`);
         return { sent: true };
     } catch (err) {
         const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
