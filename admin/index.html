@@ -92,7 +92,10 @@
                 </button>
             </nav>
 
-            <div class="p-4 border-t">
+            <div class="p-4 border-t space-y-2">
+                <button onclick="showModal('change-password-modal')" class="w-full text-left text-sm text-gray-500 hover:text-blue-600">
+                    <i class="fas fa-key mr-2"></i> Change Password
+                </button>
                 <button onclick="adminLogout()" class="w-full text-left text-sm text-gray-500 hover:text-red-600">
                     <i class="fas fa-sign-out-alt mr-2"></i> Sign Out
                 </button>
@@ -479,7 +482,10 @@
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold"><i class="fas fa-map-marker-alt text-blue-500 mr-2"></i> Locations — <span id="locations-company-name"></span></h3>
-                <button onclick="hideModal('locations-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                <div class="flex items-center gap-4">
+                    <button onclick="openBranchesModal()" class="text-sm font-semibold text-purple-600 hover:text-purple-800"><i class="fas fa-store mr-1"></i>CHC Branches</button>
+                    <button onclick="hideModal('locations-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                </div>
             </div>
 
             <!-- Add single location -->
@@ -491,6 +497,7 @@
                     <input type="text" id="loc-address" placeholder="Full address" class="px-3 py-2 border rounded-lg text-sm col-span-2">
                     <input type="text" id="loc-contact" placeholder="Contact name" class="px-3 py-2 border rounded-lg text-sm">
                     <input type="text" id="loc-phone" placeholder="Phone" class="px-3 py-2 border rounded-lg text-sm">
+                    <select id="loc-branch" class="px-3 py-2 border rounded-lg text-sm col-span-2 bg-white"><option value="">— Assign CHC branch (optional) —</option></select>
                 </div>
                 <button onclick="addLocation()" class="mt-3 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
                     <i class="fas fa-plus mr-1"></i> Add Location
@@ -511,6 +518,44 @@
             <div id="locations-list" class="space-y-2">
                 <p class="text-center text-gray-400 py-4">Loading...</p>
             </div>
+        </div>
+    </div>
+
+    <!-- CHC Branches Modal -->
+    <div id="branches-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-store text-purple-500 mr-2"></i> CHC Servicing Branches</h3>
+                <button onclick="hideModal('branches-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">A branch's emails are notified for orders from the locations assigned to it (in addition to info@chcpaint.com and the company managers).</p>
+            <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                <p class="text-sm font-semibold text-gray-700 mb-3">Add Branch</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <input type="text" id="branch-name" placeholder="Branch name * (e.g. Markham)" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="branch-city" placeholder="City" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="branch-emails" placeholder="Notification emails (comma separated)" class="px-3 py-2 border rounded-lg text-sm col-span-2">
+                </div>
+                <button onclick="addBranch()" class="mt-3 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-semibold"><i class="fas fa-plus mr-1"></i> Add Branch</button>
+            </div>
+            <div id="branches-list" class="space-y-2"><p class="text-center text-gray-400 py-4">Loading...</p></div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="change-password-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-key text-blue-500 mr-2"></i> Change Password</h3>
+                <button onclick="hideModal('change-password-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="changeMyPassword(event)" class="space-y-3">
+                <input type="password" id="cp-current" required placeholder="Current password" class="w-full px-3 py-2 border rounded-lg">
+                <input type="password" id="cp-new" required placeholder="New password" class="w-full px-3 py-2 border rounded-lg">
+                <input type="password" id="cp-confirm" required placeholder="Confirm new password" class="w-full px-3 py-2 border rounded-lg">
+                <p class="text-xs text-gray-400">At least 8 characters with uppercase, lowercase, and a number.</p>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Update Password</button>
+            </form>
         </div>
     </div>
 
@@ -546,6 +591,11 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">Order Notification Email</label>
                     <input type="email" id="new-company-notification-email" class="w-full px-3 py-2 border rounded-lg" placeholder="Where order alerts are sent">
                     <p class="text-xs text-gray-400 mt-1">Leave blank to use the contact email above</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Manager Notification Emails</label>
+                    <textarea id="new-company-manager-emails" rows="2" class="w-full px-3 py-2 border rounded-lg" placeholder="manager1@company.com, manager2@company.com"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">Comma or line separated. Each manager is emailed on every order (with full order details &amp; PO).</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Company Logo</label>
@@ -885,6 +935,7 @@
                 <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${c.is_active ? 'Active' : 'Inactive'}</span></td>
                 <td class="px-4 py-3 text-right">
                     <button onclick="editNotificationEmail('${c.id}', '${esc(c.email_config?.notification_email || c.contact_email || '').replace(/'/g, "\\'")}')" class="text-orange-500 hover:text-orange-700 text-sm mr-3" title="Change order notification email"><i class="fas fa-envelope"></i></button>
+                    <button onclick="manageManagerEmails('${c.id}', '${esc((c.email_config?.manager_emails || []).join(', ')).replace(/'/g, "\\'")}')" class="text-purple-500 hover:text-purple-700 text-sm mr-3" title="Manager notification emails (${(c.email_config?.manager_emails || []).length})"><i class="fas fa-users"></i></button>
                     <button onclick="openLocationsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-blue-500 hover:text-blue-700 text-sm mr-3" title="Manage locations"><i class="fas fa-map-marker-alt"></i></button>
                     <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
@@ -910,6 +961,10 @@
         e.preventDefault();
         try {
             const notificationEmail = document.getElementById('new-company-notification-email').value.trim();
+            const managerEmails = parseEmailList(document.getElementById('new-company-manager-emails').value);
+            const emailConfig = {};
+            if (notificationEmail) emailConfig.notification_email = notificationEmail;
+            if (managerEmails.length) emailConfig.manager_emails = managerEmails;
             const resp = await adminFetch('/companies', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -918,7 +973,7 @@
                     contact_email: document.getElementById('new-company-email').value,
                     contact_phone: document.getElementById('new-company-phone').value,
                     address: document.getElementById('new-company-address').value,
-                    email_config: notificationEmail ? { notification_email: notificationEmail } : {}
+                    email_config: emailConfig
                 })
             });
             const data = await resp.json();
@@ -958,6 +1013,30 @@
     // ============================================================
     // NOTIFICATION EMAIL
     // ============================================================
+    function parseEmailList(raw) {
+        return [...new Set((raw || '').split(/[\s,;]+/).map(e => e.trim().toLowerCase())
+            .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))];
+    }
+
+    async function manageManagerEmails(companyId, currentCsv) {
+        const raw = prompt('Manager emails to notify on every order (comma separated). These managers receive the full order details + PO:', currentCsv || '');
+        if (raw === null) return; // cancelled
+        const list = parseEmailList(raw);
+        try {
+            const resp = await adminFetch(`/companies/${companyId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ email_config: { manager_emails: list } })
+            });
+            if (resp.ok) {
+                alert(list.length ? `Saved ${list.length} manager email(s).` : 'Manager emails cleared.');
+                loadCompanies();
+            } else {
+                const d = await resp.json();
+                alert(d.error || 'Failed to update.');
+            }
+        } catch (err) { alert('Failed to update manager emails.'); }
+    }
+
     async function editNotificationEmail(companyId, currentEmail) {
         const newEmail = prompt('Enter the email address for order notifications:', currentEmail);
         if (newEmail === null) return; // cancelled
@@ -991,7 +1070,22 @@
         locationsCompanyId = companyId;
         document.getElementById('locations-company-name').textContent = companyName;
         showModal('locations-modal');
-        loadLocations();
+        loadBranches().then(loadLocations);
+    }
+
+    async function loadBranches() {
+        try {
+            const resp = await adminFetch('/branches');
+            const data = await resp.json();
+            admin.branches = data.branches || [];
+        } catch (err) { admin.branches = []; }
+        const sel = document.getElementById('loc-branch');
+        if (sel) sel.innerHTML = '<option value="">— Assign CHC branch (optional) —</option>' +
+            admin.branches.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+    }
+    function branchOptions(selectedId) {
+        return '<option value="">— No branch —</option>' +
+            (admin.branches || []).map(b => `<option value="${b.id}" ${b.id===selectedId?'selected':''}>${esc(b.name)}</option>`).join('');
     }
 
     async function loadLocations() {
@@ -1023,6 +1117,9 @@
                         ${l.contact_name || l.contact_phone ? `<p class="text-xs text-gray-400 mt-1">${esc(l.contact_name || '')} ${l.contact_phone ? '· ' + esc(l.contact_phone) : ''}</p>` : ''}
                     </div>
                     <div class="flex items-center gap-2">
+                        <select onchange="assignLocationBranch('${l.id}', this.value)" class="text-xs border rounded px-2 py-1 bg-white" title="Assign servicing CHC branch">
+                            ${branchOptions(l.supplier_branch_id)}
+                        </select>
                         <button onclick="deleteLocation('${l.id}', '${esc(l.name).replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-600 text-sm" title="Delete">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -1046,13 +1143,14 @@
                     city: document.getElementById('loc-city').value.trim(),
                     address: document.getElementById('loc-address').value.trim(),
                     contact_name: document.getElementById('loc-contact').value.trim(),
-                    contact_phone: document.getElementById('loc-phone').value.trim()
+                    contact_phone: document.getElementById('loc-phone').value.trim(),
+                    supplier_branch_id: document.getElementById('loc-branch').value || null
                 })
             });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
 
             // Clear inputs
-            ['loc-name', 'loc-city', 'loc-address', 'loc-contact', 'loc-phone'].forEach(id => document.getElementById(id).value = '');
+            ['loc-name', 'loc-city', 'loc-address', 'loc-contact', 'loc-phone', 'loc-branch'].forEach(id => document.getElementById(id).value = '');
             loadLocations();
         } catch (err) { alert('Failed to add location: ' + err.message); }
     }
@@ -1093,6 +1191,67 @@
             const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/${id}`, { method: 'DELETE' });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
             loadLocations();
+        } catch (err) { alert('Failed to delete: ' + err.message); }
+    }
+
+    async function assignLocationBranch(locId, branchId) {
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/${locId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ supplier_branch_id: branchId || null })
+            });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+        } catch (err) { alert('Failed to assign branch: ' + err.message); loadLocations(); }
+    }
+
+    // ---- CHC Branches management ----
+    function openBranchesModal() {
+        showModal('branches-modal');
+        loadBranches().then(renderBranches);
+    }
+    function renderBranches() {
+        const c = document.getElementById('branches-list');
+        if (!admin.branches || !admin.branches.length) { c.innerHTML = '<p class="text-center text-gray-400 py-6">No branches yet. Add one above.</p>'; return; }
+        c.innerHTML = admin.branches.map(b => `
+            <div class="bg-white border rounded-lg px-4 py-3">
+                <div class="flex items-center justify-between mb-2">
+                    <p class="font-medium text-gray-800">${esc(b.name)}${b.city ? ` <span class="text-xs text-gray-400">· ${esc(b.city)}</span>` : ''}</p>
+                    <button onclick="deleteBranch('${b.id}', '${esc(b.name).replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-600 text-sm" title="Delete branch"><i class="fas fa-trash"></i></button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="branch-emails-${b.id}" value="${esc((b.emails||[]).join(', '))}" placeholder="Notification emails (comma separated)" class="flex-1 px-3 py-1.5 border rounded text-sm">
+                    <button onclick="saveBranchEmails('${b.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm">Save</button>
+                </div>
+            </div>
+        `).join('');
+    }
+    async function addBranch() {
+        const name = document.getElementById('branch-name').value.trim();
+        if (!name) { alert('Branch name is required.'); return; }
+        try {
+            const resp = await adminFetch('/branches', { method: 'POST', body: JSON.stringify({
+                name, city: document.getElementById('branch-city').value.trim(), emails: document.getElementById('branch-emails').value.trim()
+            })});
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            ['branch-name','branch-city','branch-emails'].forEach(id => document.getElementById(id).value='');
+            await loadBranches(); renderBranches();
+        } catch (err) { alert('Failed to add branch: ' + err.message); }
+    }
+    async function saveBranchEmails(id) {
+        try {
+            const emails = document.getElementById(`branch-emails-${id}`).value;
+            const resp = await adminFetch(`/branches/${id}`, { method: 'PUT', body: JSON.stringify({ emails }) });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            await loadBranches(); renderBranches();
+            alert('Saved.');
+        } catch (err) { alert('Failed to save: ' + err.message); }
+    }
+    async function deleteBranch(id, name) {
+        if (!confirm(`Delete branch "${name}"? Locations assigned to it will become unassigned.`)) return;
+        try {
+            const resp = await adminFetch(`/branches/${id}`, { method: 'DELETE' });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            await loadBranches(); renderBranches();
         } catch (err) { alert('Failed to delete: ' + err.message); }
     }
 
@@ -1518,10 +1677,31 @@
                         </select>
                     </td>
                     <td class="px-4 py-3 text-sm text-gray-500">${new Date(o.created_at).toLocaleDateString()}</td>
-                    <td class="px-4 py-3 text-right text-sm text-gray-400">${(o.items || []).length} items</td>
+                    <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
+                        ${o.invoice_filename ? '<span class="text-green-600 mr-2" title="Invoice uploaded"><i class="fas fa-file-invoice-dollar"></i></span>' : ''}
+                        <button onclick="uploadInvoice('${o.id}', '${o.company_id}')" class="text-gray-400 hover:text-blue-600" title="Upload invoice for this order"><i class="fas fa-file-upload"></i></button>
+                        <span class="text-gray-400 ml-2">${(o.items || []).length} items</span>
+                    </td>
                 </tr>
             `).join('') || '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No orders found.</td></tr>';
         } catch (err) { console.error('Orders load failed:', err); }
+    }
+
+    function uploadInvoice(orderId, companyId) {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.pdf,.png,.jpg,.jpeg';
+        input.onchange = async () => {
+            if (!input.files[0]) return;
+            const fd = new FormData(); fd.append('invoice', input.files[0]);
+            try {
+                const resp = await adminFetchRaw(`/companies/${companyId}/orders/${orderId}/invoice`, { method: 'POST', body: fd });
+                const d = await resp.json();
+                if (!resp.ok) { alert(d.error || 'Upload failed.'); return; }
+                alert('Invoice uploaded — the order recipients have been notified.');
+                loadAdminOrders();
+            } catch (err) { alert('Upload failed.'); }
+        };
+        input.click();
     }
 
     async function updateOrderStatus(orderId, status) {
@@ -1625,7 +1805,10 @@
                     <td class="px-4 py-3 text-sm text-gray-500">${esc(a.email)}</td>
                     <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${a.role === 'super_admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">${a.role}</span></td>
                     <td class="px-4 py-3 text-sm text-gray-500">${esc(a.companies?.name || '-')}</td>
-                    <td class="px-4 py-3 text-sm text-gray-400">${a.last_login ? new Date(a.last_login).toLocaleString() : 'Never'}</td>
+                    <td class="px-4 py-3 text-sm text-gray-400">
+                        <span>${a.last_login ? new Date(a.last_login).toLocaleString() : 'Never'}</span>
+                        ${admin.role === 'super_admin' ? `<button onclick="resetAdminPassword('${a.id}', '${esc(a.email).replace(/'/g, "\\'")}')" class="ml-3 text-orange-500 hover:text-orange-700" title="Reset this admin's password"><i class="fas fa-key"></i></button>` : ''}
+                    </td>
                 </tr>
             `).join('') || '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No admin users.</td></tr>';
         } catch (err) { console.error('Admin users load failed:', err); }
@@ -1647,6 +1830,33 @@
             if (resp.ok) { hideModal('admin-user-modal'); loadAdminUsers(); }
             else { const d = await resp.json(); alert(d.error); }
         } catch (err) { alert('Failed to create admin.'); }
+    }
+
+    async function changeMyPassword(e) {
+        e.preventDefault();
+        const current = document.getElementById('cp-current').value;
+        const npw = document.getElementById('cp-new').value;
+        const conf = document.getElementById('cp-confirm').value;
+        if (npw !== conf) { alert('New passwords do not match.'); return; }
+        try {
+            const resp = await adminFetch('/me/password', { method: 'PUT', body: JSON.stringify({ current_password: current, new_password: npw }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to change password.'); return; }
+            ['cp-current','cp-new','cp-confirm'].forEach(id => document.getElementById(id).value = '');
+            hideModal('change-password-modal');
+            alert('Password updated.');
+        } catch (err) { alert('Failed to change password.'); }
+    }
+
+    async function resetAdminPassword(id, email) {
+        const npw = prompt(`Set a new password for ${email} (min 8 chars, with uppercase, lowercase, and a number):`);
+        if (!npw) return;
+        try {
+            const resp = await adminFetch(`/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ new_password: npw }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to reset password.'); return; }
+            alert(d.message || 'Password reset.');
+        } catch (err) { alert('Failed to reset password.'); }
     }
 
     // ============================================================

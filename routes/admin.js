@@ -5,8 +5,10 @@ const XLSX = require('xlsx');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess } = require('../middleware/auth');
-const { catalogUpload, logoUpload } = require('../middleware/upload');
+const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
+const { resolveOrderRecipients } = require('../utils/recipients');
+const { sendInvoiceReady } = require('../utils/email');
 
 const router = express.Router();
 
@@ -436,6 +438,7 @@ router.put('/companies/:companyId/locations/:locationId', requireCompanyAccess, 
         const updates = sanitizeObject(req.body);
         delete updates.id;
         delete updates.company_id;
+        if (updates.supplier_branch_id === '') updates.supplier_branch_id = null;
 
         const { data, error } = await supabaseAdmin
             .from('company_locations')
@@ -473,6 +476,134 @@ router.delete('/companies/:companyId/locations/:locationId', requireCompanyAcces
     } catch (err) {
         console.error('Delete location error:', err);
         res.status(500).json({ error: 'Failed to delete location.' });
+    }
+});
+
+// ============================================================
+// CHC SUPPLIER BRANCHES (servicing branches + their notification emails)
+// ============================================================
+function parseBranchEmails(raw) {
+    const arr = Array.isArray(raw) ? raw : String(raw || '').split(/[\s,;]+/);
+    return [...new Set(arr.map(e => String(e || '').trim().toLowerCase())
+        .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))];
+}
+
+/** GET /api/admin/branches — list all CHC branches */
+router.get('/branches', async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('supplier_branches')
+            .select('id, name, emails, city, is_active')
+            .order('name');
+        if (error) throw error;
+        res.json({ branches: data || [] });
+    } catch (err) {
+        console.error('Branches list error:', err);
+        res.status(500).json({ error: 'Failed to load branches.' });
+    }
+});
+
+/** POST /api/admin/branches — create a branch */
+router.post('/branches', requireSuperAdmin, async (req, res) => {
+    try {
+        const name = stripHtml(req.body.name);
+        if (!name) return res.status(400).json({ error: 'Branch name is required.' });
+        const { data, error } = await supabaseAdmin
+            .from('supplier_branches')
+            .insert({ name, city: stripHtml(req.body.city || '') || null, emails: parseBranchEmails(req.body.emails) })
+            .select()
+            .single();
+        if (error) throw error;
+        await logAction(req.admin.id, 'branch_created', 'branch', data.id, { name }, req.ip);
+        res.status(201).json({ branch: data });
+    } catch (err) {
+        console.error('Create branch error:', err);
+        res.status(500).json({ error: 'Failed to create branch.' });
+    }
+});
+
+/** PUT /api/admin/branches/:id — update a branch (name/city/emails/is_active) */
+router.put('/branches/:id', requireSuperAdmin, async (req, res) => {
+    try {
+        const updates = { updated_at: new Date().toISOString() };
+        if (req.body.name !== undefined) updates.name = stripHtml(req.body.name);
+        if (req.body.city !== undefined) updates.city = stripHtml(req.body.city || '') || null;
+        if (req.body.emails !== undefined) updates.emails = parseBranchEmails(req.body.emails);
+        if (req.body.is_active !== undefined) updates.is_active = !!req.body.is_active;
+        const { data, error } = await supabaseAdmin
+            .from('supplier_branches')
+            .update(updates)
+            .eq('id', req.params.id)
+            .select()
+            .single();
+        if (error) throw error;
+        await logAction(req.admin.id, 'branch_updated', 'branch', data.id, updates, req.ip);
+        res.json({ branch: data });
+    } catch (err) {
+        console.error('Update branch error:', err);
+        res.status(500).json({ error: 'Failed to update branch.' });
+    }
+});
+
+/** DELETE /api/admin/branches/:id — delete a branch (locations are unassigned via FK) */
+router.delete('/branches/:id', requireSuperAdmin, async (req, res) => {
+    try {
+        const { error } = await supabaseAdmin.from('supplier_branches').delete().eq('id', req.params.id);
+        if (error) throw error;
+        await logAction(req.admin.id, 'branch_deleted', 'branch', req.params.id, {}, req.ip);
+        res.json({ message: 'Branch deleted.' });
+    } catch (err) {
+        console.error('Delete branch error:', err);
+        res.status(500).json({ error: 'Failed to delete branch.' });
+    }
+});
+
+/**
+ * POST /api/admin/companies/:companyId/orders/:orderId/invoice
+ * A CHC employee uploads an invoice for an order; stores it privately and
+ * emails the same recipients as the order confirmation.
+ */
+router.post('/companies/:companyId/orders/:orderId/invoice', requireCompanyAccess, invoiceUpload.single('invoice'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No invoice file provided.' });
+        const { companyId, orderId } = req.params;
+
+        const { data: order, error: oErr } = await supabaseAdmin
+            .from('orders').select('id, order_number, company_id, location_id')
+            .eq('id', orderId).eq('company_id', companyId).single();
+        if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
+
+        const ext = (req.file.originalname.split('.').pop() || 'pdf').toLowerCase();
+        const storagePath = `${companyId}/${orderId}/invoice-${Date.now()}.${ext}`;
+        const { error: upErr } = await supabaseAdmin.storage.from('invoices')
+            .upload(storagePath, req.file.buffer, { contentType: req.file.mimetype || 'application/octet-stream', upsert: true });
+        if (upErr) { console.error('Invoice storage error:', upErr); return res.status(500).json({ error: 'Failed to store invoice file.' }); }
+
+        const { data: updated, error: updErr } = await supabaseAdmin.from('orders').update({
+            invoice_path: storagePath,
+            invoice_filename: stripHtml(req.file.originalname),
+            invoice_uploaded_at: new Date().toISOString(),
+            invoice_uploaded_by: req.admin.id
+        }).eq('id', orderId).select('id, order_number, invoice_filename, invoice_uploaded_at').single();
+        if (updErr) throw updErr;
+
+        await logAction(req.admin.id, 'invoice_uploaded', 'order', orderId, { filename: req.file.originalname }, req.ip);
+
+        // Notify the same recipients as the order confirmation (company + managers + branch)
+        try {
+            const recipients = await resolveOrderRecipients(order);
+            if (recipients.length) {
+                const { data: company } = await supabaseAdmin.from('companies').select('name, slug').eq('id', companyId).single();
+                const retrieveUrl = `${process.env.APP_URL || ''}/store/${company?.slug || ''}`;
+                sendInvoiceReady({ to: recipients, order: { order_number: order.order_number, id: order.id }, companyName: company?.name || '', retrieveUrl })
+                    .catch(e => console.error('Invoice email failed (non-blocking):', e.message));
+            }
+        } catch (e) { console.error('Invoice recipients error:', e.message); }
+
+        res.json({ message: 'Invoice uploaded and recipients notified.', order: updated });
+    } catch (err) {
+        console.error('Invoice upload error:', err);
+        res.status(500).json({ error: 'Failed to upload invoice.' });
     }
 });
 

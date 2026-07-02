@@ -34,4 +34,17 @@ const logoUpload = multer({
     }
 });
 
-module.exports = { catalogUpload, logoUpload };
+const ALLOWED_INVOICE_TYPES = ['.pdf', '.png', '.jpg', '.jpeg'];
+const MAX_INVOICE_SIZE = parseInt(process.env.MAX_INVOICE_SIZE) || 10 * 1024 * 1024; // 10MB
+
+const invoiceUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_INVOICE_SIZE },
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (ALLOWED_INVOICE_TYPES.includes(ext)) cb(null, true);
+        else cb(new Error(`Invalid invoice type. Allowed: ${ALLOWED_INVOICE_TYPES.join(', ')}`));
+    }
+});
+
+module.exports = { catalogUpload, logoUpload, invoiceUpload };

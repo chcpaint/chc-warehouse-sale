@@ -43,7 +43,9 @@ async function sendOrderNotification(options) {
 
     const { to, order, companyName, contactName, contactEmail, contactPhone, poNumber, location, notes } = options;
 
-    if (!to) {
+    // `to` may be a single address or an array of manager addresses
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) {
         console.warn('Email: No notification email configured for this company.');
         return { sent: false, reason: 'no_recipient' };
     }
@@ -112,17 +114,52 @@ async function sendOrderNotification(options) {
 
     try {
         await sgMail.send({
-            to,
+            to: recipients,
             from: fromAddress,
             subject: `${companyName} Ordering, ${order.order_number || order.id}${location ? ', ' + location : ''}`,
             text,
             html
         });
-        console.log(`Email: Order notification sent to ${to} for order ${order.order_number || order.id}`);
+        console.log(`Email: Order notification sent to ${recipients.join(', ')} for order ${order.order_number || order.id}`);
         return { sent: true };
     } catch (err) {
         const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
         console.error('Email: Failed to send order notification:', errMsg);
+        return { sent: false, reason: 'send_failed', error: errMsg };
+    }
+}
+
+/**
+ * Notify recipients that an invoice is ready to retrieve for an order.
+ */
+async function sendInvoiceReady(options) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+    const { to, order, companyName, retrieveUrl } = options;
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) return { sent: false, reason: 'no_recipient' };
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    const orderNo = order.order_number || order.id;
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">Invoice Ready</h2>
+            <p style="margin: 5px 0 0; opacity: 0.9;">Order #${escHtml(orderNo)}</p>
+        </div>
+        <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <p>An invoice is now available for <strong>${escHtml(companyName)}</strong> order <strong>#${escHtml(orderNo)}</strong>.</p>
+            <p>Sign in to your store, open the order in your order history, and download the invoice to print and make payment.</p>
+            ${retrieveUrl ? `<p style="margin-top:20px;"><a href="${escHtml(retrieveUrl)}" style="background:#1e40af;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;">Go to your store</a></p>` : ''}
+            <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
+        </div>
+    </div>`;
+    const text = `Invoice ready for ${companyName} order #${orderNo}.\nSign in to your store and open the order to download the invoice.${retrieveUrl ? '\n' + retrieveUrl : ''}`;
+    try {
+        await sgMail.send({ to: recipients, from: fromAddress, subject: `Invoice ready — ${companyName} order ${orderNo}`, text, html });
+        console.log(`Email: Invoice-ready sent to ${recipients.join(', ')} for order ${orderNo}`);
+        return { sent: true };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Email: Failed to send invoice-ready:', errMsg);
         return { sent: false, reason: 'send_failed', error: errMsg };
     }
 }
@@ -156,4 +193,4 @@ function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendOrderNotification, sendTestEmail };
+module.exports = { sendOrderNotification, sendInvoiceReady, sendTestEmail };

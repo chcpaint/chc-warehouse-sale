@@ -243,7 +243,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         }
         const { data: locationRow, error: locationLookupError } = await supabaseAdmin
             .from('company_locations')
-            .select('id, name')
+            .select('id, name, supplier_branch_id')
             .eq('id', location_id)
             .eq('company_id', companyId)
             .eq('is_active', true)
@@ -358,11 +358,31 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 .eq('id', companyId)
                 .single();
 
-            const notificationEmail = companyData?.email_config?.notification_email || companyData?.contact_email;
+            // Notify the company notification/contact email plus every configured manager.
+            const cfg = companyData?.email_config || {};
+            const managerEmails = Array.isArray(cfg.manager_emails) ? cfg.manager_emails : [];
+            const baseEmail = cfg.notification_email || companyData?.contact_email;
 
-            if (notificationEmail) {
+            // Route to the servicing CHC branch assigned to this order's location.
+            let branchEmails = [];
+            if (locationRow.supplier_branch_id) {
+                const { data: branch } = await supabaseAdmin
+                    .from('supplier_branches')
+                    .select('emails, is_active')
+                    .eq('id', locationRow.supplier_branch_id)
+                    .single();
+                if (branch && branch.is_active !== false && Array.isArray(branch.emails)) branchEmails = branch.emails;
+            }
+
+            const recipients = [...new Set(
+                [...(baseEmail ? [baseEmail] : []), ...managerEmails, ...branchEmails]
+                    .map(e => String(e || '').trim().toLowerCase())
+                    .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+            )];
+
+            if (recipients.length) {
                 sendOrderNotification({
-                    to: notificationEmail,
+                    to: recipients,
                     order: { ...order, items: verifiedItems },
                     companyName: req.company.name,
                     contactName: stripHtml(contact_name),
@@ -402,7 +422,7 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const { data: orders, error } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, contact_email, total, status, location, location_id, created_at, items')
+            .select('id, order_number, contact_name, contact_email, total, status, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -496,6 +516,32 @@ router.post('/:slug/payments/create-intent', requireCompanyAuth, async (req, res
     } catch (err) {
         console.error('Create payment intent error:', err);
         res.status(500).json({ error: 'Failed to start payment.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/orders/:orderId/invoice
+ * Returns a short-lived signed download URL for the order's invoice (company-scoped).
+ */
+router.get('/:slug/orders/:orderId/invoice', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: order } = await supabaseAdmin
+            .from('orders').select('id, invoice_path, invoice_filename')
+            .eq('id', req.params.orderId).eq('company_id', req.company.id).single();
+        if (!order || !order.invoice_path) {
+            return res.status(404).json({ error: 'No invoice available for this order.' });
+        }
+        const { data: signed, error } = await supabaseAdmin.storage
+            .from('invoices')
+            .createSignedUrl(order.invoice_path, 300, { download: order.invoice_filename || true });
+        if (error || !signed) {
+            console.error('Invoice signed URL error:', error);
+            return res.status(500).json({ error: 'Failed to prepare invoice download.' });
+        }
+        res.json({ url: signed.signedUrl, filename: order.invoice_filename });
+    } catch (err) {
+        console.error('Invoice download error:', err);
+        res.status(500).json({ error: 'Failed to get invoice.' });
     }
 });
 
