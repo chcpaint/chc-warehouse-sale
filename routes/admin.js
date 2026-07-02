@@ -8,7 +8,7 @@ const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess } = require('.
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
-const { sendInvoiceReady } = require('../utils/email');
+const { sendInvoiceReady, sendOrderClosed } = require('../utils/email');
 
 const router = express.Router();
 
@@ -604,6 +604,27 @@ router.post('/companies/:companyId/orders/:orderId/invoice', requireCompanyAcces
     } catch (err) {
         console.error('Invoice upload error:', err);
         res.status(500).json({ error: 'Failed to upload invoice.' });
+    }
+});
+
+/**
+ * GET /api/admin/companies/:companyId/orders/:orderId/invoice
+ * Short-lived signed URL so branch staff can view/verify the uploaded invoice.
+ */
+router.get('/companies/:companyId/orders/:orderId/invoice', requireCompanyAccess, async (req, res) => {
+    try {
+        const { companyId, orderId } = req.params;
+        const { data: order, error } = await supabaseAdmin
+            .from('orders').select('invoice_path, invoice_filename')
+            .eq('id', orderId).eq('company_id', companyId).single();
+        if (error || !order || !order.invoice_path) return res.status(404).json({ error: 'No invoice on file for this order.' });
+        const { data: signed, error: sErr } = await supabaseAdmin.storage.from('invoices')
+            .createSignedUrl(order.invoice_path, 300, { download: order.invoice_filename || true });
+        if (sErr || !signed) return res.status(500).json({ error: 'Failed to prepare invoice download.' });
+        res.json({ url: signed.signedUrl, filename: order.invoice_filename });
+    } catch (err) {
+        console.error('Admin invoice fetch error:', err);
+        res.status(500).json({ error: 'Failed to get invoice.' });
     }
 });
 
@@ -1220,7 +1241,7 @@ router.get('/reports/by-location', async (req, res) => {
 router.put('/orders/:orderId/status', async (req, res) => {
     try {
         const { status, note } = req.body;
-        const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'];
+        const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'closed', 'cancelled'];
 
         if (!validStatuses.includes(status)) {
             return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
@@ -1256,6 +1277,69 @@ router.put('/orders/:orderId/status', async (req, res) => {
     } catch (err) {
         console.error('Order status update error:', err);
         res.status(500).json({ error: 'Failed to update order status.' });
+    }
+});
+
+/**
+ * PUT /api/admin/companies/:companyId/orders/:orderId/close
+ * Step 3 of the branch workflow: payment received -> mark paid + close the order.
+ * Records timestamps, appends status history, notifies recipients, and audit-logs.
+ */
+router.put('/companies/:companyId/orders/:orderId/close', requireCompanyAccess, async (req, res) => {
+    try {
+        const { companyId, orderId } = req.params;
+        const note = stripHtml(req.body?.note || '');
+
+        const { data: order, error: oErr } = await supabaseAdmin
+            .from('orders')
+            .select('id, order_number, company_id, location_id, status, payment_status, invoice_filename, status_history')
+            .eq('id', orderId).eq('company_id', companyId).single();
+        if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
+
+        if (order.status === 'closed' || order.payment_status === 'paid') {
+            return res.status(409).json({ error: 'This order is already closed / marked paid.' });
+        }
+
+        const now = new Date().toISOString();
+        const statusHistory = order.status_history || [];
+        statusHistory.push({
+            status: 'closed',
+            timestamp: now,
+            note: note || 'Payment received — order closed',
+            updated_by: req.admin.email
+        });
+
+        const { data: updated, error: updErr } = await supabaseAdmin
+            .from('orders')
+            .update({
+                status: 'closed',
+                payment_status: 'paid',
+                paid_at: now,
+                closed_at: now,
+                closed_by: req.admin.id,
+                status_history: statusHistory
+            })
+            .eq('id', orderId)
+            .select('id, order_number, status, payment_status, paid_at, closed_at')
+            .single();
+        if (updErr) throw updErr;
+
+        await logAction(req.admin.id, 'order_closed', 'order', orderId, { note }, req.ip);
+
+        // Non-blocking payment-received confirmation to the same recipients as the order.
+        try {
+            const recipients = await resolveOrderRecipients(order);
+            if (recipients.length) {
+                const { data: company } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).single();
+                sendOrderClosed({ to: recipients, order: { order_number: order.order_number, id: order.id }, companyName: company?.name || '' })
+                    .catch(e => console.error('Order-closed email failed (non-blocking):', e.message));
+            }
+        } catch (e) { console.error('Order-closed recipients error:', e.message); }
+
+        res.json({ message: 'Order marked paid and closed. Recipients notified.', order: updated });
+    } catch (err) {
+        console.error('Order close error:', err);
+        res.status(500).json({ error: 'Failed to close order.' });
     }
 });
 

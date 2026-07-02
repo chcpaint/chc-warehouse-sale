@@ -164,6 +164,41 @@ async function sendInvoiceReady(options) {
     }
 }
 
+
+/**
+ * Notify recipients that payment was received and the order is closed (step 3 of 3).
+ */
+async function sendOrderClosed(options) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+    const { to, order, companyName } = options;
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) return { sent: false, reason: 'no_recipient' };
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    const orderNo = order.order_number || order.id;
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #047857; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">Payment Received — Order Closed</h2>
+            <p style="margin: 5px 0 0; opacity: 0.9;">Order #${escHtml(orderNo)}</p>
+        </div>
+        <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <p>Payment has been received for <strong>${escHtml(companyName)}</strong> order <strong>#${escHtml(orderNo)}</strong> and the order is now closed.</p>
+            <p>Thank you for your business.</p>
+            <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
+        </div>
+    </div>`;
+    const text = `Payment received for ${companyName} order #${orderNo}. The order is now closed. Thank you for your business.`;
+    try {
+        await sgMail.send({ to: recipients, from: fromAddress, subject: `Payment received — ${companyName} order ${orderNo}`, text, html });
+        console.log(`Email: Order-closed sent to ${recipients.join(', ')} for order ${orderNo}`);
+        return { sent: true };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Email: Failed to send order-closed:', errMsg);
+        return { sent: false, reason: 'send_failed', error: errMsg };
+    }
+}
+
 /**
  * Send a test email to verify configuration.
  */
@@ -193,4 +228,4 @@ function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendOrderNotification, sendInvoiceReady, sendTestEmail };
+module.exports = { sendOrderNotification, sendInvoiceReady, sendOrderClosed, sendTestEmail };
