@@ -92,7 +92,10 @@
                 </button>
             </nav>
 
-            <div class="p-4 border-t">
+            <div class="p-4 border-t space-y-2">
+                <button onclick="showModal('change-password-modal')" class="w-full text-left text-sm text-gray-500 hover:text-blue-600">
+                    <i class="fas fa-key mr-2"></i> Change Password
+                </button>
                 <button onclick="adminLogout()" class="w-full text-left text-sm text-gray-500 hover:text-red-600">
                     <i class="fas fa-sign-out-alt mr-2"></i> Sign Out
                 </button>
@@ -536,6 +539,23 @@
                 <button onclick="addBranch()" class="mt-3 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-semibold"><i class="fas fa-plus mr-1"></i> Add Branch</button>
             </div>
             <div id="branches-list" class="space-y-2"><p class="text-center text-gray-400 py-4">Loading...</p></div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="change-password-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-key text-blue-500 mr-2"></i> Change Password</h3>
+                <button onclick="hideModal('change-password-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="changeMyPassword(event)" class="space-y-3">
+                <input type="password" id="cp-current" required placeholder="Current password" class="w-full px-3 py-2 border rounded-lg">
+                <input type="password" id="cp-new" required placeholder="New password" class="w-full px-3 py-2 border rounded-lg">
+                <input type="password" id="cp-confirm" required placeholder="Confirm new password" class="w-full px-3 py-2 border rounded-lg">
+                <p class="text-xs text-gray-400">At least 8 characters with uppercase, lowercase, and a number.</p>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Update Password</button>
+            </form>
         </div>
     </div>
 
@@ -1785,7 +1805,10 @@
                     <td class="px-4 py-3 text-sm text-gray-500">${esc(a.email)}</td>
                     <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${a.role === 'super_admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">${a.role}</span></td>
                     <td class="px-4 py-3 text-sm text-gray-500">${esc(a.companies?.name || '-')}</td>
-                    <td class="px-4 py-3 text-sm text-gray-400">${a.last_login ? new Date(a.last_login).toLocaleString() : 'Never'}</td>
+                    <td class="px-4 py-3 text-sm text-gray-400">
+                        <span>${a.last_login ? new Date(a.last_login).toLocaleString() : 'Never'}</span>
+                        ${admin.role === 'super_admin' ? `<button onclick="resetAdminPassword('${a.id}', '${esc(a.email).replace(/'/g, "\\'")}')" class="ml-3 text-orange-500 hover:text-orange-700" title="Reset this admin's password"><i class="fas fa-key"></i></button>` : ''}
+                    </td>
                 </tr>
             `).join('') || '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No admin users.</td></tr>';
         } catch (err) { console.error('Admin users load failed:', err); }
@@ -1807,6 +1830,33 @@
             if (resp.ok) { hideModal('admin-user-modal'); loadAdminUsers(); }
             else { const d = await resp.json(); alert(d.error); }
         } catch (err) { alert('Failed to create admin.'); }
+    }
+
+    async function changeMyPassword(e) {
+        e.preventDefault();
+        const current = document.getElementById('cp-current').value;
+        const npw = document.getElementById('cp-new').value;
+        const conf = document.getElementById('cp-confirm').value;
+        if (npw !== conf) { alert('New passwords do not match.'); return; }
+        try {
+            const resp = await adminFetch('/me/password', { method: 'PUT', body: JSON.stringify({ current_password: current, new_password: npw }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to change password.'); return; }
+            ['cp-current','cp-new','cp-confirm'].forEach(id => document.getElementById(id).value = '');
+            hideModal('change-password-modal');
+            alert('Password updated.');
+        } catch (err) { alert('Failed to change password.'); }
+    }
+
+    async function resetAdminPassword(id, email) {
+        const npw = prompt(`Set a new password for ${email} (min 8 chars, with uppercase, lowercase, and a number):`);
+        if (!npw) return;
+        try {
+            const resp = await adminFetch(`/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ new_password: npw }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to reset password.'); return; }
+            alert(d.message || 'Password reset.');
+        } catch (err) { alert('Failed to reset password.'); }
     }
 
     // ============================================================
