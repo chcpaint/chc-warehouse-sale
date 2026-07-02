@@ -521,6 +521,29 @@
         </div>
     </div>
 
+    <!-- Edit Location Modal -->
+    <div id="edit-location-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-pen text-blue-500 mr-2"></i> Edit Location</h3>
+                <button onclick="hideModal('edit-location-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="saveLocationEdit(event)" class="space-y-3">
+                <input type="hidden" id="edit-loc-id">
+                <input type="text" id="edit-loc-name" required placeholder="Location name *" class="w-full px-3 py-2 border rounded-lg">
+                <input type="text" id="edit-loc-city" placeholder="City" class="w-full px-3 py-2 border rounded-lg">
+                <input type="text" id="edit-loc-address" placeholder="Full address" class="w-full px-3 py-2 border rounded-lg">
+                <input type="text" id="edit-loc-contact" placeholder="Contact name" class="w-full px-3 py-2 border rounded-lg">
+                <input type="text" id="edit-loc-phone" placeholder="Phone" class="w-full px-3 py-2 border rounded-lg">
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">Servicing CHC branch</label>
+                    <select id="edit-loc-branch" class="w-full px-3 py-2 border rounded-lg bg-white"></select>
+                </div>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Save Changes</button>
+            </form>
+        </div>
+    </div>
+
     <!-- CHC Branches Modal -->
     <div id="branches-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
@@ -1065,6 +1088,7 @@
     // LOCATIONS
     // ============================================================
     let locationsCompanyId = null;
+    let currentLocations = [];
 
     function openLocationsModal(companyId, companyName) {
         locationsCompanyId = companyId;
@@ -1096,6 +1120,7 @@
             const resp = await adminFetch(`/companies/${locationsCompanyId}/locations`);
             const data = await resp.json();
             const locs = data.locations || [];
+            currentLocations = locs;
 
             if (locs.length === 0) {
                 container.innerHTML = '<p class="text-center text-gray-400 py-6">No locations yet. Add your first one above.</p>';
@@ -1120,6 +1145,9 @@
                         <select onchange="assignLocationBranch('${l.id}', this.value)" class="text-xs border rounded px-2 py-1 bg-white" title="Assign servicing CHC branch">
                             ${branchOptions(l.supplier_branch_id)}
                         </select>
+                        <button onclick="editLocation('${l.id}')" class="text-blue-400 hover:text-blue-600 text-sm" title="Edit location">
+                            <i class="fas fa-pen"></i>
+                        </button>
                         <button onclick="deleteLocation('${l.id}', '${esc(l.name).replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-600 text-sm" title="Delete">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -1185,8 +1213,42 @@
         } catch (err) { alert('Failed to add locations: ' + err.message); }
     }
 
+    function editLocation(id) {
+        const l = (currentLocations || []).find(x => x.id === id);
+        if (!l) return;
+        document.getElementById('edit-loc-id').value = l.id;
+        document.getElementById('edit-loc-name').value = l.name || '';
+        document.getElementById('edit-loc-city').value = l.city || '';
+        document.getElementById('edit-loc-address').value = l.address || '';
+        document.getElementById('edit-loc-contact').value = l.contact_name || '';
+        document.getElementById('edit-loc-phone').value = l.contact_phone || '';
+        document.getElementById('edit-loc-branch').innerHTML = branchOptions(l.supplier_branch_id);
+        showModal('edit-location-modal');
+    }
+
+    async function saveLocationEdit(e) {
+        e.preventDefault();
+        const id = document.getElementById('edit-loc-id').value;
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    name: document.getElementById('edit-loc-name').value.trim(),
+                    city: document.getElementById('edit-loc-city').value.trim(),
+                    address: document.getElementById('edit-loc-address').value.trim(),
+                    contact_name: document.getElementById('edit-loc-contact').value.trim(),
+                    contact_phone: document.getElementById('edit-loc-phone').value.trim(),
+                    supplier_branch_id: document.getElementById('edit-loc-branch').value || null
+                })
+            });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            hideModal('edit-location-modal');
+            loadLocations();
+        } catch (err) { alert('Failed to save changes: ' + err.message); }
+    }
+
     async function deleteLocation(id, name) {
-        if (!confirm(`Delete location "${name}"?`)) return;
+        if (!confirm(`Delete "${name}"?\n\nThis permanently removes the location and its branch assignment, and cannot be undone.\nUse this if a location has closed or moved to another banner.`)) return;
         try {
             const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/${id}`, { method: 'DELETE' });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
