@@ -6,6 +6,8 @@
     <title>CHC B2B Platform</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <style>
         .tab-active { border-bottom: 3px solid #1e40af; color: #1e40af; font-weight: 600; }
         .promo-badge { animation: pulse-badge 2s infinite; }
@@ -192,15 +194,22 @@
                             <span>Total:</span>
                             <span id="cart-total">$0.00</span>
                         </div>
-                        <button onclick="showCheckout()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors">
-                            Proceed to Checkout
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-800">
+                            <b>Step 1 &mdash; Get it approved.</b> Download this as a quote to send for approval and to get your PO number. Nothing is ordered yet.
+                        </div>
+                        <button onclick="downloadQuote()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors mb-3">
+                            <i class="fas fa-file-arrow-down mr-2"></i>Download Quote (PDF)
+                        </button>
+                        <button onclick="showCheckout()" class="w-full border-2 border-green-600 text-green-700 hover:bg-green-50 font-semibold py-3 rounded-lg transition-colors">
+                            <i class="fas fa-arrow-right mr-2"></i>Convert to Order &mdash; enter PO
                         </button>
                     </div>
                 </div>
 
                 <!-- Checkout Form -->
                 <div id="checkout-form" class="hidden mt-6 bg-white rounded-xl shadow-sm border p-6 fade-in">
-                    <h3 class="text-xl font-bold mb-4">Checkout Details</h3>
+                    <h3 class="text-xl font-bold mb-1">Step 2 &mdash; Convert to Order</h3>
+                    <p class="text-sm text-gray-500 mb-4">Enter the PO number from your approved quote, then submit. This places the order and emails everyone.</p>
                     <form onsubmit="submitOrder(event)" class="space-y-4">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
@@ -922,6 +931,45 @@
     // ============================================================
     // ORDERS
     // ============================================================
+    // Generate a client-side Quote PDF from the current cart (nothing is ordered yet).
+    function downloadQuote() {
+        if (!state.cart.length) { alert('Your cart is empty.'); return; }
+        if (!window.jspdf || !window.jspdf.jsPDF) { alert('Quote generator is still loading \u2014 please try again in a moment.'); return; }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const company = (state.company && state.company.name) || '';
+        const location = (state.location && state.location.name) || '';
+        const now = new Date();
+        const qnum = 'Q-' + now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + '-' + Math.floor(1000+Math.random()*9000);
+        doc.setFontSize(20); doc.setTextColor(30,64,175); doc.text('QUOTE', 14, 20);
+        doc.setFontSize(10); doc.setTextColor(90,90,90);
+        doc.text('CHC Paint & Auto Body Supplies', 14, 27);
+        doc.text('Quote #: ' + qnum, 140, 18);
+        doc.text('Date: ' + now.toLocaleDateString(), 140, 24);
+        doc.setTextColor(20,20,20); doc.setFontSize(11);
+        doc.text('Prepared for: ' + company, 14, 40);
+        doc.text('Location / Branch: ' + location, 14, 46);
+        let total = 0;
+        const rows = state.cart.map(it => {
+            const line = it.price * it.quantity; total += line;
+            return [it.sku || '', it.name, String(it.quantity), '$' + it.price.toFixed(2), '$' + line.toFixed(2)];
+        });
+        doc.autoTable({
+            startY: 54,
+            head: [['SKU','Item','Qty','Unit Price','Line Total']],
+            body: rows,
+            styles: { fontSize: 9, cellPadding: 2 },
+            headStyles: { fillColor: [30,64,175] },
+            columnStyles: { 2:{halign:'center'}, 3:{halign:'right'}, 4:{halign:'right'} }
+        });
+        const y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 60) + 8;
+        doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(20,20,20);
+        doc.text('Total: $' + total.toFixed(2), 140, y);
+        doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(120,120,120);
+        doc.text('This is a quote, not an invoice. Prices are subject to change and final confirmation. To place the order, return to the store, click "Convert to Order", and enter your PO number.', 14, y + 12, { maxWidth: 182 });
+        doc.save(qnum + '.pdf');
+    }
+
     async function submitOrder(e) {
         e.preventDefault();
         const btn = document.getElementById('submit-order-btn');
