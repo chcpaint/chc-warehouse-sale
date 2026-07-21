@@ -660,6 +660,14 @@
                 <input type="text" id="edit-loc-address" placeholder="Full address" class="w-full px-3 py-2 border rounded-lg">
                 <input type="text" id="edit-loc-contact" placeholder="Contact name" class="w-full px-3 py-2 border rounded-lg">
                 <input type="text" id="edit-loc-phone" placeholder="Phone" class="w-full px-3 py-2 border rounded-lg">
+                <div class="grid grid-cols-2 gap-2">
+                    <input type="text" id="edit-loc-province" placeholder="Province (e.g. Nova Scotia)" class="w-full px-3 py-2 border rounded-lg">
+                    <select id="edit-loc-restrict" class="w-full px-3 py-2 border rounded-lg bg-white">
+                        <option value="">All categories</option>
+                        <option value="Equip/Filter/Booth">Equipment/Booth only</option>
+                    </select>
+                </div>
+                <p class="text-xs text-gray-400 -mt-1">Set Province to \u201cNova Scotia\u201d to auto-limit this shop to Equipment/Booth ordering.</p>
                 <div>
                     <label class="block text-xs font-medium text-gray-500 mb-1">Servicing CHC branch</label>
                     <select id="edit-loc-branch" class="w-full px-3 py-2 border rounded-lg bg-white"></select>
@@ -1522,6 +1530,8 @@
         document.getElementById('edit-loc-address').value = l.address || '';
         document.getElementById('edit-loc-contact').value = l.contact_name || '';
         document.getElementById('edit-loc-phone').value = l.contact_phone || '';
+        document.getElementById('edit-loc-province').value = l.province || '';
+        document.getElementById('edit-loc-restrict').value = l.restrict_to_category || '';
         document.getElementById('edit-loc-branch').innerHTML = branchOptions(l.supplier_branch_id);
         showModal('edit-location-modal');
     }
@@ -1538,6 +1548,8 @@
                     address: document.getElementById('edit-loc-address').value.trim(),
                     contact_name: document.getElementById('edit-loc-contact').value.trim(),
                     contact_phone: document.getElementById('edit-loc-phone').value.trim(),
+                    province: document.getElementById('edit-loc-province').value.trim() || null,
+                    restrict_to_category: (() => { let r = document.getElementById('edit-loc-restrict').value || ''; const prov = document.getElementById('edit-loc-province').value.trim().toLowerCase(); if (!r && prov === 'nova scotia') r = 'Equip/Filter/Booth'; return r || null; })(),
                     supplier_branch_id: document.getElementById('edit-loc-branch').value || null
                 })
             });
