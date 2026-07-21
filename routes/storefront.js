@@ -64,7 +64,18 @@ router.get('/:slug/info', async (req, res) => {
 router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
     try {
         const companyId = req.company.id;
-        const { brand, category, search, page = 1, limit = 100 } = req.query;
+        const { brand, category, search, location_id, page = 1, limit = 100 } = req.query;
+
+        // Location-based category lockdown (e.g., Nova Scotia shops -> Equipment/Booth only)
+        let effectiveCategory = category;
+        let lockedCategory = null;
+        if (location_id && isValidUUID(location_id)) {
+            const { data: loc } = await supabaseAdmin
+                .from('company_locations')
+                .select('restrict_to_category')
+                .eq('id', location_id).eq('company_id', companyId).single();
+            if (loc && loc.restrict_to_category) { lockedCategory = loc.restrict_to_category; effectiveCategory = loc.restrict_to_category; }
+        }
 
         let query = supabaseAdmin
             .from('products')
@@ -76,7 +87,7 @@ router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
             .order('name');
 
         if (brand) query = query.eq('brand', brand);
-        if (category) query = query.eq('category', category);
+        if (effectiveCategory) query = query.eq('category', effectiveCategory);
         if (search) query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%,brand.ilike.%${search}%`);
 
         // Pagination
@@ -116,9 +127,10 @@ router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
             total: count,
             page: parseInt(page),
             limit: parseInt(limit),
+            locked_category: lockedCategory,
             filters: {
                 brands: uniqueBrands,
-                categories: uniqueCategories
+                categories: lockedCategory ? [lockedCategory] : uniqueCategories
             }
         });
 
@@ -196,7 +208,7 @@ router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('company_locations')
-            .select('id, name, city, address')
+            .select('id, name, city, address, province, restrict_to_category')
             .eq('company_id', req.company.id)
             .eq('is_active', true)
             .order('sort_order')
@@ -243,7 +255,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         }
         const { data: locationRow, error: locationLookupError } = await supabaseAdmin
             .from('company_locations')
-            .select('id, name, supplier_branch_id')
+            .select('id, name, supplier_branch_id, restrict_to_category')
             .eq('id', location_id)
             .eq('company_id', companyId)
             .eq('is_active', true)
@@ -265,12 +277,20 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         const productIds = items.map(i => i.product_id);
         const { data: products } = await supabaseAdmin
             .from('products')
-            .select('id, name, sku, price, case_qty')
+            .select('id, name, sku, price, case_qty, category')
             .eq('company_id', companyId)
             .in('id', productIds);
 
         if (!products || products.length !== productIds.length) {
             return res.status(400).json({ error: 'One or more products not found.' });
+        }
+
+        // Enforce location category lockdown at order time (defense in depth)
+        if (locationRow.restrict_to_category) {
+            const offItem = products.find(p => (p.category || '') !== locationRow.restrict_to_category);
+            if (offItem) {
+                return res.status(400).json({ error: `This location can only order ${locationRow.restrict_to_category} items. Please remove other items from your cart.` });
+            }
         }
 
         // Check for active promotions on these products (separate queries to avoid .or() injection)
