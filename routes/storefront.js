@@ -441,6 +441,32 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/store/:slug/reports/orders
+ * Filtered orders for reporting: by location, date range. Returns line items too.
+ * Branches may view all and filter; scoping/aggregation happens client-side.
+ */
+router.get('/:slug/reports/orders', requireCompanyAuth, async (req, res) => {
+    try {
+        const { location_id, from, to } = req.query;
+        let q = supabaseAdmin
+            .from('orders')
+            .select('id, order_number, contact_name, po_number, status, total, location, location_id, created_at, items')
+            .eq('company_id', req.company.id)
+            .order('created_at', { ascending: false })
+            .limit(5000);
+        if (location_id) q = q.eq('location_id', location_id);
+        if (from) q = q.gte('created_at', from);
+        if (to) q = q.lte('created_at', to);
+        const { data, error } = await q;
+        if (error) { console.error('Reports fetch error:', error); return res.status(500).json({ error: 'Failed to load report data.' }); }
+        res.json({ orders: data || [] });
+    } catch (err) {
+        console.error('Reports error:', err);
+        res.status(500).json({ error: 'Failed to load report data.' });
+    }
+});
+
+/**
  * GET /api/store/:slug/payments/config
  * Tells the storefront whether online card payment is available for this tenant.
  * Returns { enabled:false } unless Stripe keys are configured AND the company opted in.
