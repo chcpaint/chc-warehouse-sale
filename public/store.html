@@ -129,6 +129,10 @@
                         class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
                         <i class="fas fa-chart-line mr-1"></i> Reports
                     </button>
+                    <button onclick="showTab('contact')" data-tab="contact"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-address-book mr-1"></i> Contact
+                    </button>
                 </nav>
             </div>
         </header>
@@ -352,6 +356,74 @@
                         </thead>
                         <tbody id="rep-orders-body"></tbody>
                     </table></div>
+                </div>
+            </section>
+
+            <!-- ============ CONTACT TAB ============ -->
+            <section id="tab-contact" class="hidden fade-in">
+                <h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-address-book mr-2"></i>Contact CHC</h2>
+                <p class="text-gray-500 mb-5">Reach CHC head office or your servicing branch.</p>
+
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Head Office</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800">Frank Chiappetta</p>
+                        <p class="text-sm text-blue-600 mb-2">Sales Director</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:4168242655" class="hover:underline">416-824-2655</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:frankc@chcpaint.com" class="text-blue-600 hover:underline">frankc@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800">Gabriel Chiappetta</p>
+                        <p class="text-sm text-blue-600 mb-2">District Manager, Ontario</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:6479967062" class="hover:underline">647-996-7062</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:gabe@chcpaint.com" class="text-blue-600 hover:underline">gabe@chcpaint.com</a></p>
+                    </div>
+                </div>
+
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Branches</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Markham Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">166 Bullock Drive, Unit 8&9</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Frank Guido</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:9055543133" class="hover:underline">905-554-3133</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:markham@chcpaint.com" class="text-blue-600 hover:underline">markham@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Woodbridge Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">4370 Steeles Ave. W., Unit 23</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Francesco Pacheco</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:9058507009" class="hover:underline">905-850-7009</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:woodbridge@chcpaint.com" class="text-blue-600 hover:underline">woodbridge@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Hamilton Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">83 Bigwin Rd., Unit 7</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Jonathan Derouchie</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:9055759517" class="hover:underline">905-575-9517</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:hamilton@chcpaint.com" class="text-blue-600 hover:underline">hamilton@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Oakville Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">1200 Speers Rd., Unit 13&15</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Amarbir Singh</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:2898370123" class="hover:underline">289-837-0123</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:oakville@chcpaint.com" class="text-blue-600 hover:underline">oakville@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Ottawa Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">2750 Stevenage Dr., Unit 3</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Mick Teillet-Proulx</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:6137337373" class="hover:underline">613-733-7373</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:ottawa@chcpaint.com" class="text-blue-600 hover:underline">ottawa@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>St. Catharines Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">33 Elm St.</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Candice Pearce</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:2893625150" class="hover:underline">289-362-5150</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:stcatharines@chcpaint.com" class="text-blue-600 hover:underline">stcatharines@chcpaint.com</a></p>
+                    </div>
                 </div>
             </section>
 
