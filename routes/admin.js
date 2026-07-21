@@ -1236,6 +1236,35 @@ router.get('/reports/by-location', async (req, res) => {
 });
 
 /**
+ * GET /api/admin/reports/orders
+ * Filtered orders (with line items) for the console Reports view. Respects role scoping.
+ */
+router.get('/reports/orders', async (req, res) => {
+    try {
+        const { company_id, location_id, from, to } = req.query;
+        let q = supabaseAdmin
+            .from('orders')
+            .select('id, order_number, contact_name, po_number, status, total, location, location_id, company_id, created_at, items, companies (id, name)')
+            .order('created_at', { ascending: false })
+            .limit(5000);
+        if (req.admin.role !== 'super_admin') {
+            q = q.eq('company_id', req.admin.company_id);
+        } else if (company_id) {
+            q = q.eq('company_id', company_id);
+        }
+        if (location_id) q = q.eq('location_id', location_id);
+        if (from) q = q.gte('created_at', from);
+        if (to) q = q.lte('created_at', to);
+        const { data, error } = await q;
+        if (error) throw error;
+        res.json({ orders: data || [] });
+    } catch (err) {
+        console.error('Admin reports/orders error:', err);
+        res.status(500).json({ error: 'Failed to load report data.' });
+    }
+});
+
+/**
  * PUT /api/admin/orders/:orderId/status
  */
 router.put('/orders/:orderId/status', async (req, res) => {
