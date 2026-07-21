@@ -6,6 +6,8 @@
     <title>CHC Admin Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <style>
         .sidebar-link.active { background: rgba(59, 130, 246, 0.1); color: #2563eb; border-right: 3px solid #2563eb; }
         .fade-in { animation: fadeIn 0.3s ease; }
@@ -86,6 +88,9 @@
                 </button>
                 <button onclick="adminNav('orders')" data-nav="orders" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-receipt w-5"></i> Orders
+                </button>
+                <button onclick="adminNav('reports')" data-nav="reports" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-chart-line w-5"></i> Reports
                 </button>
                 <button onclick="adminNav('admins')" data-nav="admins" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-admins">
                     <i class="fas fa-users-cog w-5"></i> Admin Users
@@ -402,6 +407,93 @@
                 </section>
 
                 <!-- Admin Users -->
+                <!-- Reports (CHC head office: all companies) -->
+                <section id="section-reports" class="hidden fade-in">
+                    <div class="flex flex-wrap gap-3 items-end mb-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Company</label>
+                            <select id="rep-company" onchange="onRepCompanyChange()" class="px-3 py-2 border rounded-lg text-sm bg-white min-w-[150px]">
+                                <option value="">All Companies</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Shop</label>
+                            <select id="rep-shop" onchange="arLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white min-w-[150px]">
+                                <option value="">All shops</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Period</label>
+                            <select id="rep-period" onchange="onAdminRepPeriodChange()" class="px-3 py-2 border rounded-lg text-sm bg-white">
+                                <option value="this_month">This month</option>
+                                <option value="last_month">Last month</option>
+                                <option value="this_quarter">This quarter</option>
+                                <option value="this_year" selected>This year</option>
+                                <option value="last_year">Last year</option>
+                                <option value="all">All time</option>
+                                <option value="custom">Custom range</option>
+                            </select>
+                        </div>
+                        <div id="rep-cf" class="hidden">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">From</label>
+                            <input type="date" id="rep-from" onchange="arLoad()" class="px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                        <div id="rep-ct" class="hidden">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">To</label>
+                            <input type="date" id="rep-to" onchange="arLoad()" class="px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Item (name or SKU)</label>
+                            <input type="text" id="rep-item" oninput="arItemDebounce()" placeholder="Filter by item&hellip;" class="px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                        <div class="ml-auto flex gap-2">
+                            <button onclick="downloadAdminReportCSV('orders')" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Orders CSV</button>
+                            <button onclick="downloadAdminReportCSV('items')" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Item CSV</button>
+                            <button onclick="downloadAdminReportPDF(false)" class="px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm"><i class="fas fa-file-pdf mr-1"></i>Summary PDF</button>
+                            <button onclick="downloadAdminReportPDF(true)" class="px-3 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-sm"><i class="fas fa-print mr-1"></i>Print</button>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-400 mb-3">CSV files open directly in Google Sheets or Excel.</p>
+
+                    <div id="rep-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
+
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                        <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
+                            <span class="font-semibold text-gray-700 text-sm">Items purchased</span>
+                            <span id="rep-items-meta" class="text-xs text-gray-400"></span>
+                        </div>
+                        <div class="overflow-x-auto"><table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('items','sku')">SKU</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('items','name')">Item</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="arSort('items','qty')">Qty</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="arSort('items','orders')">Orders</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="arSort('items','spend')">Spend</th>
+                            </tr></thead>
+                            <tbody id="rep-items-body"></tbody>
+                        </table></div>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
+                            <span class="font-semibold text-gray-700 text-sm">Orders</span>
+                            <span id="rep-orders-meta" class="text-xs text-gray-400"></span>
+                        </div>
+                        <div class="overflow-x-auto"><table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','date')">Date</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','order')">Order #</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','company')">Company</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','shop')">Shop</th>
+                                <th class="text-left px-4 py-2">PO</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','by')">Ordered by</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="arSort('orders','total')">Total</th>
+                            </tr></thead>
+                            <tbody id="rep-orders-body"></tbody>
+                        </table></div>
+                    </div>
+                </section>
+
                 <section id="section-admins" class="hidden fade-in">
                     <div class="flex justify-between items-center mb-4">
                         <p class="text-gray-500">Manage admin user accounts.</p>
@@ -898,9 +990,10 @@
         document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products',
-            promotions: 'Promotions', orders: 'Orders', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
+            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
+        if (section === 'reports') arInit();
         if (section === 'products') loadAdminProducts();
         if (section === 'promotions') loadAdminPromotions();
         if (section === 'orders') loadAdminOrders();
@@ -931,6 +1024,180 @@
                 ...(options.headers || {})
             }
         });
+    }
+
+    // ============================================================
+    // CHC REPORTS (all companies)
+    // ============================================================
+    let arState = { orders: [], items: [], filteredOrders: [], periodLabel: '', shopsCompany: null,
+                    sort: { orders: { key: 'date', dir: -1 }, items: { key: 'spend', dir: -1 } } };
+    let arTimer, arInited = false;
+    function arItemDebounce() { clearTimeout(arTimer); arTimer = setTimeout(arApplyFilters, 300); }
+    async function arInit() { if (!arInited) { arInited = true; await populateRepShops(); } arLoad(); }
+
+    function arPeriodRange(pd) {
+        const now = new Date(); const y = now.getFullYear(); const m = now.getMonth();
+        const iso = d => d.toISOString();
+        const start = (yy, mm, dd) => new Date(yy, mm, dd, 0, 0, 0);
+        const end = (yy, mm, dd) => new Date(yy, mm, dd, 23, 59, 59, 999);
+        const q = Math.floor(m / 3);
+        const mLabel = d => d.toLocaleString('default', { month: 'long' }) + ' ' + d.getFullYear();
+        switch (pd) {
+            case 'this_month':   return { from: iso(start(y, m, 1)), to: iso(now), label: mLabel(now) };
+            case 'last_month':   { const d = new Date(y, m - 1, 1); return { from: iso(start(d.getFullYear(), d.getMonth(), 1)), to: iso(end(y, m, 0)), label: mLabel(d) }; }
+            case 'this_quarter': return { from: iso(start(y, q * 3, 1)), to: iso(now), label: 'Q' + (q + 1) + ' ' + y };
+            case 'this_year':    return { from: iso(start(y, 0, 1)), to: iso(now), label: 'Year ' + y };
+            case 'last_year':    return { from: iso(start(y - 1, 0, 1)), to: iso(end(y - 1, 11, 31)), label: 'Year ' + (y - 1) };
+            case 'custom':       {
+                const f = document.getElementById('rep-from').value; const t = document.getElementById('rep-to').value;
+                const parse = (v, e) => { if (!v) return null; const [yy, mm, dd] = v.split('-').map(Number); return iso(e ? end(yy, mm - 1, dd) : start(yy, mm - 1, dd)); };
+                return { from: parse(f, false), to: parse(t, true), label: (f || '\u2026') + ' to ' + (t || '\u2026') };
+            }
+            default: return { from: null, to: null, label: 'All time' };
+        }
+    }
+    function onAdminRepPeriodChange() {
+        const custom = document.getElementById('rep-period').value === 'custom';
+        document.getElementById('rep-cf').classList.toggle('hidden', !custom);
+        document.getElementById('rep-ct').classList.toggle('hidden', !custom);
+        if (!custom) arLoad();
+    }
+    async function onRepCompanyChange() { await populateRepShops(); arLoad(); }
+    async function populateRepShops() {
+        const companyId = document.getElementById('rep-company').value;
+        const sel = document.getElementById('rep-shop');
+        if (arState.shopsCompany === companyId) return;
+        let opts = '<option value="">All shops</option>';
+        if (companyId) {
+            try {
+                const resp = await adminFetch(`/companies/${companyId}/locations`);
+                const data = await resp.json();
+                const locs = (data.locations || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+                opts += locs.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('');
+            } catch (e) { /* All shops only */ }
+        }
+        sel.innerHTML = opts; arState.shopsCompany = companyId;
+    }
+    async function arLoad() {
+        const companyId = document.getElementById('rep-company').value;
+        const shop = document.getElementById('rep-shop').value;
+        const { from, to, label } = arPeriodRange(document.getElementById('rep-period').value);
+        arState.periodLabel = label;
+        const params = new URLSearchParams();
+        if (companyId) params.set('company_id', companyId);
+        if (shop) params.set('location_id', shop);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        try {
+            const resp = await adminFetch(`/reports/orders?${params}`);
+            const data = await resp.json();
+            arState.orders = (data.orders || []).map(o => ({ ...o, company_name: (o.companies && o.companies.name) || '' }));
+            arApplyFilters();
+        } catch (e) {
+            document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-red-500">Failed to load report.</td></tr>';
+        }
+    }
+    function arApplyFilters() {
+        const term = (document.getElementById('rep-item').value || '').trim().toLowerCase();
+        const match = i => !term || (i.name || '').toLowerCase().includes(term) || (i.sku || '').toLowerCase().includes(term);
+        let orders = arState.orders;
+        if (term) orders = orders.filter(o => (o.items || []).some(match));
+        arState.filteredOrders = orders;
+        const map = {};
+        orders.forEach(o => (o.items || []).forEach(i => {
+            if (!match(i)) return;
+            const key = i.sku || i.name;
+            if (!map[key]) map[key] = { sku: i.sku || '', name: i.name || '', qty: 0, orders: new Set(), spend: 0 };
+            map[key].qty += Number(i.quantity) || 0;
+            map[key].orders.add(o.id);
+            map[key].spend += Number(i.subtotal) || 0;
+        }));
+        arState.items = Object.values(map).map(x => ({ sku: x.sku, name: x.name, qty: x.qty, orders: x.orders.size, spend: x.spend }));
+        arRender();
+    }
+    function arCmp(a, b, key, dir) { let x = a[key], y = b[key]; if (typeof x === 'string') { x = x.toLowerCase(); y = (y || '').toLowerCase(); } return (x < y ? -1 : x > y ? 1 : 0) * dir; }
+    function arCmpOrder(a, b, key, dir) {
+        const g = { date: o => o.created_at, order: o => o.order_number, company: o => o.company_name || '', shop: o => o.location || '', by: o => o.contact_name || '', total: o => Number(o.total) || 0 };
+        let x = g[key](a), y = g[key](b); if (typeof x === 'string') { x = x.toLowerCase(); y = (y || '').toLowerCase(); } return (x < y ? -1 : x > y ? 1 : 0) * dir;
+    }
+    function arSort(which, key) {
+        const st = arState.sort[which];
+        const textKeys = ['name', 'sku', 'date', 'order', 'company', 'shop', 'by'];
+        st.dir = (st.key === key) ? -st.dir : (textKeys.includes(key) ? 1 : -1);
+        st.key = key; arRender();
+    }
+    function arRender() {
+        const orders = arState.filteredOrders;
+        const totalSpend = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+        const units = arState.items.reduce((s, i) => s + i.qty, 0);
+        const cards = [['Orders', orders.length], ['Total spend', '$' + totalSpend.toFixed(2)], ['Units', units], ['Unique items', arState.items.length]];
+        document.getElementById('rep-summary').innerHTML = cards.map(c => `
+            <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-gray-400 uppercase">${c[0]}</p><p class="text-2xl font-bold text-gray-800 mt-1">${c[1]}</p></div>`).join('');
+        const si = arState.sort.items;
+        const items = arState.items.slice().sort((a, b) => arCmp(a, b, si.key, si.dir));
+        document.getElementById('rep-items-body').innerHTML = items.length ? items.map(i => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2 text-gray-500">${esc(i.sku || '-')}</td>
+                <td class="px-4 py-2">${esc(i.name)}</td>
+                <td class="px-4 py-2 text-right font-semibold">${i.qty}</td>
+                <td class="px-4 py-2 text-right">${i.orders}</td>
+                <td class="px-4 py-2 text-right">$${i.spend.toFixed(2)}</td>
+            </tr>`).join('') : '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No items in this range.</td></tr>';
+        document.getElementById('rep-items-meta').textContent = arState.periodLabel;
+        const so = arState.sort.orders;
+        const os = orders.slice().sort((a, b) => arCmpOrder(a, b, so.key, so.dir));
+        document.getElementById('rep-orders-body').innerHTML = os.length ? os.map(o => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2 text-gray-500">${new Date(o.created_at).toLocaleDateString()}</td>
+                <td class="px-4 py-2 font-mono font-semibold text-blue-700">${esc(o.order_number)}</td>
+                <td class="px-4 py-2">${esc(o.company_name || '-')}</td>
+                <td class="px-4 py-2">${esc(o.location || '-')}</td>
+                <td class="px-4 py-2">${esc(o.po_number || '-')}</td>
+                <td class="px-4 py-2">${esc(o.contact_name || '-')}</td>
+                <td class="px-4 py-2 text-right font-semibold">$${parseFloat(o.total).toFixed(2)}</td>
+            </tr>`).join('') : '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400">No orders in this range.</td></tr>';
+        document.getElementById('rep-orders-meta').textContent = `${orders.length} order${orders.length !== 1 ? 's' : ''} \u00b7 ${arState.periodLabel}`;
+    }
+    function arCsvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    function arSlug() { return (arState.periodLabel || 'report').replace(/[^a-z0-9]+/gi, '-'); }
+    function downloadAdminReportCSV(kind) {
+        let rows, name;
+        if (kind === 'items') {
+            rows = [['SKU', 'Item', 'Qty', 'Orders', 'Spend']];
+            arState.items.slice().sort((a, b) => b.spend - a.spend).forEach(i => rows.push([i.sku, i.name, i.qty, i.orders, i.spend.toFixed(2)]));
+            name = 'item-summary';
+        } else {
+            rows = [['Date', 'Order #', 'Company', 'Shop', 'PO', 'Ordered by', 'Status', 'Items', 'Total']];
+            arState.filteredOrders.forEach(o => rows.push([new Date(o.created_at).toLocaleDateString(), o.order_number, o.company_name || '', o.location || '', o.po_number || '', o.contact_name || '', o.status || '', (o.items || []).length, parseFloat(o.total).toFixed(2)]));
+            name = 'orders';
+        }
+        const csv = rows.map(r => r.map(arCsvCell).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `CHC-report-${name}-${arSlug()}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    }
+    function downloadAdminReportPDF(printIt) {
+        if (!window.jspdf || !window.jspdf.jsPDF) { alert('PDF generator is still loading \u2014 try again in a moment.'); return; }
+        const { jsPDF } = window.jspdf; const doc = new jsPDF();
+        const cSel = document.getElementById('rep-company'); const cName = cSel.options[cSel.selectedIndex] ? cSel.options[cSel.selectedIndex].text : 'All Companies';
+        const sSel = document.getElementById('rep-shop'); const sName = sSel.options[sSel.selectedIndex] ? sSel.options[sSel.selectedIndex].text : 'All shops';
+        const orders = arState.filteredOrders;
+        const totalSpend = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+        const units = arState.items.reduce((s, i) => s + i.qty, 0);
+        doc.setFontSize(18); doc.setTextColor(30, 64, 175); doc.text('Purchase Summary', 14, 18);
+        doc.setFontSize(10); doc.setTextColor(90, 90, 90);
+        doc.text('CHC Paint & Auto Body Supplies', 14, 25);
+        doc.text('Generated: ' + new Date().toLocaleDateString(), 150, 18);
+        doc.text('Company: ' + cName + '     Shop: ' + sName, 14, 33);
+        doc.text('Period: ' + arState.periodLabel, 14, 39);
+        doc.setTextColor(20, 20, 20); doc.setFontSize(11);
+        doc.text(`Orders: ${orders.length}    Total spend: $${totalSpend.toFixed(2)}    Units: ${units}    Unique items: ${arState.items.length}`, 14, 49);
+        doc.autoTable({ startY: 56, head: [['SKU', 'Item', 'Qty', 'Orders', 'Spend']],
+            body: arState.items.slice().sort((a, b) => b.spend - a.spend).map(i => [i.sku || '', i.name, String(i.qty), String(i.orders), '$' + i.spend.toFixed(2)]),
+            styles: { fontSize: 8, cellPadding: 1.5 }, headStyles: { fillColor: [30, 64, 175] },
+            columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } } });
+        if (printIt) { doc.output('dataurlnewwindow'); } else { doc.save(`CHC-summary-${arSlug()}.pdf`); }
     }
 
     function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
@@ -1001,7 +1268,7 @@
     }
 
     function populateCompanyDropdowns() {
-        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'new-admin-company'];
+        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'rep-company', 'new-admin-company'];
         selectors.forEach(id => {
             const el = document.getElementById(id);
             if (!el) return;
