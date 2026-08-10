@@ -227,6 +227,30 @@ router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
  * POST /api/store/:slug/orders
  * Submit a new order
  */
+/**
+ * POST /api/store/:slug/track
+ * Lightweight, anonymous usage logging (visit / login / enter-store). Never blocks the store.
+ */
+router.post('/:slug/track', async (req, res) => {
+    try {
+        const { event, location_id, session_id } = req.body || {};
+        const ev = ['visit', 'login', 'enter'].includes(event) ? event : 'visit';
+        const { data: company } = await supabaseAdmin
+            .from('companies').select('id').eq('slug', req.params.slug).single();
+        if (!company) return res.json({ ok: true });
+        await supabaseAdmin.from('console_visits').insert({
+            company_id: company.id,
+            slug: req.params.slug,
+            event: ev,
+            location_id: (location_id && isValidUUID(location_id)) ? location_id : null,
+            session_id: (session_id || '').toString().slice(0, 64),
+            ip: (req.headers['x-forwarded-for'] || req.ip || '').toString().split(',')[0].trim().slice(0, 64),
+            user_agent: (req.headers['user-agent'] || '').toString().slice(0, 300)
+        });
+        res.json({ ok: true });
+    } catch (e) { res.json({ ok: true }); }
+});
+
 router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const companyId = req.company.id;
@@ -381,7 +405,8 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             // Notify the company notification/contact email plus every configured manager.
             const cfg = companyData?.email_config || {};
             const managerEmails = Array.isArray(cfg.manager_emails) ? cfg.manager_emails : [];
-            const baseEmail = cfg.notification_email || companyData?.contact_email;
+            // Company contact email (if the company has one set). Managers below are the optional per-company group.
+            const companyContact = companyData?.contact_email;
 
             // Route to the servicing CHC branch assigned to this order's location.
             let branchEmails = [];
@@ -394,15 +419,21 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 if (branch && branch.is_active !== false && Array.isArray(branch.emails)) branchEmails = branch.emails;
             }
 
+            // Always email the person who placed the order + the company contact (if set)
+            // + the optional manager/general group + the servicing CHC branch.
+            const ordererEmail = String(contact_email || '').trim().toLowerCase();
             const recipients = [...new Set(
-                [...(baseEmail ? [baseEmail] : []), ...managerEmails, ...branchEmails]
+                [ordererEmail, ...(companyContact ? [companyContact] : []), ...managerEmails, ...branchEmails]
                     .map(e => String(e || '').trim().toLowerCase())
                     .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
             )];
+            // Replies (from the branch/CHC) go back to the person who ordered, then the company contact.
+            const replyTo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ordererEmail) ? ordererEmail : (companyContact || undefined);
 
             if (recipients.length) {
                 sendOrderNotification({
                     to: recipients,
+                    replyTo,
                     order: { ...order, items: verifiedItems },
                     companyName: req.company.name,
                     contactName: stripHtml(contact_name),

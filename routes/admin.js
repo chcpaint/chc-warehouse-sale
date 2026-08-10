@@ -569,7 +569,7 @@ router.post('/companies/:companyId/orders/:orderId/invoice', requireCompanyAcces
         const { companyId, orderId } = req.params;
 
         const { data: order, error: oErr } = await supabaseAdmin
-            .from('orders').select('id, order_number, company_id, location_id')
+            .from('orders').select('id, order_number, company_id, location_id, contact_email')
             .eq('id', orderId).eq('company_id', companyId).single();
         if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
 
@@ -591,11 +591,11 @@ router.post('/companies/:companyId/orders/:orderId/invoice', requireCompanyAcces
 
         // Notify the same recipients as the order confirmation (company + managers + branch)
         try {
-            const recipients = await resolveOrderRecipients(order);
+            const { to: recipients, replyTo } = await resolveOrderRecipients(order);
             if (recipients.length) {
                 const { data: company } = await supabaseAdmin.from('companies').select('name, slug').eq('id', companyId).single();
                 const retrieveUrl = `${process.env.APP_URL || ''}/store/${company?.slug || ''}`;
-                sendInvoiceReady({ to: recipients, order: { order_number: order.order_number, id: order.id }, companyName: company?.name || '', retrieveUrl })
+                sendInvoiceReady({ to: recipients, replyTo, order: { order_number: order.order_number, id: order.id }, companyName: company?.name || '', retrieveUrl })
                     .catch(e => console.error('Invoice email failed (non-blocking):', e.message));
             }
         } catch (e) { console.error('Invoice recipients error:', e.message); }
@@ -1321,7 +1321,7 @@ router.put('/companies/:companyId/orders/:orderId/close', requireCompanyAccess, 
 
         const { data: order, error: oErr } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, company_id, location_id, status, payment_status, invoice_filename, status_history')
+            .select('id, order_number, company_id, location_id, contact_email, status, payment_status, invoice_filename, status_history')
             .eq('id', orderId).eq('company_id', companyId).single();
         if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
 
@@ -1357,10 +1357,10 @@ router.put('/companies/:companyId/orders/:orderId/close', requireCompanyAccess, 
 
         // Non-blocking payment-received confirmation to the same recipients as the order.
         try {
-            const recipients = await resolveOrderRecipients(order);
+            const { to: recipients, replyTo } = await resolveOrderRecipients(order);
             if (recipients.length) {
                 const { data: company } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).single();
-                sendOrderClosed({ to: recipients, order: { order_number: order.order_number, id: order.id }, companyName: company?.name || '' })
+                sendOrderClosed({ to: recipients, replyTo, order: { order_number: order.order_number, id: order.id }, companyName: company?.name || '' })
                     .catch(e => console.error('Order-closed email failed (non-blocking):', e.message));
             }
         } catch (e) { console.error('Order-closed recipients error:', e.message); }
