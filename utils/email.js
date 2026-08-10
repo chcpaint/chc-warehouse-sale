@@ -41,7 +41,7 @@ async function sendOrderNotification(options) {
         return { sent: false, reason: 'not_configured' };
     }
 
-    const { to, order, companyName, contactName, contactEmail, contactPhone, poNumber, location, notes } = options;
+    const { to, order, companyName, contactName, contactEmail, contactPhone, poNumber, location, notes, replyTo } = options;
 
     // `to` may be a single address or an array of manager addresses
     const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
@@ -66,11 +66,12 @@ async function sendOrderNotification(options) {
     const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">New Order Received</h2>
+            <h2 style="margin: 0;">Order Received</h2>
             <p style="margin: 5px 0 0; opacity: 0.9;">Order #${escHtml(order.order_number || order.id)}</p>
         </div>
         <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
             <h3 style="color: #374151; margin-top: 0;">Company: ${escHtml(companyName)}</h3>
+            <p style="color:#374151; margin:0 0 15px;">Thank you — we've received your order. Our team will follow up with your invoice for payment. A copy is below for your records.</p>
 
             ${poNumber ? `<div style="margin-bottom: 15px; padding: 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;">
                 <strong style="font-size: 16px; color: #1e40af;">PO #: ${escHtml(poNumber)}</strong>
@@ -116,7 +117,8 @@ async function sendOrderNotification(options) {
         await sgMail.send({
             to: recipients,
             from: fromAddress,
-            subject: `${companyName} Ordering, ${order.order_number || order.id}${location ? ', ' + location : ''}`,
+            subject: `Order received \u2014 ${companyName} order ${order.order_number || order.id}${location ? ', ' + location : ''}`,
+            replyTo: replyTo || undefined,
             text,
             html
         });
@@ -134,7 +136,7 @@ async function sendOrderNotification(options) {
  */
 async function sendInvoiceReady(options) {
     if (!ensureInit()) return { sent: false, reason: 'not_configured' };
-    const { to, order, companyName, retrieveUrl } = options;
+    const { to, order, companyName, retrieveUrl, replyTo } = options;
     const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
     if (!recipients.length) return { sent: false, reason: 'no_recipient' };
     const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
@@ -170,7 +172,7 @@ async function sendInvoiceReady(options) {
  */
 async function sendOrderClosed(options) {
     if (!ensureInit()) return { sent: false, reason: 'not_configured' };
-    const { to, order, companyName } = options;
+    const { to, order, companyName, replyTo } = options;
     const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
     if (!recipients.length) return { sent: false, reason: 'no_recipient' };
     const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';

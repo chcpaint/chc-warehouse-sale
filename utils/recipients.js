@@ -6,16 +6,20 @@ function validEmails(list) {
 }
 
 /**
- * Resolve who should be emailed for an order:
- * the company notification/contact email + the company managers + the
- * servicing CHC branch assigned to the order's location. Deduped + validated.
- * @param {{company_id:string, location_id?:string}} order
+ * Resolve who should be emailed for an order and who replies go to.
+ * TO: the person who placed the order (order.contact_email) + the company's
+ *     contact email (if set) + the company's manager/general group (optional,
+ *     per-company) + the servicing CHC branch assigned to the order's location.
+ * REPLY-TO: the orderer (falls back to the company contact) so replies from the
+ *     branch/CHC land with the person who placed the order.
+ * @param {{company_id:string, location_id?:string, contact_email?:string}} order
+ * @returns {Promise<{to:string[], replyTo?:string}>}
  */
 async function resolveOrderRecipients(order) {
     const { data: company } = await supabaseAdmin
         .from('companies').select('email_config, contact_email').eq('id', order.company_id).single();
     const cfg = company?.email_config || {};
-    const base = cfg.notification_email || company?.contact_email;
+    const companyContact = company?.contact_email;
     const managers = Array.isArray(cfg.manager_emails) ? cfg.manager_emails : [];
 
     let branchEmails = [];
@@ -28,7 +32,16 @@ async function resolveOrderRecipients(order) {
             if (branch && branch.is_active !== false && Array.isArray(branch.emails)) branchEmails = branch.emails;
         }
     }
-    return validEmails([...(base ? [base] : []), ...managers, ...branchEmails]);
+
+    const orderer = order.contact_email;
+    const to = validEmails([
+        ...(orderer ? [orderer] : []),
+        ...(companyContact ? [companyContact] : []),
+        ...managers,
+        ...branchEmails
+    ]);
+    const replyTo = validEmails([...(orderer ? [orderer] : []), ...(companyContact ? [companyContact] : [])])[0];
+    return { to, replyTo };
 }
 
 module.exports = { resolveOrderRecipients, validEmails };
