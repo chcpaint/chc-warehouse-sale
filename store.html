@@ -1,0 +1,1618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHC B2B Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        .tab-active { border-bottom: 3px solid #1e40af; color: #1e40af; font-weight: 600; }
+        .promo-badge { animation: pulse-badge 2s infinite; }
+        @keyframes pulse-badge { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+        .cart-count { animation: pop 0.3s ease; }
+        @keyframes pop { 0% { transform: scale(0.5); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+        .skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <!-- ============================================================ -->
+    <!-- LOGIN SCREEN -->
+    <!-- ============================================================ -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-blue-700">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4">
+            <!-- Dual Logo Area -->
+            <div class="flex items-center justify-center gap-4 mb-6">
+                <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-14 object-contain" onerror="this.style.display='none'">
+                <div class="h-10 w-px bg-gray-300" id="logo-divider" style="display:none"></div>
+                <img id="login-company-logo" src="" alt="" class="h-14 object-contain" style="display:none">
+            </div>
+            <h2 id="login-company-name" class="text-2xl font-bold text-center text-gray-800 mb-2">Welcome</h2>
+            <p class="text-gray-500 text-center mb-6">Enter your access code to continue</p>
+
+            <div id="login-error" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm"></div>
+
+            <!-- Step 1: Access code -->
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Access Code</label>
+                    <input type="password" id="access-code" placeholder="Enter your company access code"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg" required>
+                </div>
+                <button type="submit" id="login-btn"
+                    class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors">
+                    <span id="login-btn-text">Continue</span>
+                    <i id="login-spinner" class="fas fa-spinner fa-spin ml-2 hidden"></i>
+                </button>
+            </form>
+
+            <!-- Step 2: Location selection (shown after the access code is verified) -->
+            <div id="location-step" class="hidden space-y-4">
+                <p class="text-sm text-gray-600">Select your location to continue. All orders in this session will be recorded under this location.</p>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Your Location *</label>
+                    <div class="relative" id="location-picker">
+                        <input type="text" id="location-search" placeholder="Search locations..." autocomplete="off"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg pr-8 focus:ring-2 focus:ring-blue-500"
+                            onfocus="showLocationDropdown()" oninput="filterLocations()">
+                        <i class="fas fa-chevron-down absolute right-3 top-4 text-gray-400 pointer-events-none" id="location-chevron"></i>
+                        <input type="hidden" id="selected-location-id" value="">
+                        <div id="location-dropdown" class="hidden absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto"></div>
+                    </div>
+                </div>
+                <button type="button" id="enter-store-btn" onclick="enterStore()" disabled
+                    class="w-full bg-blue-700 hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition-colors">
+                    Enter Store
+                </button>
+                <button type="button" onclick="resetLogin()" class="w-full text-sm text-gray-500 hover:text-gray-700">
+                    Use a different access code
+                </button>
+            </div>
+
+            <p class="text-center text-xs text-gray-400 mt-6">Powered by Refinish AI</p>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MAIN APPLICATION -->
+    <!-- ============================================================ -->
+    <div id="app" class="hidden">
+        <!-- HEADER with dual branding -->
+        <header class="bg-white shadow-sm border-b sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 py-3">
+                <div class="flex items-center justify-between">
+                    <!-- Dual Logo -->
+                    <div class="flex items-center gap-3">
+                        <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-10 object-contain" onerror="this.parentElement.innerHTML='<span class=\'font-bold text-blue-900 text-xl\'>CHC</span>'">
+                        <div class="h-8 w-px bg-gray-300" id="header-logo-divider" style="display:none"></div>
+                        <img id="header-company-logo" src="" alt="" class="h-10 object-contain" style="display:none">
+                        <span id="header-company-name" class="font-semibold text-gray-700 text-lg"></span>
+                    </div>
+
+                    <!-- Cart & User Info -->
+                    <div class="flex items-center gap-4">
+                        <button onclick="showTab('cart')" class="relative bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-2 rounded-lg transition-colors">
+                            <i class="fas fa-shopping-cart"></i>
+                            <span id="cart-badge" class="hidden absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center cart-count">0</span>
+                        </button>
+                        <button onclick="logout()" class="text-gray-400 hover:text-gray-600 text-sm">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Navigation Tabs -->
+                <nav class="flex gap-1 mt-3 -mb-px" id="nav-tabs">
+                    <button onclick="showTab('products')" data-tab="products"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all tab-active">
+                        <i class="fas fa-box mr-1"></i> Products
+                    </button>
+                    <button onclick="showTab('promotions')" data-tab="promotions"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-tags mr-1"></i> Promotions
+                    </button>
+                    <button onclick="showTab('cart')" data-tab="cart"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-shopping-cart mr-1"></i> Cart
+                    </button>
+                    <button onclick="showTab('orders')" data-tab="orders"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-receipt mr-1"></i> Order History
+                    </button>
+                    <button onclick="showTab('reports')" data-tab="reports"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-chart-line mr-1"></i> Reports
+                    </button>
+                    <button onclick="showTab('contact')" data-tab="contact"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-address-book mr-1"></i> Contact
+                    </button>
+                </nav>
+            </div>
+        </header>
+
+        <!-- MAIN CONTENT -->
+        <main class="max-w-7xl mx-auto px-4 py-6">
+
+            <!-- ============ PRODUCTS TAB ============ -->
+            <section id="tab-products" class="fade-in">
+                <!-- Filters -->
+                <div class="bg-white rounded-xl shadow-sm border p-4 mb-6">
+                    <div class="flex flex-wrap gap-3 items-center">
+                        <div class="flex-1 min-w-[200px]">
+                            <div class="relative">
+                                <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                                <input type="text" id="search-input" placeholder="Search products..."
+                                    class="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    oninput="debounceSearch()">
+                            </div>
+                        </div>
+                        <select id="brand-filter" onchange="loadProducts()" class="px-3 py-2 border rounded-lg bg-white">
+                            <option value="">All Brands</option>
+                        </select>
+                        <select id="category-filter" onchange="loadProducts()" class="px-3 py-2 border rounded-lg bg-white">
+                            <option value="">All Categories</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="ns-lock-banner" class="hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-3 mb-4 text-sm">
+                    <i class="fas fa-lock mr-2"></i><span id="ns-lock-text"></span>
+                </div>
+
+                <!-- Product Grid -->
+                <div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <!-- Products loaded dynamically -->
+                </div>
+
+                <!-- Pagination -->
+                <div id="pagination" class="flex justify-center gap-2 mt-6"></div>
+            </section>
+
+            <!-- ============ PROMOTIONS TAB ============ -->
+            <section id="tab-promotions" class="hidden fade-in">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800"><i class="fas fa-tags text-red-500 mr-2"></i>Current Promotions</h2>
+                    <p class="text-gray-500 mt-1">Special pricing on select products — limited time!</p>
+                </div>
+                <div id="promotions-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <!-- Promotions loaded dynamically -->
+                </div>
+                <div id="no-promotions" class="hidden text-center py-12 text-gray-400">
+                    <i class="fas fa-tags text-4xl mb-3"></i>
+                    <p class="text-lg">No active promotions right now.</p>
+                    <p class="text-sm">Check back soon for special deals!</p>
+                </div>
+            </section>
+
+            <!-- ============ CART TAB ============ -->
+            <section id="tab-cart" class="hidden fade-in">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-shopping-cart mr-2"></i>Your Cart</h2>
+                <div id="cart-empty" class="text-center py-12 text-gray-400">
+                    <i class="fas fa-shopping-cart text-4xl mb-3"></i>
+                    <p class="text-lg">Your cart is empty</p>
+                    <button onclick="showTab('products')" class="mt-3 text-blue-600 hover:underline">Browse products</button>
+                </div>
+                <div id="cart-content" class="hidden">
+                    <div id="cart-items" class="space-y-3 mb-6"></div>
+                    <div class="bg-white rounded-xl shadow-sm border p-6">
+                        <div class="flex justify-between text-xl font-bold mb-4">
+                            <span>Total:</span>
+                            <span id="cart-total">$0.00</span>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-800">
+                            <b>Step 1 &mdash; Get it approved.</b> Download this as a quote to send for approval and to get your PO number. Nothing is ordered yet.
+                        </div>
+                        <button onclick="downloadQuote()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors mb-3">
+                            <i class="fas fa-file-arrow-down mr-2"></i>Download Quote (PDF)
+                        </button>
+                        <button onclick="showCheckout()" class="w-full border-2 border-green-600 text-green-700 hover:bg-green-50 font-semibold py-3 rounded-lg transition-colors">
+                            <i class="fas fa-arrow-right mr-2"></i>Convert to Order &mdash; enter PO
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Checkout Form -->
+                <div id="checkout-form" class="hidden mt-6 bg-white rounded-xl shadow-sm border p-6 fade-in">
+                    <h3 class="text-xl font-bold mb-1">Step 2 &mdash; Convert to Order</h3>
+                    <p class="text-sm text-gray-500 mb-4">Enter the PO number from your approved quote, then submit. This places the order and emails everyone.</p>
+                    <form onsubmit="submitOrder(event)" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Contact Name *</label>
+                                <input type="text" id="checkout-name" required class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                                <input type="email" id="checkout-email" required class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                                <input type="tel" id="checkout-phone" class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Location / Branch *</label>
+                                <div class="w-full px-3 py-2 border rounded-lg bg-gray-50 flex items-center justify-between">
+                                    <span id="checkout-location-name" class="text-gray-800 font-medium">&mdash;</span>
+                                    <span class="text-xs text-gray-400"><i class="fas fa-lock mr-1"></i>Set at login</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">PO Number *</label>
+                            <input type="text" id="checkout-po" required placeholder="Enter your Purchase Order number"
+                                class="w-full px-3 py-2 border rounded-lg">
+                        </div>
+
+                        <!-- Online payment (pre-wired, hidden unless this account has payments enabled) -->
+                        <div id="payment-section" class="hidden border rounded-lg p-3 bg-blue-50">
+                            <label class="block text-sm font-medium text-gray-700 mb-2"><i class="fas fa-credit-card mr-1"></i>Pay by card (optional)</label>
+                            <div id="stripe-card-element" class="bg-white border rounded p-3 text-sm text-gray-400">
+                                Card payment will appear here once activated.
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">You can still submit with a PO number above.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                            <textarea id="checkout-notes" rows="3" class="w-full px-3 py-2 border rounded-lg"></textarea>
+                        </div>
+                        <button type="submit" id="submit-order-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition-colors">
+                            <i class="fas fa-paper-plane mr-2"></i>Submit Order
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- ============ ORDERS TAB ============ -->
+            <section id="tab-orders" class="hidden fade-in">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-receipt mr-2"></i>Order History</h2>
+                <div id="orders-list" class="space-y-3"></div>
+                <div id="no-orders" class="hidden text-center py-12 text-gray-400">
+                    <i class="fas fa-receipt text-4xl mb-3"></i>
+                    <p class="text-lg">No orders yet.</p>
+                </div>
+            </section>
+            <!-- ============ REPORTS TAB ============ -->
+            <section id="tab-reports" class="hidden fade-in">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-chart-line mr-2"></i>Reports</h2>
+                <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Shop</label>
+                            <select id="rep-shop" onchange="loadReports()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"></select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Period</label>
+                            <select id="rep-period" onchange="onRepPeriodChange()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                <option value="this_month">This month</option>
+                                <option value="last_month">Last month</option>
+                                <option value="this_quarter">This quarter</option>
+                                <option value="this_year" selected>This year</option>
+                                <option value="last_year">Last year</option>
+                                <option value="all">All time</option>
+                                <option value="custom">Custom range</option>
+                            </select>
+                        </div>
+                        <div id="rep-custom-from-wrap" class="hidden">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">From</label>
+                            <input type="date" id="rep-from" onchange="loadReports()" class="w-full px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                        <div id="rep-custom-to-wrap" class="hidden">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">To</label>
+                            <input type="date" id="rep-to" onchange="loadReports()" class="w-full px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Item (name or SKU)</label>
+                            <input type="text" id="rep-item" oninput="repItemDebounce()" placeholder="Filter by item&hellip;" class="w-full px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap gap-2 mt-3 items-center">
+                        <button onclick="downloadReportCSV('orders')" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Orders CSV</button>
+                        <button onclick="downloadReportCSV('items')" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Item summary CSV</button>
+                        <button onclick="downloadReportPDF(false)" class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm"><i class="fas fa-file-pdf mr-1"></i>Summary PDF</button>
+                        <button onclick="downloadReportPDF(true)" class="px-3 py-1.5 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-sm"><i class="fas fa-print mr-1"></i>Print</button>
+                        <span class="text-xs text-gray-400 ml-1">CSV files open directly in Google Sheets or Excel.</span>
+                    </div>
+                </div>
+
+                <div id="rep-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
+
+                <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                    <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
+                        <span class="font-semibold text-gray-700 text-sm">Items purchased</span>
+                        <span id="rep-items-meta" class="text-xs text-gray-400"></span>
+                    </div>
+                    <div class="overflow-x-auto"><table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                            <tr>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="sortReport('items','sku')">SKU</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="sortReport('items','name')">Item</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="sortReport('items','qty')">Qty</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="sortReport('items','orders')">Orders</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="sortReport('items','spend')">Spend</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rep-items-body"></tbody>
+                    </table></div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                    <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
+                        <span class="font-semibold text-gray-700 text-sm">Orders</span>
+                        <span id="rep-orders-meta" class="text-xs text-gray-400"></span>
+                    </div>
+                    <div class="overflow-x-auto"><table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                            <tr>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="sortReport('orders','date')">Date</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="sortReport('orders','order')">Order #</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="sortReport('orders','shop')">Shop</th>
+                                <th class="text-left px-4 py-2">PO</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="sortReport('orders','by')">Ordered by</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="sortReport('orders','total')">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rep-orders-body"></tbody>
+                    </table></div>
+                </div>
+            </section>
+
+            <!-- ============ CONTACT TAB ============ -->
+            <section id="tab-contact" class="hidden fade-in">
+                <h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-address-book mr-2"></i>Contact CHC</h2>
+                <p class="text-gray-500 mb-5">Reach CHC head office or your servicing branch.</p>
+
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Head Office</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800">Frank Chiappetta</p>
+                        <p class="text-sm text-blue-600 mb-2">Sales Director</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:4168242655" class="hover:underline">416-824-2655</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:frankc@chcpaint.com" class="text-blue-600 hover:underline">frankc@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800">Gabriel Chiappetta</p>
+                        <p class="text-sm text-blue-600 mb-2">District Manager, Ontario</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:6479967062" class="hover:underline">647-996-7062</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:gabe@chcpaint.com" class="text-blue-600 hover:underline">gabe@chcpaint.com</a></p>
+                    </div>
+                </div>
+
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Branches</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Markham Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">166 Bullock Drive, Unit 8&9</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Frank Guido</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:9055543133" class="hover:underline">905-554-3133</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:markham@chcpaint.com" class="text-blue-600 hover:underline">markham@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Woodbridge Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">4370 Steeles Ave. W., Unit 23</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Francesco Pacheco</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:9058507009" class="hover:underline">905-850-7009</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:woodbridge@chcpaint.com" class="text-blue-600 hover:underline">woodbridge@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Hamilton Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">83 Bigwin Rd., Unit 7</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Jonathan Derouchie</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:9055759517" class="hover:underline">905-575-9517</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:hamilton@chcpaint.com" class="text-blue-600 hover:underline">hamilton@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Oakville Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">1200 Speers Rd., Unit 13&15</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Amarbir Singh</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:2898370123" class="hover:underline">289-837-0123</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:oakville@chcpaint.com" class="text-blue-600 hover:underline">oakville@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>Ottawa Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">2750 Stevenage Dr., Unit 3</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Mick Teillet-Proulx</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:6137337373" class="hover:underline">613-733-7373</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:ottawa@chcpaint.com" class="text-blue-600 hover:underline">ottawa@chcpaint.com</a></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <p class="font-bold text-gray-800 mb-1"><i class="fas fa-map-marker-alt text-red-500 mr-1"></i>St. Catharines Branch</p>
+                        <p class="text-sm text-gray-500 mb-3">33 Elm St.</p>
+                        <p class="text-sm text-gray-600"><i class="fas fa-user text-gray-400 mr-2"></i>Candice Pearce</p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-phone text-gray-400 mr-2"></i><a href="tel:2893625150" class="hover:underline">289-362-5150</a></p>
+                        <p class="text-sm text-gray-600 mt-1"><i class="fas fa-envelope text-gray-400 mr-2"></i><a href="mailto:stcatharines@chcpaint.com" class="text-blue-600 hover:underline">stcatharines@chcpaint.com</a></p>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ORDER SUCCESS MODAL -->
+    <div id="order-success-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl p-8 max-w-md w-full text-center fade-in">
+            <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-check text-green-500 text-3xl"></i>
+            </div>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">Order Submitted!</h3>
+            <p class="text-gray-500 mb-2">Your order has been received and is being processed.</p>
+            <p class="font-mono text-lg font-bold text-blue-700 mb-4" id="order-confirmation-number"></p>
+            <button onclick="closeOrderModal()" class="bg-blue-700 hover:bg-blue-800 text-white px-6 py-2 rounded-lg">Continue Shopping</button>
+        </div>
+    </div>
+
+    <script>
+    // ============================================================
+    // STATE
+    // ============================================================
+    let state = {
+        token: null,
+        company: null,
+        location: null,
+        slug: null,
+        products: [],
+        promotions: [],
+        cart: [],
+        orders: [],
+        filters: { brands: [], categories: [] },
+        currentPage: 1,
+        totalProducts: 0
+    };
+
+    const API_BASE = '/api';
+
+    // Anonymous usage tracking (visit / login / enter). Fire-and-forget; never blocks the store.
+    function chcSid() {
+        let sid = localStorage.getItem('chc_sid');
+        if (!sid) { sid = 'sid-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); localStorage.setItem('chc_sid', sid); }
+        return sid;
+    }
+    function track(event, location_id) {
+        try {
+            if (!state.slug) return;
+            const url = `${API_BASE}/store/${state.slug}/track`;
+            const body = JSON.stringify({ event, location_id: location_id || null, session_id: chcSid() });
+            if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+            else fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true });
+        } catch (e) { /* ignore */ }
+    }
+
+    // ============================================================
+    // INITIALIZATION
+    // ============================================================
+    document.addEventListener('DOMContentLoaded', () => {
+        // Extract slug from URL: /store/{slug}
+        const pathParts = window.location.pathname.split('/');
+        const storeIdx = pathParts.indexOf('store');
+        state.slug = storeIdx >= 0 ? pathParts[storeIdx + 1] : null;
+
+        if (!state.slug) {
+            window.location.href = '/';
+            return;
+        }
+
+        // Load CHC master logo from Supabase Storage
+        loadPlatformLogo();
+        track('visit');
+
+        // Check for existing session
+        const savedToken = sessionStorage.getItem('chc_token');
+        const savedCompany = sessionStorage.getItem('chc_company');
+        const savedLocation = sessionStorage.getItem('chc_location');
+
+        if (savedToken && savedCompany && savedLocation) {
+            state.token = savedToken;
+            state.company = JSON.parse(savedCompany);
+            state.location = JSON.parse(savedLocation);
+            showApp();
+        } else if (savedToken && savedCompany) {
+            // Access code already verified but no location chosen yet — resume at location step
+            state.token = savedToken;
+            state.company = JSON.parse(savedCompany);
+            loadCompanyInfo();
+            promptLocationSelection();
+        } else {
+            loadCompanyInfo();
+        }
+    });
+
+    // ============================================================
+    // PLATFORM LOGO
+    // ============================================================
+    async function loadPlatformLogo() {
+        try {
+            const resp = await fetch(`${API_BASE}/store/platform-logo`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.url) {
+                // Update all CHC master logo images
+                document.querySelectorAll('img[alt="CHC Paint"]').forEach(img => {
+                    img.src = data.url;
+                });
+                // Also update admin sidebar logo if present
+                document.querySelectorAll('img[alt="CHC"]').forEach(img => {
+                    img.src = data.url;
+                });
+            }
+        } catch (err) { console.error('Platform logo load failed:', err); }
+    }
+
+    // ============================================================
+    // AUTH
+    // ============================================================
+    async function loadCompanyInfo() {
+        try {
+            const resp = await fetch(`${API_BASE}/store/${state.slug}/info`);
+            if (!resp.ok) {
+                document.getElementById('login-company-name').textContent = 'Store Not Found';
+                return;
+            }
+            const data = await resp.json();
+            const company = data.company;
+
+            document.getElementById('login-company-name').textContent = company.name;
+            if (company.logo_url) {
+                const logo = document.getElementById('login-company-logo');
+                logo.src = company.logo_url;
+                logo.alt = company.name;
+                logo.style.display = 'block';
+                document.getElementById('logo-divider').style.display = 'block';
+            }
+        } catch (err) {
+            console.error('Failed to load company info:', err);
+        }
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const code = document.getElementById('access-code').value;
+        const errorEl = document.getElementById('login-error');
+        const btn = document.getElementById('login-btn');
+        const spinner = document.getElementById('login-spinner');
+        const btnText = document.getElementById('login-btn-text');
+
+        errorEl.classList.add('hidden');
+        spinner.classList.remove('hidden');
+        btnText.textContent = 'Verifying...';
+        btn.disabled = true;
+
+        try {
+            const resp = await fetch(`${API_BASE}/auth/company-login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug: state.slug, access_code: code })
+            });
+
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                errorEl.textContent = data.error || 'Login failed.';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            state.token = data.token;
+            state.company = data.company;
+            sessionStorage.setItem('chc_token', data.token);
+            sessionStorage.setItem('chc_company', JSON.stringify(data.company));
+            track('login');
+
+            // Access code verified — now require the user to select their location
+            promptLocationSelection();
+
+        } catch (err) {
+            errorEl.textContent = 'Connection error. Please try again.';
+            errorEl.classList.remove('hidden');
+        } finally {
+            spinner.classList.add('hidden');
+            btnText.textContent = 'Continue';
+            btn.disabled = false;
+        }
+    });
+
+    // ============================================================
+    // LOCATION-BOUND LOGIN (step 2)
+    // ============================================================
+    function promptLocationSelection() {
+        document.getElementById('login-form').classList.add('hidden');
+        document.getElementById('location-step').classList.remove('hidden');
+        document.getElementById('login-error').classList.add('hidden');
+        loadLocations();
+    }
+
+    function enterStore() {
+        if (!state.location || !state.location.id) {
+            const err = document.getElementById('login-error');
+            err.textContent = 'Please select your location to continue.';
+            err.classList.remove('hidden');
+            return;
+        }
+        sessionStorage.setItem('chc_location', JSON.stringify(state.location));
+        track('enter', state.location.id);
+        showApp();
+    }
+
+    function resetLogin() {
+        state.location = null;
+        sessionStorage.removeItem('chc_location');
+        document.getElementById('selected-location-id').value = '';
+        document.getElementById('location-search').value = '';
+        document.getElementById('enter-store-btn').disabled = true;
+        document.getElementById('location-step').classList.add('hidden');
+        document.getElementById('login-error').classList.add('hidden');
+        document.getElementById('login-form').classList.remove('hidden');
+        document.getElementById('access-code').value = '';
+    }
+
+    function logout() {
+        sessionStorage.removeItem('chc_token');
+        sessionStorage.removeItem('chc_company');
+        sessionStorage.removeItem('chc_location');
+        state.token = null;
+        state.company = null;
+        state.location = null;
+        state.cart = [];
+        document.getElementById('app').classList.add('hidden');
+        document.getElementById('login-screen').classList.remove('hidden');
+        // Reset back to step 1 (access code)
+        const ls = document.getElementById('location-step');
+        const lf = document.getElementById('login-form');
+        if (ls) ls.classList.add('hidden');
+        if (lf) lf.classList.remove('hidden');
+        const eb = document.getElementById('enter-store-btn');
+        if (eb) eb.disabled = true;
+        const sid = document.getElementById('selected-location-id');
+        if (sid) sid.value = '';
+        const ac = document.getElementById('access-code');
+        if (ac) ac.value = '';
+    }
+
+    // ============================================================
+    // APP DISPLAY
+    // ============================================================
+    function showApp() {
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+
+        // Set header branding
+        document.getElementById('header-company-name').textContent = state.company.name;
+        if (state.company.logo_url) {
+            const logo = document.getElementById('header-company-logo');
+            logo.src = state.company.logo_url;
+            logo.alt = state.company.name;
+            logo.style.display = 'block';
+            document.getElementById('header-logo-divider').style.display = 'block';
+        }
+
+        // Load cart from sessionStorage
+        const savedCart = sessionStorage.getItem('chc_cart');
+        if (savedCart) state.cart = JSON.parse(savedCart);
+        updateCartBadge();
+
+        loadProducts();
+        loadPromotions();
+        // Reflect the location chosen at login in the checkout form
+        if (state.location && document.getElementById('checkout-location-name')) {
+            document.getElementById('checkout-location-name').textContent = state.location.name;
+        }
+    }
+
+    let allLocations = [];
+    let locationsLoaded = false;
+
+    async function loadLocations() {
+        try {
+            console.log('[Locations] Loading for slug:', state.slug);
+            const resp = await apiFetch(`/store/${state.slug}/locations`);
+            console.log('[Locations] API response status:', resp.status);
+
+            if (!resp.ok) {
+                console.error('[Locations] API error:', resp.status);
+                return;
+            }
+
+            const data = await resp.json();
+            allLocations = data.locations || [];
+            locationsLoaded = true;
+
+            if (allLocations.length === 0) {
+                document.getElementById('location-search').placeholder = 'Enter your location';
+                document.getElementById('location-chevron').style.display = 'none';
+                return;
+            }
+
+            // Show the searchable dropdown
+            document.getElementById('location-search').placeholder = `Search ${allLocations.length} locations...`;
+            document.getElementById('location-chevron').style.display = '';
+            renderLocationDropdown(allLocations);
+        } catch (err) {
+            console.error('[Locations] Load failed:', err);
+        }
+    }
+
+    function renderLocationDropdown(locs) {
+        const dropdown = document.getElementById('location-dropdown');
+        if (!dropdown) { console.error('[Locations] dropdown element not found'); return; }
+
+        // Group by city
+        const grouped = {};
+        locs.forEach(l => {
+            const city = l.city || 'Other';
+            if (!grouped[city]) grouped[city] = [];
+            grouped[city].push(l);
+        });
+
+        const cities = Object.keys(grouped).sort();
+        let html = '';
+        cities.forEach(city => {
+            html += `<div class="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 sticky top-0">${escapeHtml(city)}</div>`;
+            grouped[city].forEach(l => {
+                const addr = l.address ? ` - ${escapeHtml(l.address)}` : '';
+                html += `<div class="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm location-option" data-id="${escapeHtml(l.id)}" data-value="${escapeHtml(l.name)}" data-restrict="${escapeHtml(l.restrict_to_category || '')}" onclick="selectLocation(this)">
+                    <span class="text-gray-800">${escapeHtml(l.name)}</span>
+                    <span class="text-gray-400 text-xs">${addr}</span>
+                </div>`;
+            });
+        });
+
+        if (!html) {
+            html = '<div class="px-3 py-4 text-center text-gray-400 text-sm">No matching locations</div>';
+        }
+
+        dropdown.innerHTML = html;
+    }
+
+    function filterLocations() {
+        const searchEl = document.getElementById('location-search');
+        if (!searchEl) return;
+        const query = searchEl.value.toLowerCase().trim();
+
+        if (allLocations.length === 0) return; // No locations to filter
+
+        if (!query) {
+            renderLocationDropdown(allLocations);
+            showLocationDropdown();
+            return;
+        }
+        const filtered = allLocations.filter(l =>
+            l.name.toLowerCase().includes(query) || (l.city && l.city.toLowerCase().includes(query))
+        );
+        renderLocationDropdown(filtered);
+        showLocationDropdown();
+    }
+
+    function showLocationDropdown() {
+        const dd = document.getElementById('location-dropdown');
+        if (!dd) return;
+        dd.classList.remove('hidden');
+        // Close on outside click
+        setTimeout(() => {
+            document.addEventListener('click', closeLocationDropdown);
+        }, 10);
+    }
+
+    function closeLocationDropdown(e) {
+        const picker = document.getElementById('location-picker');
+        const dd = document.getElementById('location-dropdown');
+        if (picker && dd && !picker.contains(e?.target)) {
+            dd.classList.add('hidden');
+            document.removeEventListener('click', closeLocationDropdown);
+        }
+    }
+
+    function selectLocation(el) {
+        const id = el.dataset.id;
+        const value = el.dataset.value;
+        state.location = { id, name: value, restrict: el.dataset.restrict || '' };
+        const hidden = document.getElementById('selected-location-id');
+        if (hidden) hidden.value = id;
+        document.getElementById('location-search').value = value;
+        const enterBtn = document.getElementById('enter-store-btn');
+        if (enterBtn) enterBtn.disabled = false;
+        const dd = document.getElementById('location-dropdown');
+        if (dd) dd.classList.add('hidden');
+        document.removeEventListener('click', closeLocationDropdown);
+    }
+
+    function showTab(tab) {
+        document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.add('hidden'));
+        document.getElementById(`tab-${tab}`).classList.remove('hidden');
+
+        document.querySelectorAll('[data-tab]').forEach(el => el.classList.remove('tab-active'));
+        const tabBtn = document.querySelector(`[data-tab="${tab}"]`);
+        if (tabBtn) tabBtn.classList.add('tab-active');
+
+        if (tab === 'cart') renderCart();
+        if (tab === 'orders') loadOrders();
+        if (tab === 'reports') loadReports();
+    }
+
+    // ============================================================
+    // REPORTS
+    // ============================================================
+    let repState = { orders: [], items: [], filteredOrders: [], periodLabel: '',
+                     sort: { orders: { key: 'date', dir: -1 }, items: { key: 'spend', dir: -1 } } };
+    let repItemTimer;
+    function repItemDebounce() { clearTimeout(repItemTimer); repItemTimer = setTimeout(applyReportFilters, 300); }
+
+    function onRepPeriodChange() {
+        const custom = document.getElementById('rep-period').value === 'custom';
+        document.getElementById('rep-custom-from-wrap').classList.toggle('hidden', !custom);
+        document.getElementById('rep-custom-to-wrap').classList.toggle('hidden', !custom);
+        if (!custom) loadReports();
+    }
+
+    function periodRange(pd) {
+        const now = new Date(); const y = now.getFullYear(); const m = now.getMonth();
+        const iso = d => d.toISOString();
+        const start = (yy, mm, dd) => new Date(yy, mm, dd, 0, 0, 0);
+        const end = (yy, mm, dd) => new Date(yy, mm, dd, 23, 59, 59, 999);
+        const q = Math.floor(m / 3);
+        const mLabel = d => d.toLocaleString('default', { month: 'long' }) + ' ' + d.getFullYear();
+        switch (pd) {
+            case 'this_month':   return { from: iso(start(y, m, 1)), to: iso(now), label: mLabel(now) };
+            case 'last_month':   { const d = new Date(y, m - 1, 1); return { from: iso(start(d.getFullYear(), d.getMonth(), 1)), to: iso(end(y, m, 0)), label: mLabel(d) }; }
+            case 'this_quarter': return { from: iso(start(y, q * 3, 1)), to: iso(now), label: 'Q' + (q + 1) + ' ' + y };
+            case 'this_year':    return { from: iso(start(y, 0, 1)), to: iso(now), label: 'Year ' + y };
+            case 'last_year':    return { from: iso(start(y - 1, 0, 1)), to: iso(end(y - 1, 11, 31)), label: 'Year ' + (y - 1) };
+            case 'custom':       {
+                const f = document.getElementById('rep-from').value; const t = document.getElementById('rep-to').value;
+                const parse = (v, e) => { if (!v) return null; const [yy, mm, dd] = v.split('-').map(Number); return iso(e ? end(yy, mm - 1, dd) : start(yy, mm - 1, dd)); };
+                return { from: parse(f, false), to: parse(t, true), label: (f || '\u2026') + ' to ' + (t || '\u2026') };
+            }
+            default: return { from: null, to: null, label: 'All time' };
+        }
+    }
+
+    async function populateRepShops() {
+        const sel = document.getElementById('rep-shop');
+        if (sel.dataset.loaded) return;
+        const cur = state.location ? state.location.id : '';
+        let opts = '<option value="">All shops</option>';
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/locations`);
+            const data = await resp.json();
+            const locs = (data.locations || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+            opts += locs.map(l => `<option value="${escapeHtml(l.id)}" ${l.id === cur ? 'selected' : ''}>${escapeHtml(l.name)}</option>`).join('');
+        } catch (e) { /* keep All shops only */ }
+        sel.innerHTML = opts; sel.dataset.loaded = '1';
+    }
+
+    async function loadReports() {
+        await populateRepShops();
+        const shop = document.getElementById('rep-shop').value;
+        const { from, to, label } = periodRange(document.getElementById('rep-period').value);
+        repState.periodLabel = label;
+        const params = new URLSearchParams();
+        if (shop) params.set('location_id', shop);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/reports/orders?${params}`);
+            const data = await resp.json();
+            repState.orders = data.orders || [];
+            applyReportFilters();
+        } catch (e) {
+            document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-red-500">Failed to load report.</td></tr>';
+        }
+    }
+
+    function applyReportFilters() {
+        const term = (document.getElementById('rep-item').value || '').trim().toLowerCase();
+        const match = i => !term || (i.name || '').toLowerCase().includes(term) || (i.sku || '').toLowerCase().includes(term);
+        let orders = repState.orders;
+        if (term) orders = orders.filter(o => (o.items || []).some(match));
+        repState.filteredOrders = orders;
+        const map = {};
+        orders.forEach(o => (o.items || []).forEach(i => {
+            if (!match(i)) return;
+            const key = i.sku || i.name;
+            if (!map[key]) map[key] = { sku: i.sku || '', name: i.name || '', qty: 0, orders: new Set(), spend: 0 };
+            map[key].qty += Number(i.quantity) || 0;
+            map[key].orders.add(o.id);
+            map[key].spend += Number(i.subtotal) || 0;
+        }));
+        repState.items = Object.values(map).map(x => ({ sku: x.sku, name: x.name, qty: x.qty, orders: x.orders.size, spend: x.spend }));
+        renderReports();
+    }
+
+    function repCmp(a, b, key, dir) { let x = a[key], y = b[key]; if (typeof x === 'string') { x = x.toLowerCase(); y = (y || '').toLowerCase(); } return (x < y ? -1 : x > y ? 1 : 0) * dir; }
+    function repCmpOrder(a, b, key, dir) {
+        const g = { date: o => o.created_at, order: o => o.order_number, shop: o => o.location || '', by: o => o.contact_name || '', total: o => Number(o.total) || 0 };
+        let x = g[key](a), y = g[key](b); if (typeof x === 'string') { x = x.toLowerCase(); y = (y || '').toLowerCase(); } return (x < y ? -1 : x > y ? 1 : 0) * dir;
+    }
+    function sortReport(which, key) {
+        const st = repState.sort[which];
+        const textKeys = ['name', 'sku', 'date', 'order', 'shop', 'by'];
+        st.dir = (st.key === key) ? -st.dir : (textKeys.includes(key) ? 1 : -1);
+        st.key = key; renderReports();
+    }
+
+    function renderReports() {
+        const orders = repState.filteredOrders;
+        const totalSpend = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+        const units = repState.items.reduce((s, i) => s + i.qty, 0);
+        const cards = [['Orders', orders.length], ['Total spend', '$' + totalSpend.toFixed(2)], ['Units', units], ['Unique items', repState.items.length]];
+        document.getElementById('rep-summary').innerHTML = cards.map(c => `
+            <div class="bg-white rounded-xl shadow-sm border p-4">
+                <p class="text-xs text-gray-400 uppercase">${c[0]}</p>
+                <p class="text-2xl font-bold text-gray-800 mt-1">${c[1]}</p>
+            </div>`).join('');
+        const si = repState.sort.items;
+        const items = repState.items.slice().sort((a, b) => repCmp(a, b, si.key, si.dir));
+        document.getElementById('rep-items-body').innerHTML = items.length ? items.map(i => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2 text-gray-500">${escapeHtml(i.sku || '-')}</td>
+                <td class="px-4 py-2">${escapeHtml(i.name)}</td>
+                <td class="px-4 py-2 text-right font-semibold">${i.qty}</td>
+                <td class="px-4 py-2 text-right">${i.orders}</td>
+                <td class="px-4 py-2 text-right">$${i.spend.toFixed(2)}</td>
+            </tr>`).join('') : '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No items in this range.</td></tr>';
+        document.getElementById('rep-items-meta').textContent = repState.periodLabel;
+        const so = repState.sort.orders;
+        const os = orders.slice().sort((a, b) => repCmpOrder(a, b, so.key, so.dir));
+        document.getElementById('rep-orders-body').innerHTML = os.length ? os.map(o => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2 text-gray-500">${new Date(o.created_at).toLocaleDateString()}</td>
+                <td class="px-4 py-2 font-mono font-semibold text-blue-700">${escapeHtml(o.order_number)}</td>
+                <td class="px-4 py-2">${escapeHtml(o.location || '-')}</td>
+                <td class="px-4 py-2">${escapeHtml(o.po_number || '-')}</td>
+                <td class="px-4 py-2">${escapeHtml(o.contact_name || '-')}</td>
+                <td class="px-4 py-2 text-right font-semibold">$${parseFloat(o.total).toFixed(2)}</td>
+            </tr>`).join('') : '<tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No orders in this range.</td></tr>';
+        document.getElementById('rep-orders-meta').textContent = `${orders.length} order${orders.length !== 1 ? 's' : ''} \u00b7 ${repState.periodLabel}`;
+    }
+
+    function repCsvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    function reportSlugLabel() { return (repState.periodLabel || 'report').replace(/[^a-z0-9]+/gi, '-'); }
+    function downloadReportCSV(kind) {
+        let rows, name;
+        if (kind === 'items') {
+            rows = [['SKU', 'Item', 'Qty', 'Orders', 'Spend']];
+            repState.items.slice().sort((a, b) => b.spend - a.spend).forEach(i => rows.push([i.sku, i.name, i.qty, i.orders, i.spend.toFixed(2)]));
+            name = 'item-summary';
+        } else {
+            rows = [['Date', 'Order #', 'Shop', 'PO', 'Ordered by', 'Status', 'Items', 'Total']];
+            repState.filteredOrders.forEach(o => rows.push([new Date(o.created_at).toLocaleDateString(), o.order_number, o.location || '', o.po_number || '', o.contact_name || '', o.status || '', (o.items || []).length, parseFloat(o.total).toFixed(2)]));
+            name = 'orders';
+        }
+        const csv = rows.map(r => r.map(repCsvCell).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `CHC-report-${name}-${reportSlugLabel()}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    }
+    function downloadReportPDF(printIt) {
+        if (!window.jspdf || !window.jspdf.jsPDF) { alert('PDF generator is still loading \u2014 please try again in a moment.'); return; }
+        const { jsPDF } = window.jspdf; const doc = new jsPDF();
+        const shopSel = document.getElementById('rep-shop');
+        const shopName = shopSel.options[shopSel.selectedIndex] ? shopSel.options[shopSel.selectedIndex].text : 'All shops';
+        const orders = repState.filteredOrders;
+        const totalSpend = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+        const units = repState.items.reduce((s, i) => s + i.qty, 0);
+        doc.setFontSize(18); doc.setTextColor(30, 64, 175); doc.text('Purchase Summary', 14, 18);
+        doc.setFontSize(10); doc.setTextColor(90, 90, 90);
+        doc.text('CHC Paint & Auto Body Supplies', 14, 25);
+        doc.text('Generated: ' + new Date().toLocaleDateString(), 150, 18);
+        doc.text('Shop: ' + shopName, 14, 33);
+        doc.text('Period: ' + repState.periodLabel, 14, 39);
+        doc.setTextColor(20, 20, 20); doc.setFontSize(11);
+        doc.text(`Orders: ${orders.length}    Total spend: $${totalSpend.toFixed(2)}    Units: ${units}    Unique items: ${repState.items.length}`, 14, 49);
+        doc.autoTable({
+            startY: 56,
+            head: [['SKU', 'Item', 'Qty', 'Orders', 'Spend']],
+            body: repState.items.slice().sort((a, b) => b.spend - a.spend).map(i => [i.sku || '', i.name, String(i.qty), String(i.orders), '$' + i.spend.toFixed(2)]),
+            styles: { fontSize: 8, cellPadding: 1.5 }, headStyles: { fillColor: [30, 64, 175] },
+            columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }
+        });
+        if (printIt) { doc.output('dataurlnewwindow'); } else { doc.save(`CHC-summary-${reportSlugLabel()}.pdf`); }
+    }
+
+
+    // ============================================================
+    // PRODUCTS
+    // ============================================================
+    let searchTimeout;
+    function debounceSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => loadProducts(), 300);
+    }
+
+    function applyLockUI(lockedCat) {
+        const catSel = document.getElementById('category-filter');
+        const banner = document.getElementById('ns-lock-banner');
+        if (lockedCat) {
+            if (catSel) { catSel.value = ''; catSel.style.display = 'none'; }
+            if (banner) { document.getElementById('ns-lock-text').textContent = `This location can order ${lockedCat} items only.`; banner.classList.remove('hidden'); }
+        } else {
+            if (catSel) catSel.style.display = '';
+            if (banner) banner.classList.add('hidden');
+        }
+    }
+
+    async function loadProducts() {
+        const grid = document.getElementById('products-grid');
+        grid.innerHTML = '<div class="col-span-full text-center py-8"><i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i></div>';
+
+        const brand = document.getElementById('brand-filter').value;
+        const category = document.getElementById('category-filter').value;
+        const search = document.getElementById('search-input').value;
+
+        try {
+            const params = new URLSearchParams({ page: state.currentPage, limit: 100 });
+            if (brand) params.set('brand', brand);
+            if (category) params.set('category', category);
+            if (search) params.set('search', search);
+            if (state.location && state.location.id) params.set('location_id', state.location.id);
+
+            const resp = await apiFetch(`/store/${state.slug}/products?${params}`);
+            const data = await resp.json();
+
+            state.products = data.products;
+            state.totalProducts = data.total;
+
+            // Update filters
+            if (data.filters) {
+                updateFilterDropdown('brand-filter', data.filters.brands, 'All Brands');
+                updateFilterDropdown('category-filter', data.filters.categories, 'All Categories');
+            }
+            applyLockUI(data.locked_category);
+
+            renderProducts();
+
+        } catch (err) {
+            grid.innerHTML = '<div class="col-span-full text-center py-8 text-red-500">Failed to load products.</div>';
+        }
+    }
+
+    function updateFilterDropdown(id, options, defaultLabel) {
+        const select = document.getElementById(id);
+        const current = select.value;
+        select.innerHTML = `<option value="">${defaultLabel}</option>`;
+        options.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt;
+            option.textContent = opt;
+            if (opt === current) option.selected = true;
+            select.appendChild(option);
+        });
+    }
+
+    function renderProducts() {
+        const grid = document.getElementById('products-grid');
+
+        if (!state.products.length) {
+            grid.innerHTML = '<div class="col-span-full text-center py-12 text-gray-400"><i class="fas fa-box-open text-4xl mb-3"></i><p>No products found.</p></div>';
+            return;
+        }
+
+        grid.innerHTML = state.products.map(p => {
+            const inCart = state.cart.find(c => c.product_id === p.id);
+            const qty = inCart ? inCart.quantity : 0;
+
+            return `
+            <div class="bg-white rounded-xl shadow-sm border hover:shadow-md transition-shadow p-4 fade-in">
+                <div class="flex justify-between items-start mb-2">
+                    <span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded">${escapeHtml(p.brand)}</span>
+                    ${p.category ? `<span class="text-xs text-gray-400">${escapeHtml(p.category)}</span>` : ''}
+                </div>
+                <h3 class="font-semibold text-gray-800 text-sm mb-1 leading-tight">${escapeHtml(p.name)}</h3>
+                ${p.sku ? `<p class="text-xs text-gray-400 mb-2">SKU: ${escapeHtml(p.sku)}</p>` : ''}
+                <div class="flex items-baseline gap-2 mb-3">
+                    <span class="text-xl font-bold text-gray-800">$${parseFloat(p.price).toFixed(2)}</span>
+                    <!-- Product "was" price hidden in catalog; sale pricing/strikethrough is handled by Promotions. -->
+                    ${p.case_qty > 1 ? `<span class="text-xs text-gray-400">/ case of ${p.case_qty}</span>` : ''}
+                </div>
+                <div class="flex items-center gap-2">
+                    ${qty > 0 ? `
+                        <button onclick="updateCart('${p.id}', ${qty - 1})" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 font-bold">-</button>
+                        <span class="w-8 text-center font-semibold">${qty}</span>
+                        <button onclick="updateCart('${p.id}', ${qty + 1})" class="w-8 h-8 bg-blue-100 hover:bg-blue-200 rounded-lg text-blue-700 font-bold">+</button>
+                    ` : `
+                        <button onclick="addToCart('${p.id}')" class="flex-1 bg-blue-700 hover:bg-blue-800 text-white text-sm py-2 rounded-lg transition-colors">
+                            <i class="fas fa-plus mr-1"></i> Add to Cart
+                        </button>
+                    `}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // ============================================================
+    // PROMOTIONS
+    // ============================================================
+    async function loadPromotions() {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/promotions`);
+            const data = await resp.json();
+            state.promotions = data.promotions || [];
+            renderPromotions();
+        } catch (err) {
+            console.error('Failed to load promotions:', err);
+        }
+    }
+
+    function renderPromotions() {
+        const grid = document.getElementById('promotions-grid');
+        const noPromo = document.getElementById('no-promotions');
+
+        if (!state.promotions.length) {
+            grid.classList.add('hidden');
+            noPromo.classList.remove('hidden');
+            return;
+        }
+
+        grid.classList.remove('hidden');
+        noPromo.classList.add('hidden');
+
+        grid.innerHTML = state.promotions.map(p => {
+            const product = p.products;
+            if (!product) return '';
+            const endsAt = new Date(p.ends_at);
+            const daysLeft = Math.ceil((endsAt - new Date()) / (1000 * 60 * 60 * 24));
+
+            return `
+            <div class="bg-white rounded-xl shadow-sm border border-red-100 hover:shadow-md transition-shadow p-4 fade-in relative overflow-hidden">
+                <div class="absolute top-0 right-0 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-bl-lg promo-badge">
+                    ${p.savings_pct}% OFF
+                </div>
+                ${p.is_global ? '<span class="absolute top-0 left-0 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-br-lg">GLOBAL</span>' : ''}
+                <div class="mt-6">
+                    <span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded">${escapeHtml(product.brand)}</span>
+                    ${p.promo_label ? `<span class="ml-1 text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">${escapeHtml(p.promo_label)}</span>` : ''}
+                </div>
+                <h3 class="font-semibold text-gray-800 mt-2 leading-tight">${escapeHtml(product.name)}</h3>
+                ${product.sku ? `<p class="text-xs text-gray-400 mt-1">SKU: ${escapeHtml(product.sku)}</p>` : ''}
+                <div class="flex items-baseline gap-2 mt-3">
+                    <span class="text-2xl font-bold text-red-600">$${parseFloat(p.promo_price).toFixed(2)}</span>
+                    <span class="text-sm text-gray-400 line-through">$${parseFloat(product.price).toFixed(2)}</span>
+                    <span class="text-sm text-green-600 font-semibold">Save $${p.savings}</span>
+                </div>
+                <p class="text-xs text-gray-400 mt-2"><i class="fas fa-clock mr-1"></i>${daysLeft > 0 ? `${daysLeft} day${daysLeft > 1 ? 's' : ''} left` : 'Ends today!'}</p>
+                <button onclick="addToCart('${product.id}')" class="w-full mt-3 bg-red-600 hover:bg-red-700 text-white text-sm py-2 rounded-lg transition-colors">
+                    <i class="fas fa-plus mr-1"></i> Add to Cart at Promo Price
+                </button>
+            </div>`;
+        }).join('');
+    }
+
+    // ============================================================
+    // CART
+    // ============================================================
+    function addToCart(productId) {
+        const product = state.products.find(p => p.id === productId)
+            || state.promotions.find(p => p.products?.id === productId)?.products;
+        if (!product) return;
+
+        const existing = state.cart.find(c => c.product_id === productId);
+        if (existing) {
+            existing.quantity++;
+        } else {
+            // Check for active promo price
+            const promo = state.promotions.find(p => p.products?.id === productId);
+            state.cart.push({
+                product_id: productId,
+                name: product.name,
+                brand: product.brand,
+                sku: product.sku,
+                price: promo ? parseFloat(promo.promo_price) : parseFloat(product.price),
+                original_price: parseFloat(product.price),
+                is_promo: !!promo,
+                quantity: 1
+            });
+        }
+        saveCart();
+        renderProducts();
+    }
+
+    function updateCart(productId, qty) {
+        if (qty <= 0) {
+            state.cart = state.cart.filter(c => c.product_id !== productId);
+        } else {
+            const item = state.cart.find(c => c.product_id === productId);
+            if (item) item.quantity = qty;
+        }
+        saveCart();
+        renderProducts();
+        renderCart();
+    }
+
+    function saveCart() {
+        sessionStorage.setItem('chc_cart', JSON.stringify(state.cart));
+        updateCartBadge();
+    }
+
+    function updateCartBadge() {
+        const badge = document.getElementById('cart-badge');
+        const count = state.cart.reduce((sum, c) => sum + c.quantity, 0);
+        if (count > 0) {
+            badge.textContent = count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+
+    function renderCart() {
+        const empty = document.getElementById('cart-empty');
+        const content = document.getElementById('cart-content');
+        const itemsEl = document.getElementById('cart-items');
+        const checkout = document.getElementById('checkout-form');
+
+        if (!state.cart.length) {
+            empty.classList.remove('hidden');
+            content.classList.add('hidden');
+            checkout.classList.add('hidden');
+            return;
+        }
+
+        empty.classList.add('hidden');
+        content.classList.remove('hidden');
+
+        let total = 0;
+        itemsEl.innerHTML = state.cart.map(item => {
+            const subtotal = item.price * item.quantity;
+            total += subtotal;
+            return `
+            <div class="bg-white rounded-lg shadow-sm border p-4 flex items-center justify-between">
+                <div class="flex-1">
+                    <h4 class="font-semibold text-gray-800">${escapeHtml(item.name)}</h4>
+                    <p class="text-sm text-gray-400">${escapeHtml(item.brand)} ${item.sku ? '| ' + escapeHtml(item.sku) : ''}</p>
+                    <div class="flex items-baseline gap-2 mt-1">
+                        <span class="font-bold ${item.is_promo ? 'text-red-600' : 'text-gray-800'}">$${item.price.toFixed(2)}</span>
+                        ${item.is_promo ? `<span class="text-xs text-gray-400 line-through">$${item.original_price.toFixed(2)}</span><span class="text-xs text-red-500 font-semibold">PROMO</span>` : ''}
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 ml-4">
+                    <button onclick="updateCart('${item.product_id}', ${item.quantity - 1})" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-bold">-</button>
+                    <span class="w-8 text-center font-semibold">${item.quantity}</span>
+                    <button onclick="updateCart('${item.product_id}', ${item.quantity + 1})" class="w-8 h-8 bg-blue-100 hover:bg-blue-200 rounded text-blue-700 font-bold">+</button>
+                    <span class="ml-3 font-bold text-gray-800 w-20 text-right">$${subtotal.toFixed(2)}</span>
+                </div>
+            </div>`;
+        }).join('');
+
+        document.getElementById('cart-total').textContent = `$${total.toFixed(2)}`;
+    }
+
+    function showCheckout() {
+        document.getElementById('checkout-form').classList.remove('hidden');
+        // Location is fixed from login — just reflect it
+        if (state.location && document.getElementById('checkout-location-name')) {
+            document.getElementById('checkout-location-name').textContent = state.location.name;
+        }
+        loadPaymentConfig();
+        document.getElementById('checkout-name').focus();
+    }
+
+    // Online payments are pre-wired but disabled by default; the section only appears
+    // when the backend reports the tenant has Stripe enabled.
+    let paymentConfig = { enabled: false };
+    async function loadPaymentConfig() {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/payments/config`);
+            if (!resp.ok) return;
+            paymentConfig = await resp.json();
+            const section = document.getElementById('payment-section');
+            if (section && paymentConfig.enabled) {
+                section.classList.remove('hidden');
+                // TODO (activation): mount Stripe.js Elements into #stripe-card-element
+                // using paymentConfig.publishable_key, then call
+                // POST /store/:slug/payments/create-intent after the order is created.
+            }
+        } catch (err) { /* payments stay hidden on error */ }
+    }
+
+    // ============================================================
+    // ORDERS
+    // ============================================================
+    // Generate a client-side Quote PDF from the current cart (nothing is ordered yet).
+    function downloadQuote() {
+        if (!state.cart.length) { alert('Your cart is empty.'); return; }
+        if (!window.jspdf || !window.jspdf.jsPDF) { alert('Quote generator is still loading \u2014 please try again in a moment.'); return; }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const company = (state.company && state.company.name) || '';
+        const location = (state.location && state.location.name) || '';
+        const now = new Date();
+        const qnum = 'Q-' + now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + '-' + Math.floor(1000+Math.random()*9000);
+        doc.setFontSize(20); doc.setTextColor(30,64,175); doc.text('QUOTE', 14, 20);
+        doc.setFontSize(10); doc.setTextColor(90,90,90);
+        doc.text('CHC Paint & Auto Body Supplies', 14, 27);
+        doc.text('Quote #: ' + qnum, 140, 18);
+        doc.text('Date: ' + now.toLocaleDateString(), 140, 24);
+        doc.setTextColor(20,20,20); doc.setFontSize(11);
+        doc.text('Prepared for: ' + company, 14, 40);
+        doc.text('Location / Branch: ' + location, 14, 46);
+        let total = 0;
+        const rows = state.cart.map(it => {
+            const line = it.price * it.quantity; total += line;
+            return [it.sku || '', it.name, String(it.quantity), '$' + it.price.toFixed(2), '$' + line.toFixed(2)];
+        });
+        doc.autoTable({
+            startY: 54,
+            head: [['SKU','Item','Qty','Unit Price','Line Total']],
+            body: rows,
+            styles: { fontSize: 9, cellPadding: 2 },
+            headStyles: { fillColor: [30,64,175] },
+            columnStyles: { 2:{halign:'center'}, 3:{halign:'right'}, 4:{halign:'right'} }
+        });
+        const y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 60) + 8;
+        doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(20,20,20);
+        doc.text('Total: $' + total.toFixed(2), 140, y);
+        doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(120,120,120);
+        doc.text('This is a quote, not an invoice. Prices are subject to change and final confirmation. To place the order, return to the store, click "Convert to Order", and enter your PO number.', 14, y + 12, { maxWidth: 182 });
+        doc.save(qnum + '.pdf');
+    }
+
+    async function submitOrder(e) {
+        e.preventDefault();
+        const btn = document.getElementById('submit-order-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Submitting...';
+
+        try {
+            // Location is bound at login — must be present
+            if (!state.location || !state.location.id) {
+                alert('Your session has no location set. Please sign in again and choose your location.');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Submit Order';
+                logout();
+                return;
+            }
+
+            const poNumber = document.getElementById('checkout-po').value.trim();
+            if (!poNumber) {
+                alert('Please enter a PO Number before submitting.');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Submit Order';
+                return;
+            }
+
+            const resp = await apiFetch(`/store/${state.slug}/orders`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    contact_name: document.getElementById('checkout-name').value,
+                    contact_email: document.getElementById('checkout-email').value,
+                    contact_phone: document.getElementById('checkout-phone').value,
+                    po_number: poNumber,
+                    location_id: state.location.id,
+                    location: state.location.name,
+                    notes: document.getElementById('checkout-notes').value,
+                    items: state.cart.map(c => ({ product_id: c.product_id, quantity: c.quantity }))
+                })
+            });
+
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                alert(data.error || 'Order failed.');
+                return;
+            }
+
+            // Show success modal
+            document.getElementById('order-confirmation-number').textContent = data.order.order_number;
+            document.getElementById('order-success-modal').classList.remove('hidden');
+
+            // Clear cart
+            state.cart = [];
+            saveCart();
+            renderCart();
+
+        } catch (err) {
+            alert('Connection error. Please try again.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Submit Order';
+        }
+    }
+
+    function closeOrderModal() {
+        document.getElementById('order-success-modal').classList.add('hidden');
+        showTab('products');
+    }
+
+    // ============================================================
+    // ORDER DETAIL / PRINT / DOWNLOAD
+    // ============================================================
+    function toggleOrderDetail(idx) {
+        const detail = document.getElementById(`order-detail-${idx}`);
+        const chevron = document.getElementById(`order-chevron-${idx}`);
+        if (detail.classList.contains('hidden')) {
+            detail.classList.remove('hidden');
+            chevron.classList.remove('fa-chevron-down');
+            chevron.classList.add('fa-chevron-up');
+        } else {
+            detail.classList.add('hidden');
+            chevron.classList.remove('fa-chevron-up');
+            chevron.classList.add('fa-chevron-down');
+        }
+    }
+
+    function printOrder(idx) {
+        const o = state.orders[idx];
+        if (!o) return;
+        const items = o.items || [];
+        const rows = items.map(i => `
+            <tr>
+                <td style="padding:6px;border-bottom:1px solid #ddd;">${escapeHtml(i.name)}</td>
+                <td style="padding:6px;border-bottom:1px solid #ddd;">${escapeHtml(i.sku || '-')}</td>
+                <td style="padding:6px;border-bottom:1px solid #ddd;text-align:center;">${i.quantity}</td>
+                <td style="padding:6px;border-bottom:1px solid #ddd;text-align:right;">$${parseFloat(i.unit_price).toFixed(2)}</td>
+                <td style="padding:6px;border-bottom:1px solid #ddd;text-align:right;">$${parseFloat(i.subtotal).toFixed(2)}</td>
+            </tr>`).join('');
+
+        const html = `<!DOCTYPE html><html><head><title>Order ${escapeHtml(o.order_number)}</title>
+            <style>body{font-family:Arial,sans-serif;padding:30px;color:#333}table{width:100%;border-collapse:collapse;margin-top:15px}th{background:#f3f4f6;padding:8px;text-align:left;font-size:12px;border-bottom:2px solid #ddd}.total{font-size:18px;font-weight:bold;color:#1e40af}h1{color:#1e40af;margin-bottom:5px}.meta{color:#6b7280;font-size:14px;margin:3px 0}@media print{body{padding:15px}}</style>
+            </head><body>
+            <h1>Order #${escapeHtml(o.order_number)}</h1>
+            <p class="meta">Date: ${new Date(o.created_at).toLocaleDateString()}</p>
+            <p class="meta">Ordered by: ${escapeHtml(o.contact_name)}</p>
+            ${o.location ? `<p class="meta">Location: ${escapeHtml(o.location)}</p>` : ''}
+            <p class="meta">Status: ${o.status.toUpperCase()}</p>
+            <table>
+                <thead><tr><th>Product</th><th>SKU</th><th style="text-align:center">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Subtotal</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <p style="text-align:right;margin-top:15px" class="total">Total: $${parseFloat(o.total).toFixed(2)}</p>
+            <scr` + `ipt>window.onload=function(){window.print();}</scr` + `ipt>
+            </body></html>`;
+
+        const win = window.open('', '_blank');
+        win.document.write(html);
+        win.document.close();
+    }
+
+    function downloadOrderCSV(idx) {
+        const o = state.orders[idx];
+        if (!o) return;
+        const items = o.items || [];
+        const header = 'Order Number,Date,Product,SKU,Quantity,Unit Price,Subtotal';
+        const rows = items.map(i =>
+            `"${o.order_number}","${new Date(o.created_at).toLocaleDateString()}","${(i.name||'').replace(/"/g,'""')}","${(i.sku||'').replace(/"/g,'""')}",${i.quantity},${parseFloat(i.unit_price).toFixed(2)},${parseFloat(i.subtotal).toFixed(2)}`
+        );
+        rows.push(`"${o.order_number}","","","TOTAL","","","${parseFloat(o.total).toFixed(2)}"`);
+        const csv = [header, ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `order-${o.order_number}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    async function downloadInvoice(orderId) {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/orders/${orderId}/invoice`);
+            const data = await resp.json();
+            if (!resp.ok || !data.url) { alert(data.error || 'Invoice not available.'); return; }
+            window.open(data.url, '_blank');
+        } catch (err) { alert('Failed to download invoice.'); }
+    }
+
+    async function loadOrders() {
+        const list = document.getElementById('orders-list');
+        const noOrders = document.getElementById('no-orders');
+
+        list.innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i></div>';
+
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/orders`);
+            const data = await resp.json();
+
+            if (!data.orders?.length) {
+                list.innerHTML = '';
+                noOrders.classList.remove('hidden');
+                return;
+            }
+
+            noOrders.classList.add('hidden');
+            const statusColors = {
+                pending: 'bg-yellow-100 text-yellow-800',
+                confirmed: 'bg-blue-100 text-blue-800',
+                processing: 'bg-purple-100 text-purple-800',
+                shipped: 'bg-indigo-100 text-indigo-800',
+                delivered: 'bg-green-100 text-green-800',
+                cancelled: 'bg-red-100 text-red-800'
+            };
+
+            list.innerHTML = data.orders.map((o, idx) => {
+                const items = o.items || [];
+                const itemsHtml = items.map(i => `
+                    <tr>
+                        <td class="px-3 py-2 text-sm">${escapeHtml(i.name)}</td>
+                        <td class="px-3 py-2 text-sm text-gray-500">${escapeHtml(i.sku || '-')}</td>
+                        <td class="px-3 py-2 text-sm text-center">${i.quantity}</td>
+                        <td class="px-3 py-2 text-sm text-right">$${parseFloat(i.unit_price).toFixed(2)}</td>
+                        <td class="px-3 py-2 text-sm text-right font-medium">$${parseFloat(i.subtotal).toFixed(2)}</td>
+                    </tr>
+                `).join('');
+
+                return `
+                <div class="bg-white rounded-lg shadow-sm border fade-in" id="order-card-${idx}">
+                    <div class="p-4 cursor-pointer" onclick="toggleOrderDetail(${idx})">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="font-mono font-bold text-blue-700">${escapeHtml(o.order_number)}</p>
+                                <p class="text-sm text-gray-400">${new Date(o.created_at).toLocaleDateString()} - ${escapeHtml(o.contact_name)}${o.location ? ' · <i class="fas fa-map-marker-alt"></i> ' + escapeHtml(o.location) : ''}</p>
+                            </div>
+                            <div class="text-right">
+                                <span class="px-2 py-1 rounded-full text-xs font-semibold ${statusColors[o.status] || 'bg-gray-100'}">${o.status.toUpperCase()}</span>
+                                <p class="font-bold text-gray-800 mt-1">$${parseFloat(o.total).toFixed(2)}</p>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center mt-2">
+                            <p class="text-sm text-gray-500">${items.length} item${items.length !== 1 ? 's' : ''}</p>
+                            <div class="flex items-center gap-3">
+                                ${o.invoice_filename ? `<button onclick="event.stopPropagation(); downloadInvoice('${o.id}')" class="text-xs font-semibold text-green-600 hover:text-green-800"><i class="fas fa-file-invoice-dollar mr-1"></i>Download Invoice</button>` : ''}
+                                <p class="text-xs text-blue-500"><i class="fas fa-chevron-down mr-1" id="order-chevron-${idx}"></i>View Details</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="order-detail-${idx}" class="hidden border-t">
+                        <div class="overflow-x-auto">
+                            <table class="w-full">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">Product</th>
+                                        <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">SKU</th>
+                                        <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500">Qty</th>
+                                        <th class="px-3 py-2 text-right text-xs font-semibold text-gray-500">Price</th>
+                                        <th class="px-3 py-2 text-right text-xs font-semibold text-gray-500">Subtotal</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y">${itemsHtml}</tbody>
+                                <tfoot>
+                                    <tr class="border-t-2">
+                                        <td colspan="4" class="px-3 py-2 text-right font-bold">Total:</td>
+                                        <td class="px-3 py-2 text-right font-bold text-blue-700">$${parseFloat(o.total).toFixed(2)}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        <div class="p-3 bg-gray-50 flex gap-2 flex-wrap">
+                            <button onclick="printOrder(${idx})" class="px-3 py-1.5 bg-white border rounded-lg text-sm hover:bg-gray-100 transition-colors"><i class="fas fa-print mr-1"></i>Print</button>
+                            <button onclick="downloadOrderCSV(${idx})" class="px-3 py-1.5 bg-white border rounded-lg text-sm hover:bg-gray-100 transition-colors"><i class="fas fa-download mr-1"></i>Download CSV</button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Store orders for print/download
+            state.orders = data.orders;
+
+        } catch (err) {
+            list.innerHTML = '<div class="text-center py-8 text-red-500">Failed to load orders.</div>';
+        }
+    }
+
+    // ============================================================
+    // UTILITIES
+    // ============================================================
+    function apiFetch(path, options = {}) {
+        return fetch(`${API_BASE}${path}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`,
+                ...(options.headers || {})
+            }
+        });
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    </script>
+</body>
+</html>

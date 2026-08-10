@@ -1,0 +1,625 @@
+const express = require('express');
+const { supabaseAdmin } = require('../utils/supabase');
+const { requireCompanyAuth } = require('../middleware/auth');
+const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
+const { sendOrderNotification } = require('../utils/email');
+const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
+
+const router = express.Router();
+
+/**
+ * GET /api/store/platform-logo
+ * Public - get the CHC master logo URL from Supabase Storage
+ */
+router.get('/platform-logo', async (req, res) => {
+    try {
+        const { data: files } = await supabaseAdmin.storage
+            .from('company-logos')
+            .list('platform', { limit: 1, search: 'master-logo' });
+
+        if (files && files.length > 0) {
+            const { data: urlData } = supabaseAdmin.storage
+                .from('company-logos')
+                .getPublicUrl('platform/master-logo.png');
+            return res.json({ url: urlData.publicUrl });
+        }
+
+        // Fallback to local asset
+        res.json({ url: '/assets/chc-logo.png' });
+    } catch (err) {
+        console.error('Platform logo error:', err);
+        res.json({ url: '/assets/chc-logo.png' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/info
+ * Public - get company info for login page (name, logo)
+ */
+router.get('/:slug/info', async (req, res) => {
+    try {
+        const { data: company, error } = await supabaseAdmin
+            .from('companies')
+            .select('id, name, slug, logo_url, settings')
+            .eq('slug', req.params.slug)
+            .eq('is_active', true)
+            .single();
+
+        if (error || !company) {
+            return res.status(404).json({ error: 'Company not found.' });
+        }
+
+        res.json({ company });
+    } catch (err) {
+        console.error('Company info error:', err);
+        res.status(500).json({ error: 'Failed to load company info.' });
+    }
+});
+
+
+/**
+ * GET /api/store/:slug/products
+ * Get product catalog for authenticated company
+ */
+router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const { brand, category, search, location_id, page = 1, limit = 100 } = req.query;
+
+        // Location-based category lockdown (e.g., Nova Scotia shops -> Equipment/Booth only)
+        let effectiveCategory = category;
+        let lockedCategory = null;
+        if (location_id && isValidUUID(location_id)) {
+            const { data: loc } = await supabaseAdmin
+                .from('company_locations')
+                .select('restrict_to_category')
+                .eq('id', location_id).eq('company_id', companyId).single();
+            if (loc && loc.restrict_to_category) { lockedCategory = loc.restrict_to_category; effectiveCategory = loc.restrict_to_category; }
+        }
+
+        let query = supabaseAdmin
+            .from('products')
+            .select('*', { count: 'exact' })
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .order('brand')
+            .order('sort_order')
+            .order('name');
+
+        if (brand) query = query.eq('brand', brand);
+        if (effectiveCategory) query = query.eq('category', effectiveCategory);
+        if (search) query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%,brand.ilike.%${search}%`);
+
+        // Pagination
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+        query = query.range(offset, offset + parseInt(limit) - 1);
+
+        const { data: products, error, count } = await query;
+
+        if (error) {
+            console.error('Products fetch error:', error);
+            return res.status(500).json({ error: 'Failed to load products.' });
+        }
+
+        // Get available brands and categories for filters
+        const { data: brands } = await supabaseAdmin
+            .from('products')
+            .select('brand')
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .order('brand');
+
+        const uniqueBrands = [...new Set((brands?.map(b => b.brand) || []).filter(Boolean))];
+
+        const { data: categories } = await supabaseAdmin
+            .from('products')
+            .select('category')
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .not('category', 'is', null)
+            .neq('category', '')
+            .order('category');
+
+        const uniqueCategories = [...new Set((categories?.map(c => c.category) || []).filter(Boolean))];
+
+        res.json({
+            products,
+            total: count,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            locked_category: lockedCategory,
+            filters: {
+                brands: uniqueBrands,
+                categories: lockedCategory ? [lockedCategory] : uniqueCategories
+            }
+        });
+
+    } catch (err) {
+        console.error('Products error:', err);
+        res.status(500).json({ error: 'Failed to load products.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/promotions
+ * Get active promotions (global + company-specific)
+ */
+router.get('/:slug/promotions', requireCompanyAuth, async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        if (!isValidUUID(companyId)) {
+            return res.status(400).json({ error: 'Invalid company identifier.' });
+        }
+        const now = new Date().toISOString();
+
+        // Fetch company-specific promotions
+        const { data: companyPromos } = await supabaseAdmin
+            .from('promotions')
+            .select(`
+                id, promo_price, promo_label, description, starts_at, ends_at, company_id,
+                products (id, brand, name, sku, description, price, previous_price, case_qty, unit, image_url, category)
+            `)
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .lte('starts_at', now)
+            .gte('ends_at', now);
+
+        // Fetch global promotions separately (avoids .or() interpolation)
+        const { data: globalPromos } = await supabaseAdmin
+            .from('promotions')
+            .select(`
+                id, promo_price, promo_label, description, starts_at, ends_at, company_id,
+                products (id, brand, name, sku, description, price, previous_price, case_qty, unit, image_url, category)
+            `)
+            .is('company_id', null)
+            .eq('is_active', true)
+            .lte('starts_at', now)
+            .gte('ends_at', now);
+
+        const promotions = [...(companyPromos || []), ...(globalPromos || [])];
+        const error = null;
+
+        if (error) {
+            console.error('Promotions fetch error:', error);
+            return res.status(500).json({ error: 'Failed to load promotions.' });
+        }
+
+        // Tag each promotion as global or company-specific
+        const tagged = (promotions || []).map(p => ({
+            ...p,
+            is_global: p.company_id === null,
+            savings: p.products ? (p.products.price - p.promo_price).toFixed(2) : '0.00',
+            savings_pct: p.products ? Math.round((1 - p.promo_price / p.products.price) * 100) : 0
+        }));
+
+        res.json({ promotions: tagged });
+
+    } catch (err) {
+        console.error('Promotions error:', err);
+        res.status(500).json({ error: 'Failed to load promotions.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/locations
+ * Get company locations for order form dropdown
+ */
+router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('company_locations')
+            .select('id, name, city, address, province, restrict_to_category')
+            .eq('company_id', req.company.id)
+            .eq('is_active', true)
+            .order('sort_order')
+            .order('city')
+            .order('name');
+
+        if (error) throw error;
+        res.json({ locations: data || [] });
+    } catch (err) {
+        console.error('[Locations API] Error:', err);
+        res.status(500).json({ error: 'Failed to load locations.' });
+    }
+});
+
+/**
+ * POST /api/store/:slug/orders
+ * Submit a new order
+ */
+/**
+ * POST /api/store/:slug/track
+ * Lightweight, anonymous usage logging (visit / login / enter-store). Never blocks the store.
+ */
+router.post('/:slug/track', async (req, res) => {
+    try {
+        const { event, location_id, session_id } = req.body || {};
+        const ev = ['visit', 'login', 'enter'].includes(event) ? event : 'visit';
+        const { data: company } = await supabaseAdmin
+            .from('companies').select('id').eq('slug', req.params.slug).single();
+        if (!company) return res.json({ ok: true });
+        await supabaseAdmin.from('console_visits').insert({
+            company_id: company.id,
+            slug: req.params.slug,
+            event: ev,
+            location_id: (location_id && isValidUUID(location_id)) ? location_id : null,
+            session_id: (session_id || '').toString().slice(0, 64),
+            ip: (req.headers['x-forwarded-for'] || req.ip || '').toString().split(',')[0].trim().slice(0, 64),
+            user_agent: (req.headers['user-agent'] || '').toString().slice(0, 300)
+        });
+        res.json({ ok: true });
+    } catch (e) { res.json({ ok: true }); }
+});
+
+router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const {
+            contact_name, contact_email, contact_phone,
+            po_number, location, location_id, items, notes
+        } = sanitizeObject(req.body);
+
+        // Validate required fields
+        if (!contact_name || !contact_email || !items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ error: 'Contact name, email, and at least one item are required.' });
+        }
+
+        if (!po_number || !po_number.trim()) {
+            return res.status(400).json({ error: 'PO Number is required.' });
+        }
+
+        if (!isValidUUID(companyId)) {
+            return res.status(400).json({ error: 'Invalid company identifier.' });
+        }
+
+        // Location is required and must be a real, active location belonging to this company.
+        // We resolve the authoritative name from the DB and never trust client-supplied text.
+        if (!location_id || !isValidUUID(location_id)) {
+            return res.status(400).json({ error: 'Please select your location before submitting your order.' });
+        }
+        const { data: locationRow, error: locationLookupError } = await supabaseAdmin
+            .from('company_locations')
+            .select('id, name, supplier_branch_id, restrict_to_category')
+            .eq('id', location_id)
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .single();
+        if (locationLookupError || !locationRow) {
+            return res.status(400).json({ error: 'Selected location is not valid for this account.' });
+        }
+        const resolvedLocationName = locationRow.name;
+
+        // Validate item quantities
+        for (const item of items) {
+            const qty = parseInt(item.quantity);
+            if (!item.product_id || !isValidUUID(item.product_id) || !qty || qty < 1 || qty > 9999) {
+                return res.status(400).json({ error: 'Invalid product or quantity. Quantities must be between 1 and 9999.' });
+            }
+        }
+
+        // Validate and calculate totals from server-side prices
+        const productIds = items.map(i => i.product_id);
+        const { data: products } = await supabaseAdmin
+            .from('products')
+            .select('id, name, sku, price, case_qty, category')
+            .eq('company_id', companyId)
+            .in('id', productIds);
+
+        if (!products || products.length !== productIds.length) {
+            return res.status(400).json({ error: 'One or more products not found.' });
+        }
+
+        // Enforce location category lockdown at order time (defense in depth)
+        if (locationRow.restrict_to_category) {
+            const offItem = products.find(p => (p.category || '') !== locationRow.restrict_to_category);
+            if (offItem) {
+                return res.status(400).json({ error: `This location can only order ${locationRow.restrict_to_category} items. Please remove other items from your cart.` });
+            }
+        }
+
+        // Check for active promotions on these products (separate queries to avoid .or() injection)
+        const now = new Date().toISOString();
+        const { data: companyOrderPromos } = await supabaseAdmin
+            .from('promotions')
+            .select('product_id, promo_price')
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .lte('starts_at', now)
+            .gte('ends_at', now)
+            .in('product_id', productIds);
+
+        const { data: globalOrderPromos } = await supabaseAdmin
+            .from('promotions')
+            .select('product_id, promo_price')
+            .is('company_id', null)
+            .eq('is_active', true)
+            .lte('starts_at', now)
+            .gte('ends_at', now)
+            .in('product_id', productIds);
+
+        const promoMap = {};
+        // Global promos first, then company-specific (company overrides global)
+        (globalOrderPromos || []).forEach(p => { promoMap[p.product_id] = p.promo_price; });
+        (companyOrderPromos || []).forEach(p => { promoMap[p.product_id] = p.promo_price; });
+
+        const productMap = {};
+        products.forEach(p => { productMap[p.id] = p; });
+
+        // Build verified line items with server-side pricing
+        let subtotal = 0;
+        const verifiedItems = items.map(item => {
+            const product = productMap[item.product_id];
+            const effectivePrice = promoMap[item.product_id] || product.price;
+            const qty = parseInt(item.quantity) || 1;
+            const lineTotal = effectivePrice * qty;
+            subtotal += lineTotal;
+
+            return {
+                product_id: product.id,
+                name: product.name,
+                sku: product.sku,
+                quantity: qty,
+                unit_price: effectivePrice,
+                was_promo: !!promoMap[item.product_id],
+                subtotal: lineTotal
+            };
+        });
+
+        const total = subtotal; // Tax can be added here if needed
+
+        const { data: order, error } = await supabaseAdmin
+            .from('orders')
+            .insert({
+                company_id: companyId,
+                contact_name: stripHtml(contact_name),
+                contact_email: stripHtml(contact_email),
+                contact_phone: stripHtml(contact_phone || ''),
+                company_name: req.company.name,
+                po_number: stripHtml(po_number),
+                location: resolvedLocationName,
+                location_id: locationRow.id,
+                items: verifiedItems,
+                subtotal,
+                total,
+                notes: stripHtml(notes || ''),
+                status: 'pending',
+                status_history: [{ status: 'pending', timestamp: now, note: 'Order placed' }]
+            })
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Order insert error:', error);
+            return res.status(500).json({ error: 'Failed to submit order.' });
+        }
+
+        // Send email notification (non-blocking — don't fail the order if email fails)
+        try {
+            // Get company's email_config for notification routing
+            const { data: companyData } = await supabaseAdmin
+                .from('companies')
+                .select('email_config, contact_email')
+                .eq('id', companyId)
+                .single();
+
+            // Notify the company notification/contact email plus every configured manager.
+            const cfg = companyData?.email_config || {};
+            const managerEmails = Array.isArray(cfg.manager_emails) ? cfg.manager_emails : [];
+            // Company contact email (if the company has one set). Managers below are the optional per-company group.
+            const companyContact = companyData?.contact_email;
+
+            // Route to the servicing CHC branch assigned to this order's location.
+            let branchEmails = [];
+            if (locationRow.supplier_branch_id) {
+                const { data: branch } = await supabaseAdmin
+                    .from('supplier_branches')
+                    .select('emails, is_active')
+                    .eq('id', locationRow.supplier_branch_id)
+                    .single();
+                if (branch && branch.is_active !== false && Array.isArray(branch.emails)) branchEmails = branch.emails;
+            }
+
+            // Always email the person who placed the order + the company contact (if set)
+            // + the optional manager/general group + the servicing CHC branch.
+            const ordererEmail = String(contact_email || '').trim().toLowerCase();
+            const recipients = [...new Set(
+                [ordererEmail, ...(companyContact ? [companyContact] : []), ...managerEmails, ...branchEmails]
+                    .map(e => String(e || '').trim().toLowerCase())
+                    .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+            )];
+            // Replies (from the branch/CHC) go back to the person who ordered, then the company contact.
+            const replyTo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ordererEmail) ? ordererEmail : (companyContact || undefined);
+
+            if (recipients.length) {
+                sendOrderNotification({
+                    to: recipients,
+                    replyTo,
+                    order: { ...order, items: verifiedItems },
+                    companyName: req.company.name,
+                    contactName: stripHtml(contact_name),
+                    contactEmail: stripHtml(contact_email),
+                    contactPhone: stripHtml(contact_phone || ''),
+                    poNumber: stripHtml(po_number),
+                    location: resolvedLocationName,
+                    notes: stripHtml(notes || '')
+                }).catch(err => console.error('Order email failed (non-blocking):', err.message));
+            }
+        } catch (emailErr) {
+            console.error('Email lookup error (non-blocking):', emailErr.message);
+        }
+
+        res.status(201).json({
+            message: 'Order submitted successfully!',
+            order: {
+                id: order.id,
+                order_number: order.order_number,
+                total: order.total,
+                status: order.status,
+                created_at: order.created_at
+            }
+        });
+
+    } catch (err) {
+        console.error('Order submission error:', err);
+        res.status(500).json({ error: 'Failed to submit order.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/orders
+ * Get order history for the authenticated company session
+ */
+router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: orders, error } = await supabaseAdmin
+            .from('orders')
+            .select('id, order_number, contact_name, contact_email, total, status, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
+            .eq('company_id', req.company.id)
+            .order('created_at', { ascending: false })
+            .limit(50);
+
+        if (error) {
+            console.error('Orders fetch error:', error);
+            return res.status(500).json({ error: 'Failed to load orders.' });
+        }
+
+        res.json({ orders: orders || [] });
+
+    } catch (err) {
+        console.error('Orders error:', err);
+        res.status(500).json({ error: 'Failed to load orders.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/reports/orders
+ * Filtered orders for reporting: by location, date range. Returns line items too.
+ * Branches may view all and filter; scoping/aggregation happens client-side.
+ */
+router.get('/:slug/reports/orders', requireCompanyAuth, async (req, res) => {
+    try {
+        const { location_id, from, to } = req.query;
+        let q = supabaseAdmin
+            .from('orders')
+            .select('id, order_number, contact_name, po_number, status, total, location, location_id, created_at, items')
+            .eq('company_id', req.company.id)
+            .order('created_at', { ascending: false })
+            .limit(5000);
+        if (location_id) q = q.eq('location_id', location_id);
+        if (from) q = q.gte('created_at', from);
+        if (to) q = q.lte('created_at', to);
+        const { data, error } = await q;
+        if (error) { console.error('Reports fetch error:', error); return res.status(500).json({ error: 'Failed to load report data.' }); }
+        res.json({ orders: data || [] });
+    } catch (err) {
+        console.error('Reports error:', err);
+        res.status(500).json({ error: 'Failed to load report data.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/payments/config
+ * Tells the storefront whether online card payment is available for this tenant.
+ * Returns { enabled:false } unless Stripe keys are configured AND the company opted in.
+ */
+router.get('/:slug/payments/config', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: company } = await supabaseAdmin
+            .from('companies')
+            .select('settings')
+            .eq('id', req.company.id)
+            .single();
+        res.json(publicPaymentConfig(company));
+    } catch (err) {
+        console.error('Payment config error:', err);
+        res.json({ enabled: false, provider: 'stripe', publishable_key: null });
+    }
+});
+
+/**
+ * POST /api/store/:slug/payments/create-intent
+ * Pre-wired Stripe PaymentIntent creation for an existing order.
+ * INERT until Stripe keys + the company payments flag are enabled — returns 503 otherwise.
+ * Body: { order_id }
+ */
+router.post('/:slug/payments/create-intent', requireCompanyAuth, async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const { order_id } = req.body || {};
+
+        const { data: company } = await supabaseAdmin
+            .from('companies')
+            .select('settings')
+            .eq('id', companyId)
+            .single();
+
+        if (!paymentsEnabled(company)) {
+            return res.status(503).json({ error: 'Online payments are not enabled for this account.' });
+        }
+        if (!order_id || !isValidUUID(order_id)) {
+            return res.status(400).json({ error: 'A valid order_id is required.' });
+        }
+
+        // Always price from the server-side order, never the client.
+        const { data: order, error: orderErr } = await supabaseAdmin
+            .from('orders')
+            .select('id, total, order_number, payment_status')
+            .eq('id', order_id)
+            .eq('company_id', companyId)
+            .single();
+        if (orderErr || !order) {
+            return res.status(404).json({ error: 'Order not found.' });
+        }
+        if (order.payment_status === 'paid') {
+            return res.status(409).json({ error: 'This order has already been paid.' });
+        }
+
+        const stripe = getStripe();
+        const intent = await stripe.paymentIntents.create({
+            amount: Math.round(parseFloat(order.total) * 100), // cents
+            currency: 'cad',
+            metadata: { order_id: order.id, order_number: order.order_number, company_id: companyId },
+            automatic_payment_methods: { enabled: true }
+        });
+
+        await supabaseAdmin
+            .from('orders')
+            .update({ payment_provider: 'stripe', payment_intent_id: intent.id, payment_status: 'pending' })
+            .eq('id', order.id);
+
+        // TODO (activation): confirm payment client-side with Stripe.js using this client_secret,
+        // then rely on the /api/webhooks/stripe handler to mark the order 'paid'.
+        res.json({ client_secret: intent.client_secret });
+    } catch (err) {
+        console.error('Create payment intent error:', err);
+        res.status(500).json({ error: 'Failed to start payment.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/orders/:orderId/invoice
+ * Returns a short-lived signed download URL for the order's invoice (company-scoped).
+ */
+router.get('/:slug/orders/:orderId/invoice', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: order } = await supabaseAdmin
+            .from('orders').select('id, invoice_path, invoice_filename')
+            .eq('id', req.params.orderId).eq('company_id', req.company.id).single();
+        if (!order || !order.invoice_path) {
+            return res.status(404).json({ error: 'No invoice available for this order.' });
+        }
+        const { data: signed, error } = await supabaseAdmin.storage
+            .from('invoices')
+            .createSignedUrl(order.invoice_path, 300, { download: order.invoice_filename || true });
+        if (error || !signed) {
+            console.error('Invoice signed URL error:', error);
+            return res.status(500).json({ error: 'Failed to prepare invoice download.' });
+        }
+        res.json({ url: signed.signedUrl, filename: order.invoice_filename });
+    } catch (err) {
+        console.error('Invoice download error:', err);
+        res.status(500).json({ error: 'Failed to get invoice.' });
+    }
+});
+
+module.exports = router;
