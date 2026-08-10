@@ -467,6 +467,22 @@
 
     const API_BASE = '/api';
 
+    // Anonymous usage tracking (visit / login / enter). Fire-and-forget; never blocks the store.
+    function chcSid() {
+        let sid = localStorage.getItem('chc_sid');
+        if (!sid) { sid = 'sid-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); localStorage.setItem('chc_sid', sid); }
+        return sid;
+    }
+    function track(event, location_id) {
+        try {
+            if (!state.slug) return;
+            const url = `${API_BASE}/store/${state.slug}/track`;
+            const body = JSON.stringify({ event, location_id: location_id || null, session_id: chcSid() });
+            if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+            else fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true });
+        } catch (e) { /* ignore */ }
+    }
+
     // ============================================================
     // INITIALIZATION
     // ============================================================
@@ -483,6 +499,7 @@
 
         // Load CHC master logo from Supabase Storage
         loadPlatformLogo();
+        track('visit');
 
         // Check for existing session
         const savedToken = sessionStorage.getItem('chc_token');
@@ -584,6 +601,7 @@
             state.company = data.company;
             sessionStorage.setItem('chc_token', data.token);
             sessionStorage.setItem('chc_company', JSON.stringify(data.company));
+            track('login');
 
             // Access code verified — now require the user to select their location
             promptLocationSelection();
@@ -616,6 +634,7 @@
             return;
         }
         sessionStorage.setItem('chc_location', JSON.stringify(state.location));
+        track('enter', state.location.id);
         showApp();
     }
 
