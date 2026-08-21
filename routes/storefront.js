@@ -610,7 +610,7 @@ router.get('/:slug/orders/:orderId/invoice', requireCompanyAuth, async (req, res
         }
         const { data: signed, error } = await supabaseAdmin.storage
             .from('invoices')
-            .createSignedUrl(order.invoice_path, 300, { download: order.invoice_filename || true });
+            .createSignedUrl(order.invoice_path, 300);  // inline: opens the PDF in the browser instead of forcing a desktop download
         if (error || !signed) {
             console.error('Invoice signed URL error:', error);
             return res.status(500).json({ error: 'Failed to prepare invoice download.' });

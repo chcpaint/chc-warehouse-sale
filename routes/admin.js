@@ -619,7 +619,7 @@ router.get('/companies/:companyId/orders/:orderId/invoice', requireCompanyAccess
             .eq('id', orderId).eq('company_id', companyId).single();
         if (error || !order || !order.invoice_path) return res.status(404).json({ error: 'No invoice on file for this order.' });
         const { data: signed, error: sErr } = await supabaseAdmin.storage.from('invoices')
-            .createSignedUrl(order.invoice_path, 300, { download: order.invoice_filename || true });
+            .createSignedUrl(order.invoice_path, 300);  // inline: opens the PDF in the browser instead of forcing a desktop download
         if (sErr || !signed) return res.status(500).json({ error: 'Failed to prepare invoice download.' });
         res.json({ url: signed.signedUrl, filename: order.invoice_filename });
     } catch (err) {
@@ -1122,7 +1122,7 @@ router.get('/orders', async (req, res) => {
 
         let query = supabaseAdmin
             .from('orders')
-            .select(`*, companies (id, name), company_locations (id, name)`, { count: 'exact' })
+            .select(`*, companies (id, name), company_locations (id, name, supplier_branches (id, name))`, { count: 'exact' })
             .order('created_at', { ascending: false });
 
         if (req.admin.role !== 'super_admin') {
