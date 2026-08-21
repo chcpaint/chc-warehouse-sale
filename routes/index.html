@@ -1,0 +1,2487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHC Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        .sidebar-link.active { background: rgba(59, 130, 246, 0.1); color: #2563eb; border-right: 3px solid #2563eb; }
+        .fade-in { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .modal-backdrop { background: rgba(0,0,0,0.5); }
+            .stage-tab{padding:.4rem .9rem;border:1px solid #e5e7eb;border-radius:9999px;font-size:.8rem;font-weight:600;color:#475569;background:#fff;cursor:pointer;transition:all .15s;}
+        .stage-tab:hover{background:#f8fafc;}
+        .stage-tab-active{background:#1d4ed8;color:#fff;border-color:#1d4ed8;}
+        .stage-tab .cnt{display:inline-block;min-width:1.25rem;text-align:center;margin-left:.35rem;padding:0 .35rem;border-radius:9999px;background:rgba(0,0,0,.08);font-size:.7rem;}
+        .stage-tab-active .cnt{background:rgba(255,255,255,.25);}
+        @keyframes pulseSlow{0%,100%{opacity:1;}50%{opacity:.5;}}
+        .animate-pulse-slow{animation:pulseSlow 1.8s ease-in-out infinite;}
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+    <!-- ============================================================ -->
+    <!-- ADMIN LOGIN -->
+    <!-- ============================================================ -->
+    <div id="admin-login" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-700">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <i class="fas fa-shield-alt text-blue-600 text-2xl"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800">Admin Dashboard</h2>
+                <p class="text-gray-500 text-sm">CHC Paint & Auto Body Supplies</p>
+            </div>
+
+            <div id="admin-login-error" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm"></div>
+
+            <!-- Setup form (first admin only) -->
+            <div id="setup-form-container" class="hidden">
+                <p class="text-sm text-blue-600 bg-blue-50 p-3 rounded-lg mb-4"><i class="fas fa-info-circle mr-1"></i> First-time setup: Create your super admin account.</p>
+                <form id="setup-form" class="space-y-3">
+                    <input type="text" id="setup-name" placeholder="Full Name" class="w-full px-4 py-3 border rounded-lg" required>
+                    <input type="email" id="setup-email" placeholder="Email" class="w-full px-4 py-3 border rounded-lg" required>
+                    <input type="password" id="setup-password" placeholder="Password (8+ chars, mixed case + number)" class="w-full px-4 py-3 border rounded-lg" required>
+                    <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Create Admin Account</button>
+                </form>
+            </div>
+
+            <!-- Login form -->
+            <form id="admin-login-form" class="space-y-4">
+                <input type="email" id="admin-email" placeholder="Email" class="w-full px-4 py-3 border rounded-lg" required>
+                <input type="password" id="admin-password" placeholder="Password" class="w-full px-4 py-3 border rounded-lg" required>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">
+                    <span id="admin-login-text">Sign In</span>
+                    <i id="admin-login-spinner" class="fas fa-spinner fa-spin ml-2 hidden"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- ADMIN DASHBOARD -->
+    <!-- ============================================================ -->
+    <div id="admin-app" class="hidden flex min-h-screen">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-white shadow-lg border-r flex flex-col fixed h-full z-40">
+            <div class="p-4 border-b">
+                <img src="/assets/chc-logo.png" alt="CHC" class="h-10 mb-2" onerror="this.outerHTML='<span class=\'font-bold text-blue-900 text-xl\'>CHC Admin</span>'">
+                <p id="admin-welcome" class="text-sm text-gray-500"></p>
+            </div>
+
+            <nav class="flex-1 py-4">
+                <button onclick="adminNav('dashboard')" data-nav="dashboard" class="sidebar-link active w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-chart-bar w-5"></i> Dashboard
+                </button>
+                <button onclick="adminNav('companies')" data-nav="companies" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-building w-5"></i> Companies
+                </button>
+                <button onclick="adminNav('products')" data-nav="products" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-box w-5"></i> Products
+                </button>
+                <button onclick="adminNav('promotions')" data-nav="promotions" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-tags w-5"></i> Promotions
+                </button>
+                <button onclick="adminNav('orders')" data-nav="orders" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-receipt w-5"></i> Orders
+                </button>
+                <button onclick="adminNav('reports')" data-nav="reports" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-chart-line w-5"></i> Reports
+                </button>
+                <button onclick="adminNav('admins')" data-nav="admins" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-admins">
+                    <i class="fas fa-users-cog w-5"></i> Admin Users
+                </button>
+                <button onclick="adminNav('audit')" data-nav="audit" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-audit">
+                    <i class="fas fa-clipboard-list w-5"></i> Audit Log
+                </button>
+                <div class="border-t my-2"></div>
+                <button onclick="adminNav('branding')" data-nav="branding" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-branding">
+                    <i class="fas fa-paint-brush w-5"></i> Branding
+                </button>
+            </nav>
+
+            <div class="p-4 border-t space-y-2">
+                <button onclick="showModal('change-password-modal')" class="w-full text-left text-sm text-gray-500 hover:text-blue-600">
+                    <i class="fas fa-key mr-2"></i> Change Password
+                </button>
+                <button onclick="adminLogout()" class="w-full text-left text-sm text-gray-500 hover:text-red-600">
+                    <i class="fas fa-sign-out-alt mr-2"></i> Sign Out
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="flex-1 ml-64">
+            <header class="bg-white shadow-sm border-b px-6 py-4 sticky top-0 z-30">
+                <h1 id="page-title" class="text-xl font-bold text-gray-800">Dashboard</h1>
+            </header>
+
+            <main class="p-6">
+                <!-- Dashboard -->
+                <section id="section-dashboard" class="fade-in">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm text-gray-500">Companies</p>
+                                    <p id="stat-companies" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                </div>
+                                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-building text-blue-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm text-gray-500">Products</p>
+                                    <p id="stat-products" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                </div>
+                                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-box text-green-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm text-gray-500">Active Promos</p>
+                                    <p id="stat-promos" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                </div>
+                                <div class="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-tags text-red-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm text-gray-500">Orders (Month)</p>
+                                    <p id="stat-orders" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                    <p id="stat-revenue" class="text-sm text-green-600 font-semibold mt-1"></p>
+                                </div>
+                                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-receipt text-purple-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Companies Management -->
+                <section id="section-companies" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <p class="text-gray-500">Manage customer companies on the platform.</p>
+                        <button onclick="showModal('company-modal')" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <i class="fas fa-plus mr-1"></i> Add Company
+                        </button>
+                    </div>
+                    <div id="companies-table-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Slug</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Contact</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Order Email</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="companies-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Products Management -->
+                <section id="section-products" class="hidden fade-in">
+                    <!-- Top Bar: Company selector + actions -->
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center gap-3">
+                            <p class="text-gray-500">Manage product catalogs.</p>
+                            <select id="admin-product-company" onchange="loadAdminProducts()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">Select Company</option>
+                            </select>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="openUploadModal()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-upload mr-1"></i> Upload Catalog
+                            </button>
+                            <button onclick="showModal('product-modal')" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-plus mr-1"></i> Add Product
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filter Bar -->
+                    <div id="products-filter-bar" class="hidden bg-white rounded-xl shadow-sm border p-4 mb-4">
+                        <div class="flex flex-wrap items-end gap-4">
+                            <!-- Brand Filter -->
+                            <div class="flex-1 min-w-[160px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Brand</label>
+                                <select id="filter-brand" onchange="applyProductFilters()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="">All Brands</option>
+                                </select>
+                            </div>
+                            <!-- Category Filter -->
+                            <div class="flex-1 min-w-[160px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Category</label>
+                                <select id="filter-category" onchange="applyProductFilters()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="">All Categories</option>
+                                </select>
+                            </div>
+                            <!-- Search -->
+                            <div class="flex-1 min-w-[200px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search (Name / SKU)</label>
+                                <input type="text" id="filter-search" placeholder="Type to search..." oninput="debounceProductFilter()" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            </div>
+                            <!-- Clear -->
+                            <div>
+                                <button onclick="clearProductFilters()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                                    <i class="fas fa-times mr-1"></i> Clear
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Product count + filter summary -->
+                        <div class="flex justify-between items-center mt-3 pt-3 border-t">
+                            <p id="filter-result-count" class="text-sm text-gray-500"></p>
+                        </div>
+                    </div>
+
+                    <!-- Bulk Actions Bar (appears when items selected) -->
+                    <div id="bulk-actions-bar" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span id="bulk-selected-count" class="text-sm font-semibold text-blue-800"></span>
+                            <button onclick="bulkDeleteSelected()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-trash mr-1"></i> Delete Selected
+                            </button>
+                            <button onclick="bulkDeleteFiltered()" id="btn-delete-filtered" class="hidden bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-trash-alt mr-1"></i> Delete All Filtered
+                            </button>
+                        </div>
+                        <button onclick="clearProductSelection()" class="text-blue-600 hover:text-blue-800 text-sm">
+                            <i class="fas fa-times mr-1"></i> Clear Selection
+                        </button>
+                    </div>
+
+                    <!-- Products Table -->
+                    <div id="products-table-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="px-4 py-3 w-10"><input type="checkbox" id="select-all-products" onchange="toggleSelectAllProducts()" class="w-4 h-4 rounded border-gray-300"></th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Product</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Brand</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">SKU</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Price</th>
+                                    <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Case Qty</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stage &amp; Status</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="products-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Promotions Management -->
+                <section id="section-promotions" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <p class="text-gray-500">Manage promotions (global and per-company).</p>
+                        <button onclick="showModal('promo-modal')" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <i class="fas fa-plus mr-1"></i> Create Promotion
+                        </button>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Product</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Label</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Promo Price</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Dates</th>
+                                    <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="promotions-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Orders Management -->
+                <section id="section-orders" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4 flex-wrap gap-3">
+                        <div class="flex gap-3 items-center flex-wrap">
+                            <select id="admin-order-company" onchange="onOrderCompanyChange()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">All Companies</option>
+                            </select>
+                            <select id="admin-order-location" onchange="loadAdminOrders()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">All Locations</option>
+                            </select>
+                            <select id="admin-order-status" onchange="loadAdminOrders()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">All Statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="confirmed">Confirmed</option>
+                                <option value="processing">Processing</option>
+                                <option value="shipped">Shipped</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="closed">Closed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        <div class="flex gap-2 items-center">
+                            <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
+                                <button id="grp-branch" onclick="setOrderGroup('branch', this)" class="px-3 py-1.5 bg-blue-700 text-white font-semibold"><i class="fas fa-warehouse mr-1"></i>By CHC Branch</button>
+                                <button id="grp-all" onclick="setOrderGroup('all', this)" class="px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50">All</button>
+                            </div>
+                            <button onclick="toggleLocationSummary()" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
+                                <i class="fas fa-chart-bar mr-1"></i> By Location
+                            </button>
+                            <button onclick="exportOrders()" class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm">
+                                <i class="fas fa-file-csv mr-1"></i> Export CSV
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Workflow guide -->
+                    <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+                        <div class="flex items-start gap-3">
+                            <i class="fas fa-route text-blue-600 mt-1"></i>
+                            <div class="text-sm text-blue-900">
+                                <p class="font-semibold mb-1">Order workflow &mdash; 3 steps to complete an order</p>
+                                <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                                    <span><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold mr-1">1</span> <b>Order placed</b> &mdash; customer &amp; branch emailed automatically</span>
+                                    <span class="hidden sm:inline text-blue-300">&rarr;</span>
+                                    <span><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-xs font-bold mr-1">2</span> <b>Upload invoice</b> &mdash; recipients emailed automatically</span>
+                                    <span class="hidden sm:inline text-blue-300">&rarr;</span>
+                                    <span><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-600 text-white text-xs font-bold mr-1">3</span> <b>Mark Paid &amp; Close</b> &mdash; when payment is received</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stage filter tabs -->
+                    <div class="flex gap-2 mb-4 flex-wrap">
+                        <button class="stage-tab stage-tab-active" onclick="setOrderStage('all', this)">All <span class="cnt" id="cnt-all">0</span></button>
+                        <button class="stage-tab" onclick="setOrderStage('need_invoice', this)"><i class="fas fa-triangle-exclamation text-amber-500 mr-1"></i>Needs Invoice <span class="cnt" id="cnt-need">0</span></button>
+                        <button class="stage-tab" onclick="setOrderStage('invoiced', this)"><i class="fas fa-clock text-blue-500 mr-1"></i>Awaiting Payment <span class="cnt" id="cnt-inv">0</span></button>
+                        <button class="stage-tab" onclick="setOrderStage('closed', this)"><i class="fas fa-check text-emerald-500 mr-1"></i>Closed <span class="cnt" id="cnt-closed">0</span></button>
+                    </div>
+
+                    <!-- Per-location summary -->
+                    <div id="location-summary-panel" class="hidden bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                        <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
+                            <span class="text-sm font-semibold text-gray-700">Orders &amp; Revenue by Location</span>
+                            <span id="location-summary-meta" class="text-xs text-gray-400"></span>
+                        </div>
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Location</th>
+                                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Orders</th>
+                                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody id="location-summary-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Order #</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Location</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Contact</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Total</th>
+                                    <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Date</th>
+                                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orders-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Admin Users -->
+                <!-- Reports (CHC head office: all companies) -->
+                <section id="section-reports" class="hidden fade-in">
+                    <div class="flex flex-wrap gap-3 items-end mb-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Company</label>
+                            <select id="rep-company" onchange="onRepCompanyChange()" class="px-3 py-2 border rounded-lg text-sm bg-white min-w-[150px]">
+                                <option value="">All Companies</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Shop</label>
+                            <select id="rep-shop" onchange="arLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white min-w-[150px]">
+                                <option value="">All shops</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Period</label>
+                            <select id="rep-period" onchange="onAdminRepPeriodChange()" class="px-3 py-2 border rounded-lg text-sm bg-white">
+                                <option value="this_month">This month</option>
+                                <option value="last_month">Last month</option>
+                                <option value="this_quarter">This quarter</option>
+                                <option value="this_year" selected>This year</option>
+                                <option value="last_year">Last year</option>
+                                <option value="all">All time</option>
+                                <option value="custom">Custom range</option>
+                            </select>
+                        </div>
+                        <div id="rep-cf" class="hidden">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">From</label>
+                            <input type="date" id="rep-from" onchange="arLoad()" class="px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                        <div id="rep-ct" class="hidden">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">To</label>
+                            <input type="date" id="rep-to" onchange="arLoad()" class="px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Item (name or SKU)</label>
+                            <input type="text" id="rep-item" oninput="arItemDebounce()" placeholder="Filter by item&hellip;" class="px-3 py-2 border rounded-lg text-sm">
+                        </div>
+                        <div class="ml-auto flex gap-2">
+                            <button onclick="downloadAdminReportCSV('orders')" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Orders CSV</button>
+                            <button onclick="downloadAdminReportCSV('items')" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Item CSV</button>
+                            <button onclick="downloadAdminReportPDF(false)" class="px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm"><i class="fas fa-file-pdf mr-1"></i>Summary PDF</button>
+                            <button onclick="downloadAdminReportPDF(true)" class="px-3 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-sm"><i class="fas fa-print mr-1"></i>Print</button>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-400 mb-3">CSV files open directly in Google Sheets or Excel.</p>
+
+                    <div id="rep-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
+
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                        <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
+                            <span class="font-semibold text-gray-700 text-sm">Items purchased</span>
+                            <span id="rep-items-meta" class="text-xs text-gray-400"></span>
+                        </div>
+                        <div class="overflow-x-auto"><table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('items','sku')">SKU</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('items','name')">Item</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="arSort('items','qty')">Qty</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="arSort('items','orders')">Orders</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="arSort('items','spend')">Spend</th>
+                            </tr></thead>
+                            <tbody id="rep-items-body"></tbody>
+                        </table></div>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
+                            <span class="font-semibold text-gray-700 text-sm">Orders</span>
+                            <span id="rep-orders-meta" class="text-xs text-gray-400"></span>
+                        </div>
+                        <div class="overflow-x-auto"><table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','date')">Date</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','order')">Order #</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','company')">Company</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','shop')">Shop</th>
+                                <th class="text-left px-4 py-2">PO</th>
+                                <th class="text-left px-4 py-2 cursor-pointer" onclick="arSort('orders','by')">Ordered by</th>
+                                <th class="text-right px-4 py-2 cursor-pointer" onclick="arSort('orders','total')">Total</th>
+                            </tr></thead>
+                            <tbody id="rep-orders-body"></tbody>
+                        </table></div>
+                    </div>
+                </section>
+
+                <section id="section-admins" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <p class="text-gray-500">Manage admin user accounts.</p>
+                        <button onclick="showModal('admin-user-modal')" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <i class="fas fa-plus mr-1"></i> Add Admin
+                        </button>
+                    </div>
+                    <div id="admins-table-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Name</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Email</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Role</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Last Login</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admins-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Audit Log -->
+                <section id="section-audit" class="hidden fade-in">
+                    <div id="audit-log-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Time</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Admin</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Action</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Branding -->
+                <section id="section-branding" class="hidden fade-in">
+                    <div class="max-w-2xl">
+                        <!-- Master Logo -->
+                        <div class="bg-white rounded-xl shadow-sm border p-6 mb-6">
+                            <h3 class="text-lg font-bold text-gray-800 mb-1">CHC Master Logo</h3>
+                            <p class="text-sm text-gray-500 mb-6">This logo appears on every storefront header and login screen across all companies.</p>
+
+                            <div class="flex items-start gap-6">
+                                <!-- Logo Preview -->
+                                <div class="flex-shrink-0">
+                                    <div id="branding-logo-preview" class="w-48 h-32 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center overflow-hidden">
+                                        <img id="branding-logo-img" src="/assets/chc-logo.png" alt="CHC Logo" class="max-w-full max-h-full object-contain p-2" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                                        <div class="text-center text-gray-400" style="display:none">
+                                            <i class="fas fa-image text-3xl mb-1"></i>
+                                            <p class="text-xs">No logo uploaded</p>
+                                        </div>
+                                    </div>
+                                    <p id="branding-logo-info" class="text-xs text-gray-400 mt-2 text-center"></p>
+                                </div>
+
+                                <!-- Upload Controls -->
+                                <div class="flex-1">
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Upload New Logo</label>
+                                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 transition-colors cursor-pointer" onclick="document.getElementById('branding-logo-file').click()">
+                                        <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+                                        <p class="text-sm text-gray-600">Click to select an image</p>
+                                        <p class="text-xs text-gray-400 mt-1">PNG, JPG, or WebP (max 2MB)</p>
+                                        <input type="file" id="branding-logo-file" accept=".png,.jpg,.jpeg,.webp" class="hidden" onchange="previewMasterLogo(this)">
+                                    </div>
+
+                                    <!-- Selected file preview -->
+                                    <div id="branding-file-selected" class="hidden mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <i class="fas fa-check-circle text-blue-600"></i>
+                                            <span id="branding-file-name" class="text-sm text-blue-800"></span>
+                                        </div>
+                                        <button onclick="clearMasterLogoFile()" class="text-blue-600 hover:text-blue-800"><i class="fas fa-times"></i></button>
+                                    </div>
+
+                                    <button onclick="uploadMasterLogo()" id="branding-upload-btn" class="mt-4 bg-blue-700 hover:bg-blue-800 text-white font-semibold px-6 py-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed w-full" disabled>
+                                        <i class="fas fa-upload mr-2"></i> Upload Logo
+                                    </button>
+
+                                    <div id="branding-upload-status" class="hidden mt-3 text-sm rounded-lg px-4 py-2"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- How it works info -->
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-5">
+                            <h4 class="font-semibold text-blue-800 mb-2"><i class="fas fa-info-circle mr-1"></i> How Branding Works</h4>
+                            <ul class="text-sm text-blue-700 space-y-1.5">
+                                <li><i class="fas fa-check text-blue-500 mr-2"></i> <strong>CHC Master Logo</strong> appears on every storefront as the main brand.</li>
+                                <li><i class="fas fa-check text-blue-500 mr-2"></i> <strong>Company Logo</strong> is set per-company in the Companies section and appears alongside the master logo.</li>
+                                <li><i class="fas fa-check text-blue-500 mr-2"></i> If a company has no logo uploaded, their company name is displayed instead.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MODALS -->
+    <!-- ============================================================ -->
+
+    <!-- Locations Modal -->
+    <div id="locations-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-map-marker-alt text-blue-500 mr-2"></i> Locations — <span id="locations-company-name"></span></h3>
+                <div class="flex items-center gap-4">
+                    <button onclick="openBranchesModal()" class="text-sm font-semibold text-purple-600 hover:text-purple-800"><i class="fas fa-store mr-1"></i>CHC Branches</button>
+                    <button onclick="hideModal('locations-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+
+            <!-- Add single location -->
+            <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                <p class="text-sm font-semibold text-gray-700 mb-3">Add Location</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <input type="text" id="loc-name" placeholder="Location name *" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="loc-city" placeholder="City" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="loc-address" placeholder="Full address" class="px-3 py-2 border rounded-lg text-sm col-span-2">
+                    <input type="text" id="loc-contact" placeholder="Contact name" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="loc-phone" placeholder="Phone" class="px-3 py-2 border rounded-lg text-sm">
+                    <select id="loc-branch" class="px-3 py-2 border rounded-lg text-sm col-span-2 bg-white"><option value="">— Assign CHC branch (optional) —</option></select>
+                </div>
+                <button onclick="addLocation()" class="mt-3 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                    <i class="fas fa-plus mr-1"></i> Add Location
+                </button>
+            </div>
+
+            <!-- Bulk add -->
+            <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                <p class="text-sm font-semibold text-gray-700 mb-2">Bulk Add Locations</p>
+                <p class="text-xs text-gray-500 mb-2">Paste one location per line (Name | City | Address)</p>
+                <textarea id="loc-bulk" rows="4" placeholder="Ottawa East | Ottawa | 123 Main St&#10;Ottawa West | Ottawa | 456 Bank St&#10;Gatineau | Gatineau&#10;Airport" class="w-full px-3 py-2 border rounded-lg text-sm font-mono"></textarea>
+                <button onclick="bulkAddLocations()" class="mt-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                    <i class="fas fa-list mr-1"></i> Add All
+                </button>
+            </div>
+
+            <!-- Locations list -->
+            <div id="locations-list" class="space-y-2">
+                <p class="text-center text-gray-400 py-4">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Location Modal -->
+    <div id="edit-location-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-pen text-blue-500 mr-2"></i> Edit Location</h3>
+                <button onclick="hideModal('edit-location-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="saveLocationEdit(event)" class="space-y-3">
+                <input type="hidden" id="edit-loc-id">
+                <input type="text" id="edit-loc-name" required placeholder="Location name *" class="w-full px-3 py-2 border rounded-lg">
+                <input type="text" id="edit-loc-city" placeholder="City" class="w-full px-3 py-2 border rounded-lg">
+                <input type="text" id="edit-loc-address" placeholder="Full address" class="w-full px-3 py-2 border rounded-lg">
+                <input type="text" id="edit-loc-contact" placeholder="Contact name" class="w-full px-3 py-2 border rounded-lg">
+                <input type="text" id="edit-loc-phone" placeholder="Phone" class="w-full px-3 py-2 border rounded-lg">
+                <div class="grid grid-cols-2 gap-2">
+                    <input type="text" id="edit-loc-province" placeholder="Province (e.g. Nova Scotia)" class="w-full px-3 py-2 border rounded-lg">
+                    <select id="edit-loc-restrict" class="w-full px-3 py-2 border rounded-lg bg-white">
+                        <option value="">All categories</option>
+                        <option value="Equip/Filter/Booth">Equipment/Booth only</option>
+                    </select>
+                </div>
+                <p class="text-xs text-gray-400 -mt-1">Set Province to \u201cNova Scotia\u201d to auto-limit this shop to Equipment/Booth ordering.</p>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">Servicing CHC branch</label>
+                    <select id="edit-loc-branch" class="w-full px-3 py-2 border rounded-lg bg-white"></select>
+                </div>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Save Changes</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- CHC Branches Modal -->
+    <div id="branches-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-store text-purple-500 mr-2"></i> CHC Servicing Branches</h3>
+                <button onclick="hideModal('branches-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">A branch's emails are notified for orders from the locations assigned to it (in addition to info@chcpaint.com and the company managers).</p>
+            <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                <p class="text-sm font-semibold text-gray-700 mb-3">Add Branch</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <input type="text" id="branch-name" placeholder="Branch name * (e.g. Markham)" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="branch-city" placeholder="City" class="px-3 py-2 border rounded-lg text-sm">
+                    <input type="text" id="branch-emails" placeholder="Notification emails (comma separated)" class="px-3 py-2 border rounded-lg text-sm col-span-2">
+                </div>
+                <button onclick="addBranch()" class="mt-3 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-semibold"><i class="fas fa-plus mr-1"></i> Add Branch</button>
+            </div>
+            <div id="branches-list" class="space-y-2"><p class="text-center text-gray-400 py-4">Loading...</p></div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="change-password-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-key text-blue-500 mr-2"></i> Change Password</h3>
+                <button onclick="hideModal('change-password-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="changeMyPassword(event)" class="space-y-3">
+                <input type="password" id="cp-current" required placeholder="Current password" class="w-full px-3 py-2 border rounded-lg">
+                <input type="password" id="cp-new" required placeholder="New password" class="w-full px-3 py-2 border rounded-lg">
+                <input type="password" id="cp-confirm" required placeholder="Confirm new password" class="w-full px-3 py-2 border rounded-lg">
+                <p class="text-xs text-gray-400">At least 8 characters with uppercase, lowercase, and a number.</p>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Update Password</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Company Modal -->
+    <div id="company-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Add Company</h3>
+                <button onclick="hideModal('company-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="createCompany(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+                    <input type="text" id="new-company-name" required class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Access Code *</label>
+                    <input type="text" id="new-company-code" required class="w-full px-3 py-2 border rounded-lg" placeholder="Code the company will use to login">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
+                    <input type="email" id="new-company-email" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                    <input type="tel" id="new-company-phone" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                    <textarea id="new-company-address" rows="2" class="w-full px-3 py-2 border rounded-lg"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Order Notification Email</label>
+                    <input type="email" id="new-company-notification-email" class="w-full px-3 py-2 border rounded-lg" placeholder="Where order alerts are sent">
+                    <p class="text-xs text-gray-400 mt-1">Leave blank to use the contact email above</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Manager Notification Emails</label>
+                    <textarea id="new-company-manager-emails" rows="2" class="w-full px-3 py-2 border rounded-lg" placeholder="manager1@company.com, manager2@company.com"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">Comma or line separated. Each manager is emailed on every order (with full order details &amp; PO).</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Company Logo</label>
+                    <input type="file" id="new-company-logo" accept="image/png,image/jpeg,image/gif,image/webp" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Create Company</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Upload Catalog Modal -->
+    <div id="upload-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Upload Catalog</h3>
+                <button onclick="hideModal('upload-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="return false" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                    <select id="upload-company" required class="w-full px-3 py-2 border rounded-lg"><option value="">Select a company...</option></select>
+                    <p class="text-xs text-gray-400 mt-1">Each company has its own catalog &amp; pricing &mdash; pick the one you're updating.</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Catalog File (CSV or XLSX)</label>
+                    <input type="file" id="upload-file" accept=".csv,.xlsx,.xls" required class="w-full px-3 py-2 border rounded-lg" onchange="resetUploadState()">
+                    <p class="text-xs text-gray-400 mt-1">Columns: SKU, Item Name, AE Selling Price. Multi-tab XLSX supported (each tab name becomes the brand; the <code>itemswb11926</code> &amp; <code>lastcost</code> tabs are ignored). Rows priced $0 are skipped.</p>
+                </div>
+                <div id="upload-progress" class="hidden">
+                    <div class="bg-blue-50 rounded-lg p-4 text-center">
+                        <i class="fas fa-spinner fa-spin text-blue-600 text-xl mb-2"></i>
+                        <p class="text-sm text-blue-700">Working&hellip;</p>
+                    </div>
+                </div>
+                <div id="upload-result" class="hidden"></div>
+                <div class="flex gap-2">
+                    <button type="button" id="upload-preview-btn" onclick="catalogPreview()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg">Preview Changes</button>
+                    <button type="button" id="upload-apply-btn" onclick="catalogApply()" disabled class="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg">Apply Import</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create Promotion Modal -->
+    <div id="promo-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Create Promotion</h3>
+                <button onclick="hideModal('promo-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="createPromotion(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Company (leave empty for global)</label>
+                    <select id="promo-company" class="w-full px-3 py-2 border rounded-lg" onchange="loadPromoProducts()">
+                        <option value="">Global (all companies)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Product *</label>
+                    <select id="promo-product" required class="w-full px-3 py-2 border rounded-lg">
+                        <option value="">Select a product</option>
+                    </select>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Promo Price *</label>
+                        <input type="number" id="promo-price" step="0.01" min="0" required class="w-full px-3 py-2 border rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Label</label>
+                        <input type="text" id="promo-label" placeholder="e.g., Spring Sale" class="w-full px-3 py-2 border rounded-lg">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+                        <input type="datetime-local" id="promo-start" required class="w-full px-3 py-2 border rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+                        <input type="datetime-local" id="promo-end" required class="w-full px-3 py-2 border rounded-lg">
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg">Create Promotion</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Admin Modal -->
+    <div id="admin-user-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Add Admin User</h3>
+                <button onclick="hideModal('admin-user-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="createAdminUser(event)" class="space-y-4">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input type="text" id="new-admin-name" required class="w-full px-3 py-2 border rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                    <input type="email" id="new-admin-email" required class="w-full px-3 py-2 border rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Password *</label>
+                    <input type="password" id="new-admin-password" required minlength="8" class="w-full px-3 py-2 border rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                    <select id="new-admin-role" class="w-full px-3 py-2 border rounded-lg">
+                        <option value="company_admin">Company Admin</option>
+                        <option value="super_admin">Super Admin</option>
+                    </select></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Company (for Company Admin)</label>
+                    <select id="new-admin-company" class="w-full px-3 py-2 border rounded-lg">
+                        <option value="">None (Super Admin)</option>
+                    </select></div>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Create Admin</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    // ============================================================
+    // ADMIN STATE
+    // ============================================================
+    let admin = { token: null, user: null, companies: [] };
+    const API = '/api/admin';
+
+    // ============================================================
+    // ADMIN AUTH
+    // ============================================================
+    document.addEventListener('DOMContentLoaded', () => {
+        const saved = sessionStorage.getItem('chc_admin_token');
+        const savedUser = sessionStorage.getItem('chc_admin_user');
+        if (saved && savedUser) {
+            admin.token = saved;
+            admin.user = JSON.parse(savedUser);
+            showAdminApp();
+        }
+    });
+
+    document.getElementById('admin-login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errorEl = document.getElementById('admin-login-error');
+        errorEl.classList.add('hidden');
+        document.getElementById('admin-login-spinner').classList.remove('hidden');
+
+        try {
+            const resp = await fetch('/api/auth/admin-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: document.getElementById('admin-email').value,
+                    password: document.getElementById('admin-password').value
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { errorEl.textContent = data.error; errorEl.classList.remove('hidden'); return; }
+
+            admin.token = data.token;
+            admin.user = data.admin;
+            sessionStorage.setItem('chc_admin_token', data.token);
+            sessionStorage.setItem('chc_admin_user', JSON.stringify(data.admin));
+            showAdminApp();
+        } catch (err) {
+            errorEl.textContent = 'Connection error.';
+            errorEl.classList.remove('hidden');
+        } finally {
+            document.getElementById('admin-login-spinner').classList.add('hidden');
+        }
+    });
+
+    document.getElementById('setup-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errorEl = document.getElementById('admin-login-error');
+        errorEl.classList.add('hidden');
+
+        try {
+            const resp = await fetch('/api/auth/admin-setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: document.getElementById('setup-name').value,
+                    email: document.getElementById('setup-email').value,
+                    password: document.getElementById('setup-password').value
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { errorEl.textContent = data.error; errorEl.classList.remove('hidden'); return; }
+
+            admin.token = data.token;
+            admin.user = data.admin;
+            sessionStorage.setItem('chc_admin_token', data.token);
+            sessionStorage.setItem('chc_admin_user', JSON.stringify(data.admin));
+            showAdminApp();
+        } catch (err) {
+            errorEl.textContent = 'Setup failed.';
+            errorEl.classList.remove('hidden');
+        }
+    });
+
+    function adminLogout() {
+        sessionStorage.removeItem('chc_admin_token');
+        sessionStorage.removeItem('chc_admin_user');
+        admin = { token: null, user: null, companies: [] };
+        document.getElementById('admin-app').classList.add('hidden');
+        document.getElementById('admin-login').classList.remove('hidden');
+    }
+
+    // ============================================================
+    // ADMIN APP
+    // ============================================================
+    function showAdminApp() {
+        document.getElementById('admin-login').classList.add('hidden');
+        document.getElementById('admin-app').classList.remove('hidden');
+        document.getElementById('admin-welcome').textContent = `Welcome, ${admin.user.name}`;
+
+        // Hide super-admin-only nav items
+        if (admin.user.role !== 'super_admin') {
+            document.getElementById('nav-admins').classList.add('hidden');
+            document.getElementById('nav-audit').classList.add('hidden');
+            document.getElementById('nav-branding').classList.add('hidden');
+        }
+
+        // Load master logo from Supabase Storage
+        loadPlatformLogo();
+
+        loadDashboard();
+        loadCompanies();
+    }
+
+    async function loadPlatformLogo() {
+        try {
+            const resp = await fetch('/api/store/platform-logo');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.url) {
+                document.querySelectorAll('img[alt="CHC"]').forEach(img => {
+                    img.src = data.url;
+                });
+            }
+        } catch (err) { console.error('Platform logo load failed:', err); }
+    }
+
+    function adminNav(section) {
+        document.querySelectorAll('[id^="section-"]').forEach(el => el.classList.add('hidden'));
+        document.getElementById(`section-${section}`).classList.remove('hidden');
+        document.querySelectorAll('.sidebar-link').forEach(el => el.classList.remove('active'));
+        document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
+
+        const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products',
+            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
+        document.getElementById('page-title').textContent = titles[section] || section;
+
+        if (section === 'reports') arInit();
+        if (section === 'products') loadAdminProducts();
+        if (section === 'promotions') loadAdminPromotions();
+        if (section === 'orders') loadAdminOrders();
+        if (section === 'admins') loadAdminUsers();
+        if (section === 'audit') loadAuditLog();
+        if (section === 'branding') loadBrandingInfo();
+    }
+
+    // ============================================================
+    // API HELPERS
+    // ============================================================
+    function adminFetch(path, options = {}) {
+        return fetch(`${API}${path}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${admin.token}`,
+                ...(options.headers || {})
+            }
+        });
+    }
+
+    function adminFetchRaw(path, options = {}) {
+        return fetch(`${API}${path}`, {
+            ...options,
+            headers: {
+                'Authorization': `Bearer ${admin.token}`,
+                ...(options.headers || {})
+            }
+        });
+    }
+
+    // ============================================================
+    // CHC REPORTS (all companies)
+    // ============================================================
+    let arState = { orders: [], items: [], filteredOrders: [], periodLabel: '', shopsCompany: null,
+                    sort: { orders: { key: 'date', dir: -1 }, items: { key: 'spend', dir: -1 } } };
+    let arTimer, arInited = false;
+    function arItemDebounce() { clearTimeout(arTimer); arTimer = setTimeout(arApplyFilters, 300); }
+    async function arInit() { if (!arInited) { arInited = true; await populateRepShops(); } arLoad(); }
+
+    function arPeriodRange(pd) {
+        const now = new Date(); const y = now.getFullYear(); const m = now.getMonth();
+        const iso = d => d.toISOString();
+        const start = (yy, mm, dd) => new Date(yy, mm, dd, 0, 0, 0);
+        const end = (yy, mm, dd) => new Date(yy, mm, dd, 23, 59, 59, 999);
+        const q = Math.floor(m / 3);
+        const mLabel = d => d.toLocaleString('default', { month: 'long' }) + ' ' + d.getFullYear();
+        switch (pd) {
+            case 'this_month':   return { from: iso(start(y, m, 1)), to: iso(now), label: mLabel(now) };
+            case 'last_month':   { const d = new Date(y, m - 1, 1); return { from: iso(start(d.getFullYear(), d.getMonth(), 1)), to: iso(end(y, m, 0)), label: mLabel(d) }; }
+            case 'this_quarter': return { from: iso(start(y, q * 3, 1)), to: iso(now), label: 'Q' + (q + 1) + ' ' + y };
+            case 'this_year':    return { from: iso(start(y, 0, 1)), to: iso(now), label: 'Year ' + y };
+            case 'last_year':    return { from: iso(start(y - 1, 0, 1)), to: iso(end(y - 1, 11, 31)), label: 'Year ' + (y - 1) };
+            case 'custom':       {
+                const f = document.getElementById('rep-from').value; const t = document.getElementById('rep-to').value;
+                const parse = (v, e) => { if (!v) return null; const [yy, mm, dd] = v.split('-').map(Number); return iso(e ? end(yy, mm - 1, dd) : start(yy, mm - 1, dd)); };
+                return { from: parse(f, false), to: parse(t, true), label: (f || '\u2026') + ' to ' + (t || '\u2026') };
+            }
+            default: return { from: null, to: null, label: 'All time' };
+        }
+    }
+    function onAdminRepPeriodChange() {
+        const custom = document.getElementById('rep-period').value === 'custom';
+        document.getElementById('rep-cf').classList.toggle('hidden', !custom);
+        document.getElementById('rep-ct').classList.toggle('hidden', !custom);
+        if (!custom) arLoad();
+    }
+    async function onRepCompanyChange() { await populateRepShops(); arLoad(); }
+    async function populateRepShops() {
+        const companyId = document.getElementById('rep-company').value;
+        const sel = document.getElementById('rep-shop');
+        if (arState.shopsCompany === companyId) return;
+        let opts = '<option value="">All shops</option>';
+        if (companyId) {
+            try {
+                const resp = await adminFetch(`/companies/${companyId}/locations`);
+                const data = await resp.json();
+                const locs = (data.locations || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+                opts += locs.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('');
+            } catch (e) { /* All shops only */ }
+        }
+        sel.innerHTML = opts; arState.shopsCompany = companyId;
+    }
+    async function arLoad() {
+        const companyId = document.getElementById('rep-company').value;
+        const shop = document.getElementById('rep-shop').value;
+        const { from, to, label } = arPeriodRange(document.getElementById('rep-period').value);
+        arState.periodLabel = label;
+        const params = new URLSearchParams();
+        if (companyId) params.set('company_id', companyId);
+        if (shop) params.set('location_id', shop);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        try {
+            const resp = await adminFetch(`/reports/orders?${params}`);
+            const data = await resp.json();
+            arState.orders = (data.orders || []).map(o => ({ ...o, company_name: (o.companies && o.companies.name) || '' }));
+            arApplyFilters();
+        } catch (e) {
+            document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-red-500">Failed to load report.</td></tr>';
+        }
+    }
+    function arApplyFilters() {
+        const term = (document.getElementById('rep-item').value || '').trim().toLowerCase();
+        const match = i => !term || (i.name || '').toLowerCase().includes(term) || (i.sku || '').toLowerCase().includes(term);
+        let orders = arState.orders;
+        if (term) orders = orders.filter(o => (o.items || []).some(match));
+        arState.filteredOrders = orders;
+        const map = {};
+        orders.forEach(o => (o.items || []).forEach(i => {
+            if (!match(i)) return;
+            const key = i.sku || i.name;
+            if (!map[key]) map[key] = { sku: i.sku || '', name: i.name || '', qty: 0, orders: new Set(), spend: 0 };
+            map[key].qty += Number(i.quantity) || 0;
+            map[key].orders.add(o.id);
+            map[key].spend += Number(i.subtotal) || 0;
+        }));
+        arState.items = Object.values(map).map(x => ({ sku: x.sku, name: x.name, qty: x.qty, orders: x.orders.size, spend: x.spend }));
+        arRender();
+    }
+    function arCmp(a, b, key, dir) { let x = a[key], y = b[key]; if (typeof x === 'string') { x = x.toLowerCase(); y = (y || '').toLowerCase(); } return (x < y ? -1 : x > y ? 1 : 0) * dir; }
+    function arCmpOrder(a, b, key, dir) {
+        const g = { date: o => o.created_at, order: o => o.order_number, company: o => o.company_name || '', shop: o => o.location || '', by: o => o.contact_name || '', total: o => Number(o.total) || 0 };
+        let x = g[key](a), y = g[key](b); if (typeof x === 'string') { x = x.toLowerCase(); y = (y || '').toLowerCase(); } return (x < y ? -1 : x > y ? 1 : 0) * dir;
+    }
+    function arSort(which, key) {
+        const st = arState.sort[which];
+        const textKeys = ['name', 'sku', 'date', 'order', 'company', 'shop', 'by'];
+        st.dir = (st.key === key) ? -st.dir : (textKeys.includes(key) ? 1 : -1);
+        st.key = key; arRender();
+    }
+    function arRender() {
+        const orders = arState.filteredOrders;
+        const totalSpend = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+        const units = arState.items.reduce((s, i) => s + i.qty, 0);
+        const cards = [['Orders', orders.length], ['Total spend', '$' + totalSpend.toFixed(2)], ['Units', units], ['Unique items', arState.items.length]];
+        document.getElementById('rep-summary').innerHTML = cards.map(c => `
+            <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-gray-400 uppercase">${c[0]}</p><p class="text-2xl font-bold text-gray-800 mt-1">${c[1]}</p></div>`).join('');
+        const si = arState.sort.items;
+        const items = arState.items.slice().sort((a, b) => arCmp(a, b, si.key, si.dir));
+        document.getElementById('rep-items-body').innerHTML = items.length ? items.map(i => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2 text-gray-500">${esc(i.sku || '-')}</td>
+                <td class="px-4 py-2">${esc(i.name)}</td>
+                <td class="px-4 py-2 text-right font-semibold">${i.qty}</td>
+                <td class="px-4 py-2 text-right">${i.orders}</td>
+                <td class="px-4 py-2 text-right">$${i.spend.toFixed(2)}</td>
+            </tr>`).join('') : '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No items in this range.</td></tr>';
+        document.getElementById('rep-items-meta').textContent = arState.periodLabel;
+        const so = arState.sort.orders;
+        const os = orders.slice().sort((a, b) => arCmpOrder(a, b, so.key, so.dir));
+        document.getElementById('rep-orders-body').innerHTML = os.length ? os.map(o => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2 text-gray-500">${new Date(o.created_at).toLocaleDateString()}</td>
+                <td class="px-4 py-2 font-mono font-semibold text-blue-700">${esc(o.order_number)}</td>
+                <td class="px-4 py-2">${esc(o.company_name || '-')}</td>
+                <td class="px-4 py-2">${esc(o.location || '-')}</td>
+                <td class="px-4 py-2">${esc(o.po_number || '-')}</td>
+                <td class="px-4 py-2">${esc(o.contact_name || '-')}</td>
+                <td class="px-4 py-2 text-right font-semibold">$${parseFloat(o.total).toFixed(2)}</td>
+            </tr>`).join('') : '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400">No orders in this range.</td></tr>';
+        document.getElementById('rep-orders-meta').textContent = `${orders.length} order${orders.length !== 1 ? 's' : ''} \u00b7 ${arState.periodLabel}`;
+    }
+    function arCsvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    function arSlug() { return (arState.periodLabel || 'report').replace(/[^a-z0-9]+/gi, '-'); }
+    function downloadAdminReportCSV(kind) {
+        let rows, name;
+        if (kind === 'items') {
+            rows = [['SKU', 'Item', 'Qty', 'Orders', 'Spend']];
+            arState.items.slice().sort((a, b) => b.spend - a.spend).forEach(i => rows.push([i.sku, i.name, i.qty, i.orders, i.spend.toFixed(2)]));
+            name = 'item-summary';
+        } else {
+            rows = [['Date', 'Order #', 'Company', 'Shop', 'PO', 'Ordered by', 'Status', 'Items', 'Total']];
+            arState.filteredOrders.forEach(o => rows.push([new Date(o.created_at).toLocaleDateString(), o.order_number, o.company_name || '', o.location || '', o.po_number || '', o.contact_name || '', o.status || '', (o.items || []).length, parseFloat(o.total).toFixed(2)]));
+            name = 'orders';
+        }
+        const csv = rows.map(r => r.map(arCsvCell).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `CHC-report-${name}-${arSlug()}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    }
+    function downloadAdminReportPDF(printIt) {
+        if (!window.jspdf || !window.jspdf.jsPDF) { alert('PDF generator is still loading \u2014 try again in a moment.'); return; }
+        const { jsPDF } = window.jspdf; const doc = new jsPDF();
+        const cSel = document.getElementById('rep-company'); const cName = cSel.options[cSel.selectedIndex] ? cSel.options[cSel.selectedIndex].text : 'All Companies';
+        const sSel = document.getElementById('rep-shop'); const sName = sSel.options[sSel.selectedIndex] ? sSel.options[sSel.selectedIndex].text : 'All shops';
+        const orders = arState.filteredOrders;
+        const totalSpend = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+        const units = arState.items.reduce((s, i) => s + i.qty, 0);
+        doc.setFontSize(18); doc.setTextColor(30, 64, 175); doc.text('Purchase Summary', 14, 18);
+        doc.setFontSize(10); doc.setTextColor(90, 90, 90);
+        doc.text('CHC Paint & Auto Body Supplies', 14, 25);
+        doc.text('Generated: ' + new Date().toLocaleDateString(), 150, 18);
+        doc.text('Company: ' + cName + '     Shop: ' + sName, 14, 33);
+        doc.text('Period: ' + arState.periodLabel, 14, 39);
+        doc.setTextColor(20, 20, 20); doc.setFontSize(11);
+        doc.text(`Orders: ${orders.length}    Total spend: $${totalSpend.toFixed(2)}    Units: ${units}    Unique items: ${arState.items.length}`, 14, 49);
+        doc.autoTable({ startY: 56, head: [['SKU', 'Item', 'Qty', 'Orders', 'Spend']],
+            body: arState.items.slice().sort((a, b) => b.spend - a.spend).map(i => [i.sku || '', i.name, String(i.qty), String(i.orders), '$' + i.spend.toFixed(2)]),
+            styles: { fontSize: 8, cellPadding: 1.5 }, headStyles: { fillColor: [30, 64, 175] },
+            columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } } });
+        if (printIt) { doc.output('dataurlnewwindow'); } else { doc.save(`CHC-summary-${arSlug()}.pdf`); }
+    }
+
+    function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
+    function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+    function esc(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+    const statusColors = {
+        pending: 'bg-yellow-100 text-yellow-800', confirmed: 'bg-blue-100 text-blue-800',
+        processing: 'bg-purple-100 text-purple-800', shipped: 'bg-indigo-100 text-indigo-800',
+        delivered: 'bg-green-100 text-green-800', closed: 'bg-emerald-100 text-emerald-800', cancelled: 'bg-red-100 text-red-800'
+    };
+
+    // ============================================================
+    // DASHBOARD
+    // ============================================================
+    async function loadDashboard() {
+        try {
+            const resp = await adminFetch('/stats');
+            const data = await resp.json();
+            document.getElementById('stat-companies').textContent = data.total_companies;
+            document.getElementById('stat-products').textContent = data.total_products;
+            document.getElementById('stat-promos').textContent = data.active_promotions;
+            document.getElementById('stat-orders').textContent = data.orders_this_month;
+            document.getElementById('stat-revenue').textContent = `$${parseFloat(data.revenue_this_month).toLocaleString()}`;
+        } catch (err) { console.error('Dashboard load failed:', err); }
+    }
+
+    // ============================================================
+    // COMPANIES
+    // ============================================================
+    async function loadCompanies() {
+        try {
+            const resp = await adminFetch('/companies');
+            const data = await resp.json();
+            admin.companies = data.companies || [];
+            renderCompaniesTable();
+            populateCompanyDropdowns();
+        } catch (err) { console.error('Companies load failed:', err); }
+    }
+
+    function renderCompaniesTable() {
+        const tbody = document.getElementById('companies-tbody');
+        if (!admin.companies.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No companies yet. Add your first company!</td></tr>';
+            return;
+        }
+        tbody.innerHTML = admin.companies.map(c => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-3">
+                    <div class="flex items-center gap-3">
+                        ${c.logo_url ? `<img src="${esc(c.logo_url)}" class="w-8 h-8 rounded object-contain bg-gray-100">` : '<div class="w-8 h-8 rounded bg-gray-200 flex items-center justify-center text-xs text-gray-500"><i class="fas fa-building"></i></div>'}
+                        <span class="font-semibold text-gray-800">${esc(c.name)}</span>
+                    </div>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-500 font-mono">${esc(c.slug)}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">${esc(c.contact_email || '-')}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">${esc(c.email_config?.notification_email || c.contact_email || '-')}</td>
+                <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${c.is_active ? 'Active' : 'Inactive'}</span></td>
+                <td class="px-4 py-3 text-right">
+                    <button onclick="editNotificationEmail('${c.id}', '${esc(c.email_config?.notification_email || c.contact_email || '').replace(/'/g, "\\'")}')" class="text-orange-500 hover:text-orange-700 text-sm mr-3" title="Change order notification email"><i class="fas fa-envelope"></i></button>
+                    <button onclick="manageManagerEmails('${c.id}', '${esc((c.email_config?.manager_emails || []).join(', ')).replace(/'/g, "\\'")}')" class="text-purple-500 hover:text-purple-700 text-sm mr-3" title="Manager notification emails (${(c.email_config?.manager_emails || []).length})"><i class="fas fa-users"></i></button>
+                    <button onclick="openLocationsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-blue-500 hover:text-blue-700 text-sm mr-3" title="Manage locations"><i class="fas fa-map-marker-alt"></i></button>
+                    <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function populateCompanyDropdowns() {
+        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'rep-company', 'new-admin-company'];
+        selectors.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const first = el.options[0].outerHTML;
+            el.innerHTML = first;
+            admin.companies.forEach(c => {
+                el.innerHTML += `<option value="${c.id}">${esc(c.name)}</option>`;
+            });
+        });
+    }
+
+    async function createCompany(e) {
+        e.preventDefault();
+        try {
+            const notificationEmail = document.getElementById('new-company-notification-email').value.trim();
+            const managerEmails = parseEmailList(document.getElementById('new-company-manager-emails').value);
+            const emailConfig = {};
+            if (notificationEmail) emailConfig.notification_email = notificationEmail;
+            if (managerEmails.length) emailConfig.manager_emails = managerEmails;
+            const resp = await adminFetch('/companies', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: document.getElementById('new-company-name').value,
+                    access_code: document.getElementById('new-company-code').value,
+                    contact_email: document.getElementById('new-company-email').value,
+                    contact_phone: document.getElementById('new-company-phone').value,
+                    address: document.getElementById('new-company-address').value,
+                    email_config: emailConfig
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error); return; }
+
+            // Upload logo if provided
+            const logoFile = document.getElementById('new-company-logo').files[0];
+            if (logoFile) {
+                const fd = new FormData();
+                fd.append('logo', logoFile);
+                await adminFetchRaw(`/companies/${data.company.id}/logo`, { method: 'POST', body: fd });
+            }
+
+            alert(`Company created!\nStore URL: ${data.store_url}\nThe access code you entered is now active.`);
+            hideModal('company-modal');
+            loadCompanies();
+            loadDashboard();
+        } catch (err) { alert('Failed to create company.'); }
+    }
+
+    function uploadLogoFor(companyId) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/png,image/jpeg,image/gif,image/webp';
+        input.onchange = async () => {
+            const fd = new FormData();
+            fd.append('logo', input.files[0]);
+            try {
+                const resp = await adminFetchRaw(`/companies/${companyId}/logo`, { method: 'POST', body: fd });
+                if (resp.ok) { alert('Logo uploaded!'); loadCompanies(); }
+                else { const d = await resp.json(); alert(d.error); }
+            } catch (err) { alert('Upload failed.'); }
+        };
+        input.click();
+    }
+
+    // ============================================================
+    // NOTIFICATION EMAIL
+    // ============================================================
+    function parseEmailList(raw) {
+        return [...new Set((raw || '').split(/[\s,;]+/).map(e => e.trim().toLowerCase())
+            .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))];
+    }
+
+    async function manageManagerEmails(companyId, currentCsv) {
+        const raw = prompt('Manager emails to notify on every order (comma separated). These managers receive the full order details + PO:', currentCsv || '');
+        if (raw === null) return; // cancelled
+        const list = parseEmailList(raw);
+        try {
+            const resp = await adminFetch(`/companies/${companyId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ email_config: { manager_emails: list } })
+            });
+            if (resp.ok) {
+                alert(list.length ? `Saved ${list.length} manager email(s).` : 'Manager emails cleared.');
+                loadCompanies();
+            } else {
+                const d = await resp.json();
+                alert(d.error || 'Failed to update.');
+            }
+        } catch (err) { alert('Failed to update manager emails.'); }
+    }
+
+    async function editNotificationEmail(companyId, currentEmail) {
+        const newEmail = prompt('Enter the email address for order notifications:', currentEmail);
+        if (newEmail === null) return; // cancelled
+        if (newEmail && !newEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+            alert('Please enter a valid email address.');
+            return;
+        }
+        try {
+            const resp = await adminFetch(`/companies/${companyId}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    email_config: { notification_email: newEmail || '' }
+                })
+            });
+            if (resp.ok) {
+                alert('Notification email updated!');
+                loadCompanies();
+            } else {
+                const d = await resp.json();
+                alert(d.error || 'Failed to update.');
+            }
+        } catch (err) { alert('Failed to update notification email.'); }
+    }
+
+    // ============================================================
+    // LOCATIONS
+    // ============================================================
+    let locationsCompanyId = null;
+    let currentLocations = [];
+
+    function openLocationsModal(companyId, companyName) {
+        locationsCompanyId = companyId;
+        document.getElementById('locations-company-name').textContent = companyName;
+        showModal('locations-modal');
+        loadBranches().then(loadLocations);
+    }
+
+    async function loadBranches() {
+        try {
+            const resp = await adminFetch('/branches');
+            const data = await resp.json();
+            admin.branches = data.branches || [];
+        } catch (err) { admin.branches = []; }
+        const sel = document.getElementById('loc-branch');
+        if (sel) sel.innerHTML = '<option value="">— Assign CHC branch (optional) —</option>' +
+            admin.branches.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+    }
+    function branchOptions(selectedId) {
+        return '<option value="">— No branch —</option>' +
+            (admin.branches || []).map(b => `<option value="${b.id}" ${b.id===selectedId?'selected':''}>${esc(b.name)}</option>`).join('');
+    }
+
+    async function loadLocations() {
+        const container = document.getElementById('locations-list');
+        container.innerHTML = '<p class="text-center text-gray-400 py-4"><i class="fas fa-spinner fa-spin mr-1"></i> Loading...</p>';
+
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations`);
+            const data = await resp.json();
+            const locs = data.locations || [];
+            currentLocations = locs;
+
+            if (locs.length === 0) {
+                container.innerHTML = '<p class="text-center text-gray-400 py-6">No locations yet. Add your first one above.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <p class="text-sm font-semibold text-gray-600">${locs.length} location${locs.length > 1 ? 's' : ''}</p>
+                </div>
+            ` + locs.map(l => `
+                <div class="flex items-center justify-between bg-white border rounded-lg px-4 py-3 hover:bg-gray-50">
+                    <div>
+                        <p class="font-medium text-gray-800">${esc(l.name)}</p>
+                        <p class="text-sm text-gray-500">
+                            ${l.city ? '<i class="fas fa-city mr-1 text-gray-400"></i>' + esc(l.city) : ''}
+                            ${l.address ? ' — ' + esc(l.address) : ''}
+                        </p>
+                        ${l.contact_name || l.contact_phone ? `<p class="text-xs text-gray-400 mt-1">${esc(l.contact_name || '')} ${l.contact_phone ? '· ' + esc(l.contact_phone) : ''}</p>` : ''}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <select onchange="assignLocationBranch('${l.id}', this.value)" class="text-xs border rounded px-2 py-1 bg-white" title="Assign servicing CHC branch">
+                            ${branchOptions(l.supplier_branch_id)}
+                        </select>
+                        <button onclick="editLocation('${l.id}')" class="text-blue-400 hover:text-blue-600 text-sm" title="Edit location">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <button onclick="deleteLocation('${l.id}', '${esc(l.name).replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-600 text-sm" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (err) {
+            container.innerHTML = '<p class="text-center text-red-400 py-4">Failed to load locations.</p>';
+        }
+    }
+
+    async function addLocation() {
+        const name = document.getElementById('loc-name').value.trim();
+        if (!name) { alert('Location name is required.'); return; }
+
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    city: document.getElementById('loc-city').value.trim(),
+                    address: document.getElementById('loc-address').value.trim(),
+                    contact_name: document.getElementById('loc-contact').value.trim(),
+                    contact_phone: document.getElementById('loc-phone').value.trim(),
+                    supplier_branch_id: document.getElementById('loc-branch').value || null
+                })
+            });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+
+            // Clear inputs
+            ['loc-name', 'loc-city', 'loc-address', 'loc-contact', 'loc-phone', 'loc-branch'].forEach(id => document.getElementById(id).value = '');
+            loadLocations();
+        } catch (err) { alert('Failed to add location: ' + err.message); }
+    }
+
+    async function bulkAddLocations() {
+        const text = document.getElementById('loc-bulk').value.trim();
+        if (!text) { alert('Paste at least one location.'); return; }
+
+        const lines = text.split('\n').filter(l => l.trim());
+        const locations = lines.map(line => {
+            const parts = line.split('|').map(p => p.trim());
+            return {
+                name: parts[0] || '',
+                city: parts[1] || '',
+                address: parts[2] || ''
+            };
+        }).filter(l => l.name);
+
+        if (locations.length === 0) { alert('No valid locations found.'); return; }
+
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/bulk`, {
+                method: 'POST',
+                body: JSON.stringify({ locations })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+
+            alert(`${data.count} locations added.`);
+            document.getElementById('loc-bulk').value = '';
+            loadLocations();
+        } catch (err) { alert('Failed to add locations: ' + err.message); }
+    }
+
+    function editLocation(id) {
+        const l = (currentLocations || []).find(x => x.id === id);
+        if (!l) return;
+        document.getElementById('edit-loc-id').value = l.id;
+        document.getElementById('edit-loc-name').value = l.name || '';
+        document.getElementById('edit-loc-city').value = l.city || '';
+        document.getElementById('edit-loc-address').value = l.address || '';
+        document.getElementById('edit-loc-contact').value = l.contact_name || '';
+        document.getElementById('edit-loc-phone').value = l.contact_phone || '';
+        document.getElementById('edit-loc-province').value = l.province || '';
+        document.getElementById('edit-loc-restrict').value = l.restrict_to_category || '';
+        document.getElementById('edit-loc-branch').innerHTML = branchOptions(l.supplier_branch_id);
+        showModal('edit-location-modal');
+    }
+
+    async function saveLocationEdit(e) {
+        e.preventDefault();
+        const id = document.getElementById('edit-loc-id').value;
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    name: document.getElementById('edit-loc-name').value.trim(),
+                    city: document.getElementById('edit-loc-city').value.trim(),
+                    address: document.getElementById('edit-loc-address').value.trim(),
+                    contact_name: document.getElementById('edit-loc-contact').value.trim(),
+                    contact_phone: document.getElementById('edit-loc-phone').value.trim(),
+                    province: document.getElementById('edit-loc-province').value.trim() || null,
+                    restrict_to_category: (() => { let r = document.getElementById('edit-loc-restrict').value || ''; const prov = document.getElementById('edit-loc-province').value.trim().toLowerCase(); if (!r && prov === 'nova scotia') r = 'Equip/Filter/Booth'; return r || null; })(),
+                    supplier_branch_id: document.getElementById('edit-loc-branch').value || null
+                })
+            });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            hideModal('edit-location-modal');
+            loadLocations();
+        } catch (err) { alert('Failed to save changes: ' + err.message); }
+    }
+
+    async function deleteLocation(id, name) {
+        if (!confirm(`Delete "${name}"?\n\nThis permanently removes the location and its branch assignment, and cannot be undone.\nUse this if a location has closed or moved to another banner.`)) return;
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/${id}`, { method: 'DELETE' });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            loadLocations();
+        } catch (err) { alert('Failed to delete: ' + err.message); }
+    }
+
+    async function assignLocationBranch(locId, branchId) {
+        try {
+            const resp = await adminFetch(`/companies/${locationsCompanyId}/locations/${locId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ supplier_branch_id: branchId || null })
+            });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+        } catch (err) { alert('Failed to assign branch: ' + err.message); loadLocations(); }
+    }
+
+    // ---- CHC Branches management ----
+    function openBranchesModal() {
+        showModal('branches-modal');
+        loadBranches().then(renderBranches);
+    }
+    function renderBranches() {
+        const c = document.getElementById('branches-list');
+        if (!admin.branches || !admin.branches.length) { c.innerHTML = '<p class="text-center text-gray-400 py-6">No branches yet. Add one above.</p>'; return; }
+        c.innerHTML = admin.branches.map(b => `
+            <div class="bg-white border rounded-lg px-4 py-3">
+                <div class="flex items-center justify-between mb-2">
+                    <p class="font-medium text-gray-800">${esc(b.name)}${b.city ? ` <span class="text-xs text-gray-400">· ${esc(b.city)}</span>` : ''}</p>
+                    <button onclick="deleteBranch('${b.id}', '${esc(b.name).replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-600 text-sm" title="Delete branch"><i class="fas fa-trash"></i></button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="branch-emails-${b.id}" value="${esc((b.emails||[]).join(', '))}" placeholder="Notification emails (comma separated)" class="flex-1 px-3 py-1.5 border rounded text-sm">
+                    <button onclick="saveBranchEmails('${b.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm">Save</button>
+                </div>
+            </div>
+        `).join('');
+    }
+    async function addBranch() {
+        const name = document.getElementById('branch-name').value.trim();
+        if (!name) { alert('Branch name is required.'); return; }
+        try {
+            const resp = await adminFetch('/branches', { method: 'POST', body: JSON.stringify({
+                name, city: document.getElementById('branch-city').value.trim(), emails: document.getElementById('branch-emails').value.trim()
+            })});
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            ['branch-name','branch-city','branch-emails'].forEach(id => document.getElementById(id).value='');
+            await loadBranches(); renderBranches();
+        } catch (err) { alert('Failed to add branch: ' + err.message); }
+    }
+    async function saveBranchEmails(id) {
+        try {
+            const emails = document.getElementById(`branch-emails-${id}`).value;
+            const resp = await adminFetch(`/branches/${id}`, { method: 'PUT', body: JSON.stringify({ emails }) });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            await loadBranches(); renderBranches();
+            alert('Saved.');
+        } catch (err) { alert('Failed to save: ' + err.message); }
+    }
+    async function deleteBranch(id, name) {
+        if (!confirm(`Delete branch "${name}"? Locations assigned to it will become unassigned.`)) return;
+        try {
+            const resp = await adminFetch(`/branches/${id}`, { method: 'DELETE' });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            await loadBranches(); renderBranches();
+        } catch (err) { alert('Failed to delete: ' + err.message); }
+    }
+
+    // ============================================================
+    // PRODUCTS
+    // ============================================================
+    // ============================================================
+    // PRODUCTS - State & Filtering
+    // ============================================================
+    let productState = { all: [], filtered: [], selected: new Set(), currentFilters: {} };
+    let filterDebounce = null;
+
+    async function loadAdminProducts() {
+        const companyId = document.getElementById('admin-product-company').value;
+        const tbody = document.getElementById('products-tbody');
+        const filterBar = document.getElementById('products-filter-bar');
+
+        if (!companyId) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Select a company to view products.</td></tr>';
+            filterBar.classList.add('hidden');
+            document.getElementById('bulk-actions-bar').classList.add('hidden');
+            return;
+        }
+
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products?includeInactive=true&limit=5000`);
+            const data = await resp.json();
+            productState.all = data.products || [];
+            productState.selected = new Set();
+            document.getElementById('select-all-products').checked = false;
+
+            // Load filter options
+            await loadProductFilters(companyId);
+            filterBar.classList.remove('hidden');
+
+            applyProductFilters();
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-red-400">Failed to load.</td></tr>';
+        }
+    }
+
+    async function loadProductFilters(companyId) {
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/filters`);
+            const data = await resp.json();
+
+            const brandSel = document.getElementById('filter-brand');
+            brandSel.innerHTML = '<option value="">All Brands (' + (data.brands || []).length + ')</option>' +
+                (data.brands || []).map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+
+            const catSel = document.getElementById('filter-category');
+            catSel.innerHTML = '<option value="">All Categories</option>' +
+                (data.categories || []).map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        } catch (err) { console.error('Filter load failed:', err); }
+    }
+
+    function debounceProductFilter() {
+        clearTimeout(filterDebounce);
+        filterDebounce = setTimeout(applyProductFilters, 300);
+    }
+
+    function applyProductFilters() {
+        const brand = document.getElementById('filter-brand').value;
+        const category = document.getElementById('filter-category').value;
+        const search = document.getElementById('filter-search').value.toLowerCase().trim();
+
+        productState.currentFilters = { brand, category, search };
+
+        productState.filtered = productState.all.filter(p => {
+            if (brand && p.brand !== brand) return false;
+            if (category && p.category !== category) return false;
+            if (search && !p.name.toLowerCase().includes(search) && !(p.sku || '').toLowerCase().includes(search)) return false;
+            return true;
+        });
+
+        renderProductsTable();
+        updateBulkBar();
+
+        const countEl = document.getElementById('filter-result-count');
+        const total = productState.all.length;
+        const shown = productState.filtered.length;
+        countEl.textContent = shown === total ? `${total} products` : `Showing ${shown} of ${total} products`;
+    }
+
+    function clearProductFilters() {
+        document.getElementById('filter-brand').value = '';
+        document.getElementById('filter-category').value = '';
+        document.getElementById('filter-search').value = '';
+        applyProductFilters();
+    }
+
+    function renderProductsTable() {
+        const tbody = document.getElementById('products-tbody');
+        const products = productState.filtered;
+
+        if (products.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No products match your filters.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = products.map(p => `
+            <tr class="border-b hover:bg-gray-50 ${productState.selected.has(p.id) ? 'bg-blue-50' : ''}">
+                <td class="px-4 py-3"><input type="checkbox" class="product-checkbox w-4 h-4 rounded border-gray-300" data-id="${p.id}" ${productState.selected.has(p.id) ? 'checked' : ''} onchange="toggleProductSelect('${p.id}')"></td>
+                <td class="px-4 py-3 font-medium text-gray-800">${esc(p.name)}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">${esc(p.brand)}</td>
+                <td class="px-4 py-3 text-sm text-gray-400 font-mono">${esc(p.sku || '-')}</td>
+                <td class="px-4 py-3 text-right font-semibold">${p.previous_price ? '<span class="text-xs text-gray-400 line-through mr-1">$' + parseFloat(p.previous_price).toFixed(2) + '</span>' : ''}$${parseFloat(p.price).toFixed(2)}</td>
+                <td class="px-4 py-3 text-center text-sm">${p.case_qty || 1}</td>
+                <td class="px-4 py-3 text-center"><span class="px-2 py-1 rounded text-xs font-semibold ${p.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${p.is_active ? 'Active' : 'Hidden'}</span></td>
+                <td class="px-4 py-3 text-right">
+                    <button onclick="toggleProductActive('${p.id}', ${!p.is_active})" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="${p.is_active ? 'Hide from catalog' : 'Show in catalog'}">
+                        <i class="fas ${p.is_active ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                    </button>
+                    <button onclick="deleteSingleProduct('${p.id}', '${esc(p.name).replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-600 text-sm" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // ============================================================
+    // PRODUCTS - Selection & Bulk Actions
+    // ============================================================
+    function toggleProductSelect(id) {
+        if (productState.selected.has(id)) {
+            productState.selected.delete(id);
+        } else {
+            productState.selected.add(id);
+        }
+        updateBulkBar();
+        // Update row highlight without full re-render
+        const row = document.querySelector(`[data-id="${id}"]`)?.closest('tr');
+        if (row) row.classList.toggle('bg-blue-50', productState.selected.has(id));
+        // Update select-all checkbox
+        document.getElementById('select-all-products').checked = productState.selected.size === productState.filtered.length && productState.filtered.length > 0;
+    }
+
+    function toggleSelectAllProducts() {
+        const checked = document.getElementById('select-all-products').checked;
+        productState.selected = new Set();
+        if (checked) {
+            productState.filtered.forEach(p => productState.selected.add(p.id));
+        }
+        renderProductsTable();
+        updateBulkBar();
+    }
+
+    function clearProductSelection() {
+        productState.selected = new Set();
+        document.getElementById('select-all-products').checked = false;
+        renderProductsTable();
+        updateBulkBar();
+    }
+
+    function updateBulkBar() {
+        const bar = document.getElementById('bulk-actions-bar');
+        const count = productState.selected.size;
+        if (count === 0) {
+            bar.classList.add('hidden');
+            return;
+        }
+        bar.classList.remove('hidden');
+        document.getElementById('bulk-selected-count').textContent = `${count} product${count > 1 ? 's' : ''} selected`;
+
+        // Show "Delete All Filtered" only when filters are active
+        const hasFilters = productState.currentFilters.brand || productState.currentFilters.category || productState.currentFilters.search;
+        document.getElementById('btn-delete-filtered').classList.toggle('hidden', !hasFilters);
+    }
+
+    async function bulkDeleteSelected() {
+        const count = productState.selected.size;
+        if (count === 0) return;
+        if (!confirm(`Delete ${count} selected product${count > 1 ? 's' : ''}? This cannot be undone.`)) return;
+
+        const companyId = document.getElementById('admin-product-company').value;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/bulk-delete`, {
+                method: 'POST',
+                body: JSON.stringify({ product_ids: [...productState.selected] })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            alert(`${data.count} products deleted.`);
+            loadAdminProducts();
+            loadDashboard();
+        } catch (err) { alert('Delete failed: ' + err.message); }
+    }
+
+    async function bulkDeleteFiltered() {
+        const count = productState.filtered.length;
+        const filters = productState.currentFilters;
+        const desc = [filters.brand, filters.category, filters.search].filter(Boolean).join(', ');
+        if (!confirm(`Delete ALL ${count} products matching "${desc}"? This cannot be undone.`)) return;
+
+        const companyId = document.getElementById('admin-product-company').value;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/bulk-delete`, {
+                method: 'POST',
+                body: JSON.stringify({ delete_all: true, filters })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            alert(`${data.count} products deleted.`);
+            loadAdminProducts();
+            loadDashboard();
+        } catch (err) { alert('Delete failed: ' + err.message); }
+    }
+
+    async function deleteSingleProduct(id, name) {
+        if (!confirm(`Delete "${name}"?`)) return;
+        const companyId = document.getElementById('admin-product-company').value;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/${id}`, { method: 'DELETE' });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            loadAdminProducts();
+            loadDashboard();
+        } catch (err) { alert('Delete failed: ' + err.message); }
+    }
+
+    async function toggleProductActive(id, active) {
+        const companyId = document.getElementById('admin-product-company').value;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ is_active: active })
+            });
+            if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            // Update local state
+            const p = productState.all.find(x => x.id === id);
+            if (p) p.is_active = active;
+            applyProductFilters();
+        } catch (err) { alert('Update failed: ' + err.message); }
+    }
+
+    function openUploadModal() {
+        // Pre-select the company currently chosen in the Products view
+        const sel = document.getElementById('admin-product-company');
+        const up = document.getElementById('upload-company');
+        if (sel && up && sel.value) up.value = sel.value;
+        const f = document.getElementById('upload-file'); if (f) f.value = '';
+        resetUploadState();
+        showModal('upload-modal');
+    }
+
+    function resetUploadState() {
+        const apply = document.getElementById('upload-apply-btn');
+        if (apply) apply.disabled = true;
+        const r = document.getElementById('upload-result');
+        if (r) { r.classList.add('hidden'); r.innerHTML = ''; }
+    }
+
+    function showUploadResult(html) {
+        const r = document.getElementById('upload-result');
+        r.classList.remove('hidden');
+        r.innerHTML = html;
+    }
+
+    async function catalogSend(dryRun) {
+        const companyId = document.getElementById('upload-company').value;
+        const file = document.getElementById('upload-file').files[0];
+        if (!companyId || !file) { alert('Select a company and a file.'); return null; }
+
+        document.getElementById('upload-progress').classList.remove('hidden');
+        document.getElementById('upload-preview-btn').disabled = true;
+        document.getElementById('upload-apply-btn').disabled = true;
+
+        const fd = new FormData();
+        fd.append('catalog', file);
+        if (dryRun) fd.append('dry_run', '1');
+
+        try {
+            const resp = await adminFetchRaw(`/companies/${companyId}/catalog-upload`, { method: 'POST', body: fd });
+            const data = await resp.json();
+            document.getElementById('upload-progress').classList.add('hidden');
+            document.getElementById('upload-preview-btn').disabled = false;
+            if (!resp.ok) {
+                showUploadResult(`<div class="bg-red-50 p-4 rounded-lg"><p class="text-red-700">${esc(data.error || 'Upload failed.')}</p></div>`);
+                return null;
+            }
+            return data;
+        } catch (err) {
+            document.getElementById('upload-progress').classList.add('hidden');
+            document.getElementById('upload-preview-btn').disabled = false;
+            showUploadResult('<div class="bg-red-50 p-4 rounded-lg"><p class="text-red-700">Connection error.</p></div>');
+            return null;
+        }
+    }
+
+    function uploadSummaryHtml(d, isPreview) {
+        let sample = '';
+        if (d.sample_changes && d.sample_changes.length) {
+            sample = '<div class="mt-2 max-h-40 overflow-y-auto text-xs text-gray-600 border-t pt-2">' +
+                d.sample_changes.map(c => `<div>${esc(c.sku||'')} ${esc(c.name||'')}: $${Number(c.old_price).toFixed(2)} &rarr; <b>$${Number(c.new_price).toFixed(2)}</b></div>`).join('') +
+                (d.price_changes > d.sample_changes.length ? `<div class="text-gray-400">&hellip;and ${d.price_changes - d.sample_changes.length} more</div>` : '') +
+                '</div>';
+        }
+        const bg = isPreview ? 'bg-blue-50' : 'bg-green-50';
+        const title = isPreview ? 'Preview &mdash; nothing written yet' : 'Import complete';
+        return `<div class="${bg} p-4 rounded-lg">
+            <p class="font-semibold text-gray-800">${title}</p>
+            <p class="text-sm text-gray-700 mt-1">New: <b>${d.inserted}</b> &middot; Updated: <b>${d.updated}</b> &middot; Price changes: <b>${d.price_changes}</b> &middot; Skipped ($0): <b>${d.skipped}</b> &middot; Errors: <b>${d.errors}</b></p>
+            ${sample}
+        </div>`;
+    }
+
+    async function catalogPreview() {
+        resetUploadState();
+        const d = await catalogSend(true);
+        if (!d) return;
+        showUploadResult(uploadSummaryHtml(d, true));
+        document.getElementById('upload-apply-btn').disabled = false;
+    }
+
+    async function catalogApply() {
+        if (!confirm('Apply these changes to the selected company catalog?')) return;
+        const d = await catalogSend(false);
+        if (!d) return;
+        showUploadResult(uploadSummaryHtml(d, false));
+        document.getElementById('upload-apply-btn').disabled = true;
+        loadDashboard();
+        if (typeof loadAdminProducts === 'function') loadAdminProducts();
+    }
+
+    // ============================================================
+    // PROMOTIONS
+    // ============================================================
+    async function loadAdminPromotions() {
+        try {
+            const resp = await adminFetch('/promotions');
+            const data = await resp.json();
+            const tbody = document.getElementById('promotions-tbody');
+            tbody.innerHTML = (data.promotions || []).map(p => {
+                const now = new Date();
+                const isLive = p.is_active && new Date(p.starts_at) <= now && new Date(p.ends_at) >= now;
+                return `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 text-sm">${esc(p.products?.name || 'N/A')} <span class="text-xs text-gray-400">${esc(p.products?.brand || '')}</span></td>
+                    <td class="px-4 py-3 text-sm">${esc(p.promo_label || '-')}</td>
+                    <td class="px-4 py-3 text-sm">${p.company_id ? esc(p.companies?.name || 'Specific') : '<span class="text-yellow-600 font-semibold">GLOBAL</span>'}</td>
+                    <td class="px-4 py-3 text-right font-bold text-red-600">$${parseFloat(p.promo_price).toFixed(2)}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500">${new Date(p.starts_at).toLocaleDateString()} - ${new Date(p.ends_at).toLocaleDateString()}</td>
+                    <td class="px-4 py-3 text-center"><span class="px-2 py-1 rounded-full text-xs font-semibold ${isLive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}">${isLive ? 'Live' : 'Inactive'}</span></td>
+                    <td class="px-4 py-3 text-right"><button onclick="deletePromotion('${p.id}')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i></button></td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No promotions.</td></tr>';
+        } catch (err) { console.error('Promotions load failed:', err); }
+    }
+
+    async function loadPromoProducts() {
+        const companyId = document.getElementById('promo-company').value;
+        const select = document.getElementById('promo-product');
+        select.innerHTML = '<option value="">Select a product</option>';
+        if (!companyId) return;
+
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/products?limit=500`);
+            const data = await resp.json();
+            (data.products || []).forEach(p => {
+                select.innerHTML += `<option value="${p.id}">${esc(p.brand)} - ${esc(p.name)} ($${parseFloat(p.price).toFixed(2)})</option>`;
+            });
+        } catch (err) { console.error(err); }
+    }
+
+    async function createPromotion(e) {
+        e.preventDefault();
+        try {
+            const resp = await adminFetch('/promotions', {
+                method: 'POST',
+                body: JSON.stringify({
+                    company_id: document.getElementById('promo-company').value || null,
+                    product_id: document.getElementById('promo-product').value,
+                    promo_price: document.getElementById('promo-price').value,
+                    promo_label: document.getElementById('promo-label').value,
+                    starts_at: new Date(document.getElementById('promo-start').value).toISOString(),
+                    ends_at: new Date(document.getElementById('promo-end').value).toISOString()
+                })
+            });
+            if (resp.ok) { hideModal('promo-modal'); loadAdminPromotions(); loadDashboard(); }
+            else { const d = await resp.json(); alert(d.error); }
+        } catch (err) { alert('Failed to create promotion.'); }
+    }
+
+    async function deletePromotion(id) {
+        if (!confirm('Delete this promotion?')) return;
+        try {
+            await adminFetch(`/promotions/${id}`, { method: 'DELETE' });
+            loadAdminPromotions();
+            loadDashboard();
+        } catch (err) { alert('Failed to delete.'); }
+    }
+
+    // ============================================================
+    // ORDERS
+    // ============================================================
+    let orderLocationFilterLoaded = false;
+    let currentAdminOrders = [];
+    let orderStageFilter = 'all';
+    let orderGroupMode = 'branch';   // default: group orders by servicing CHC branch
+    async function loadAdminOrders() {
+        if (!orderLocationFilterLoaded) await refreshOrderLocationFilter();
+        const companyId = document.getElementById('admin-order-company').value;
+        const status = document.getElementById('admin-order-status').value;
+        const locationId = document.getElementById('admin-order-location')?.value || '';
+        const params = new URLSearchParams();
+        if (companyId) params.set('company_id', companyId);
+        if (status) params.set('status', status);
+        if (locationId) params.set('location_id', locationId);
+
+        try {
+            const resp = await adminFetch(`/orders?${params}`);
+            const data = await resp.json();
+            currentAdminOrders = data.orders || [];
+            renderAdminOrders();
+        } catch (err) { console.error('Orders load failed:', err); }
+    }
+
+    // Derive the workflow stage for an order.
+    function orderStage(o) {
+        if (o.status === 'cancelled') return { n: 0, key: 'cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-700 border-red-200' };
+        if (o.status === 'closed' || o.payment_status === 'paid') return { n: 3, key: 'closed', label: 'Paid & Closed', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+        if (o.invoice_filename) return { n: 2, key: 'invoiced', label: 'Awaiting Payment', color: 'bg-blue-100 text-blue-800 border-blue-200' };
+        return { n: 1, key: 'need_invoice', label: 'Needs Invoice', color: 'bg-amber-100 text-amber-800 border-amber-200' };
+    }
+
+    // 3-segment mini progress bar (Ordered -> Invoiced -> Paid).
+    function stageBar(st) {
+        if (st.key === 'cancelled') return '<div class="flex items-center gap-0.5 mt-1.5"><span class="text-xs text-red-500 font-semibold"><i class="fas fa-ban mr-1"></i>Cancelled</span></div>';
+        const seg = (i) => {
+            let cls = 'bg-gray-200';
+            if (i < st.n) cls = 'bg-emerald-500';
+            if (i === st.n - 1) cls = 'bg-blue-600';
+            return `<span class="inline-block h-1.5 w-6 rounded-full ${cls}"></span>`;
+        };
+        return `<div class="flex items-center gap-0.5 mt-1.5" title="Step ${st.n} of 3">${seg(0)}${seg(1)}${seg(2)}</div>`;
+    }
+
+    function setCnt(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+
+    function setOrderStage(key, btn) {
+        orderStageFilter = key;
+        document.querySelectorAll('.stage-tab').forEach(b => b.classList.remove('stage-tab-active'));
+        if (btn) btn.classList.add('stage-tab-active');
+        renderAdminOrders();
+    }
+
+    function setOrderGroup(mode, btn) {
+        orderGroupMode = mode;
+        const active = 'px-3 py-1.5 bg-blue-700 text-white font-semibold';
+        const idle = 'px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50';
+        const b = document.getElementById('grp-branch'), a = document.getElementById('grp-all');
+        if (b) b.className = mode === 'branch' ? active : idle;
+        if (a) a.className = mode === 'all' ? active : idle;
+        renderAdminOrders();
+    }
+
+    function renderOrderRow(o) {
+        const st = orderStage(o);
+        const hasInvoice = !!o.invoice_filename;
+        const statusOpts = ['pending','confirmed','processing','shipped','delivered','closed','cancelled'];
+        const invMeta = hasInvoice ? `<div class="text-xs text-gray-400 mt-1" title="${esc(o.invoice_filename)}"><i class="fas fa-file-invoice-dollar text-emerald-500 mr-1"></i>${o.invoice_uploaded_at ? new Date(o.invoice_uploaded_at).toLocaleDateString() : 'uploaded'}</div>` : '';
+
+        // Context-aware action buttons per stage.
+        let actions = '';
+        if (st.key === 'need_invoice') {
+            actions = `<button onclick="uploadInvoice('${o.id}','${o.company_id}')" class="inline-flex items-center gap-1 bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold animate-pulse-slow" title="Upload the invoice for this order"><i class="fas fa-file-upload"></i> Upload Invoice</button>`;
+        } else if (st.key === 'invoiced') {
+            actions = `<div class="flex items-center justify-end gap-2">
+                <button onclick="viewInvoice('${o.id}','${o.company_id}')" class="text-blue-600 hover:text-blue-800 text-xs" title="View uploaded invoice"><i class="fas fa-eye"></i></button>
+                <button onclick="uploadInvoice('${o.id}','${o.company_id}')" class="text-gray-400 hover:text-blue-600 text-xs" title="Replace invoice"><i class="fas fa-rotate"></i></button>
+                <button onclick="markPaidAndClose('${o.id}','${o.company_id}','${esc(o.order_number)}',true)" class="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold" title="Payment received - close order"><i class="fas fa-check-circle"></i> Mark Paid &amp; Close</button>
+            </div>`;
+        } else if (st.key === 'closed') {
+            actions = `<div class="flex items-center justify-end gap-2">
+                ${hasInvoice ? `<button onclick="viewInvoice('${o.id}','${o.company_id}')" class="text-blue-600 hover:text-blue-800 text-xs" title="View invoice"><i class="fas fa-eye"></i></button>` : ''}
+                <span class="text-emerald-600 text-xs font-semibold"><i class="fas fa-check-circle"></i> Paid${o.closed_at ? ' ' + new Date(o.closed_at).toLocaleDateString() : ''}</span>
+            </div>`;
+        } else { // cancelled
+            actions = hasInvoice ? `<button onclick="viewInvoice('${o.id}','${o.company_id}')" class="text-blue-600 hover:text-blue-800 text-xs"><i class="fas fa-eye"></i> Invoice</button>` : '<span class="text-gray-300">&mdash;</span>';
+        }
+
+        return `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-3 font-mono font-bold text-blue-700 text-sm align-top">${esc(o.order_number)}</td>
+                <td class="px-4 py-3 text-sm align-top">${esc(o.companies?.name || o.company_name || '-')}</td>
+                <td class="px-4 py-3 text-sm align-top">${o.location ? '<i class="fas fa-map-marker-alt text-blue-400 mr-1"></i>' + esc(o.location) : '<span class="text-gray-300">&mdash;</span>'}</td>
+                <td class="px-4 py-3 text-sm align-top">${esc(o.contact_name)}<br><span class="text-xs text-gray-400">${esc(o.contact_email)}</span></td>
+                <td class="px-4 py-3 text-right font-semibold align-top">$${parseFloat(o.total).toFixed(2)}</td>
+                <td class="px-4 py-3 align-top">
+                    <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold border ${st.color}">${st.label}</span>
+                    ${stageBar(st)}
+                    <select onchange="updateOrderStatus('${o.id}', this.value)" class="mt-1.5 text-xs px-1.5 py-0.5 rounded border text-gray-500 bg-white" title="Set a granular status">
+                        ${statusOpts.map(sv => `<option value="${sv}" ${sv === o.status ? 'selected' : ''}>${sv.charAt(0).toUpperCase() + sv.slice(1)}</option>`).join('')}
+                    </select>
+                    ${invMeta}
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-500 align-top">${new Date(o.created_at).toLocaleDateString()}</td>
+                <td class="px-4 py-3 text-right text-sm whitespace-nowrap align-top">
+                    ${actions}
+                    <div class="text-gray-400 text-xs mt-1">${(o.items || []).length} items</div>
+                </td>
+            </tr>`;
+    }
+
+    function renderAdminOrders() {
+        const all = currentAdminOrders || [];
+        const counts = { all: all.length, need_invoice: 0, invoiced: 0, closed: 0 };
+        all.forEach(o => { const k = orderStage(o).key; if (counts[k] !== undefined) counts[k]++; });
+        setCnt('cnt-all', counts.all); setCnt('cnt-need', counts.need_invoice);
+        setCnt('cnt-inv', counts.invoiced); setCnt('cnt-closed', counts.closed);
+        let rows = all;
+        if (orderStageFilter !== 'all') rows = all.filter(o => orderStage(o).key === orderStageFilter);
+        const tbody = document.getElementById('orders-tbody');
+        const emptyRow = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No orders in this stage.</td></tr>';
+        if (orderGroupMode === 'branch') {
+            const groups = {};
+            rows.forEach(o => {
+                const bn = (o.company_locations && o.company_locations.supplier_branches && o.company_locations.supplier_branches.name) || 'Unassigned \u2014 no CHC branch';
+                (groups[bn] = groups[bn] || []).push(o);
+            });
+            const keys = Object.keys(groups).sort((x, y) => {
+                const ux = x.indexOf('Unassigned') === 0, uy = y.indexOf('Unassigned') === 0;
+                if (ux !== uy) return ux ? 1 : -1;
+                return x.localeCompare(y);
+            });
+            tbody.innerHTML = keys.map(k => {
+                const g = groups[k];
+                const tot = g.reduce((s2, o) => s2 + (parseFloat(o.total) || 0), 0);
+                const need = g.filter(o => orderStage(o).key === 'need_invoice').length;
+                const hdr = `<tr class="bg-blue-50 border-y-2 border-blue-200">
+                    <td colspan="8" class="px-4 py-2.5">
+                        <span class="font-bold text-blue-800"><i class="fas fa-warehouse mr-1.5"></i>${esc(k)}</span>
+                        <span class="text-xs text-gray-500 ml-3">${g.length} order${g.length === 1 ? '' : 's'} &middot; $${tot.toFixed(2)}</span>
+                        ${need ? `<span class="text-xs font-semibold text-amber-600 ml-2"><i class="fas fa-triangle-exclamation mr-1"></i>${need} need invoice</span>` : ''}
+                    </td></tr>`;
+                return hdr + g.map(renderOrderRow).join('');
+            }).join('') || emptyRow;
+        } else {
+            tbody.innerHTML = rows.map(renderOrderRow).join('') || emptyRow;
+        }
+    }
+
+    function uploadInvoice(orderId, companyId) {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.pdf,.png,.jpg,.jpeg';
+        input.onchange = async () => {
+            if (!input.files[0]) return;
+            const fd = new FormData(); fd.append('invoice', input.files[0]);
+            try {
+                const resp = await adminFetchRaw(`/companies/${companyId}/orders/${orderId}/invoice`, { method: 'POST', body: fd });
+                const d = await resp.json();
+                if (!resp.ok) { alert(d.error || 'Upload failed.'); return; }
+                alert('Step 2 complete — invoice uploaded and recipients notified by email.\n\nWhen payment is received, use "Mark Paid & Close" to finish the order.');
+                loadAdminOrders();
+            } catch (err) { alert('Upload failed.'); }
+        };
+        input.click();
+    }
+
+    async function updateOrderStatus(orderId, status) {
+        try {
+            await adminFetch(`/orders/${orderId}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+        } catch (err) { alert('Failed to update status.'); loadAdminOrders(); }
+    }
+
+    // Step 3: payment received -> mark paid and close the order.
+    async function markPaidAndClose(orderId, companyId, orderNo, hasInvoice) {
+        let msg = `Mark order ${orderNo} as PAID and close it?\n\nThis records payment received, closes the order, and emails the recipients a payment confirmation. This is the final step.`;
+        if (!hasInvoice) msg = `No invoice has been uploaded for order ${orderNo}.\n\nNormally you upload the invoice first (step 2). Mark it PAID and close it anyway?`;
+        if (!confirm(msg)) return;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/orders/${orderId}/close`, { method: 'PUT', body: JSON.stringify({}) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to close order.'); return; }
+            alert('Step 3 complete — order marked paid and closed. Recipients notified.');
+            loadAdminOrders();
+        } catch (err) { alert('Failed to close order.'); }
+    }
+
+    // Open a short-lived signed link to view/verify the uploaded invoice.
+    async function viewInvoice(orderId, companyId) {
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/orders/${orderId}/invoice`);
+            const d = await resp.json();
+            if (!resp.ok || !d.url) { alert(d.error || 'No invoice available for this order.'); return; }
+            window.open(d.url, '_blank');
+        } catch (err) { alert('Could not open the invoice.'); }
+    }
+
+    async function onOrderCompanyChange() {
+        const sel = document.getElementById('admin-order-location');
+        if (sel) sel.value = '';
+        await refreshOrderLocationFilter();
+        loadAdminOrders();
+        const panel = document.getElementById('location-summary-panel');
+        if (panel && !panel.classList.contains('hidden')) loadLocationSummary();
+    }
+
+    async function refreshOrderLocationFilter() {
+        const companyId = document.getElementById('admin-order-company').value;
+        const sel = document.getElementById('admin-order-location');
+        if (!sel) return;
+        try {
+            let locations = [];
+            if (companyId) {
+                const resp = await adminFetch(`/companies/${companyId}/locations`);
+                const data = await resp.json();
+                locations = (data.locations || []).map(l => ({ id: l.id, name: l.name }));
+            } else {
+                const resp = await adminFetch('/reports/by-location');
+                const data = await resp.json();
+                locations = (data.report || []).filter(r => r.location_id).map(r => ({ id: r.location_id, name: r.location }));
+            }
+            locations.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+            sel.innerHTML = '<option value="">All Locations</option>' +
+                locations.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('');
+            orderLocationFilterLoaded = true;
+        } catch (err) { console.error('Location filter load failed:', err); }
+    }
+
+    function toggleLocationSummary() {
+        const panel = document.getElementById('location-summary-panel');
+        panel.classList.toggle('hidden');
+        if (!panel.classList.contains('hidden')) loadLocationSummary();
+    }
+
+    async function loadLocationSummary() {
+        const companyId = document.getElementById('admin-order-company').value;
+        const status = document.getElementById('admin-order-status').value;
+        const params = new URLSearchParams();
+        if (companyId) params.set('company_id', companyId);
+        if (status) params.set('status', status);
+        try {
+            const resp = await adminFetch(`/reports/by-location?${params}`);
+            const data = await resp.json();
+            const rows = (data.report || []);
+            const tbody = document.getElementById('location-summary-tbody');
+            tbody.innerHTML = rows.map(r => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-2 text-sm">${esc(r.location)}</td>
+                    <td class="px-4 py-2 text-right text-sm">${r.order_count}</td>
+                    <td class="px-4 py-2 text-right text-sm font-semibold">$${parseFloat(r.revenue).toFixed(2)}</td>
+                </tr>
+            `).join('') || '<tr><td colspan="3" class="px-4 py-6 text-center text-gray-400">No orders found.</td></tr>';
+            const meta = document.getElementById('location-summary-meta');
+            if (meta) meta.textContent = `${data.total_locations || rows.length} location(s)`;
+        } catch (err) { console.error('Location summary failed:', err); }
+    }
+
+    async function exportOrders() {
+        const companyId = document.getElementById('admin-order-company').value;
+        const status = document.getElementById('admin-order-status').value;
+        const locationId = document.getElementById('admin-order-location')?.value || '';
+        const params = new URLSearchParams();
+        if (companyId) params.set('company_id', companyId);
+        if (status) params.set('status', status);
+        if (locationId) params.set('location_id', locationId);
+        try {
+            const resp = await adminFetchRaw(`/orders/export?${params}`);
+            if (!resp.ok) { alert('Export failed.'); return; }
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `orders-export-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) { alert('Export failed.'); }
+    }
+
+    // ============================================================
+    // ADMIN USERS
+    // ============================================================
+    async function loadAdminUsers() {
+        try {
+            const resp = await adminFetch('/users');
+            const data = await resp.json();
+            const tbody = document.getElementById('admins-tbody');
+            tbody.innerHTML = (data.admins || []).map(a => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 font-medium">${esc(a.name)}</td>
+                    <td class="px-4 py-3 text-sm text-gray-500">${esc(a.email)}</td>
+                    <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${a.role === 'super_admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">${a.role}</span></td>
+                    <td class="px-4 py-3 text-sm text-gray-500">${esc(a.companies?.name || '-')}</td>
+                    <td class="px-4 py-3 text-sm text-gray-400">
+                        <span>${a.last_login ? new Date(a.last_login).toLocaleString() : 'Never'}</span>
+                        ${admin.role === 'super_admin' ? `<button onclick="resetAdminPassword('${a.id}', '${esc(a.email).replace(/'/g, "\\'")}')" class="ml-3 text-orange-500 hover:text-orange-700" title="Reset this admin's password"><i class="fas fa-key"></i></button>` : ''}
+                    </td>
+                </tr>
+            `).join('') || '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No admin users.</td></tr>';
+        } catch (err) { console.error('Admin users load failed:', err); }
+    }
+
+    async function createAdminUser(e) {
+        e.preventDefault();
+        try {
+            const resp = await adminFetch('/users', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: document.getElementById('new-admin-name').value,
+                    email: document.getElementById('new-admin-email').value,
+                    password: document.getElementById('new-admin-password').value,
+                    role: document.getElementById('new-admin-role').value,
+                    company_id: document.getElementById('new-admin-company').value || null
+                })
+            });
+            if (resp.ok) { hideModal('admin-user-modal'); loadAdminUsers(); }
+            else { const d = await resp.json(); alert(d.error); }
+        } catch (err) { alert('Failed to create admin.'); }
+    }
+
+    async function changeMyPassword(e) {
+        e.preventDefault();
+        const current = document.getElementById('cp-current').value;
+        const npw = document.getElementById('cp-new').value;
+        const conf = document.getElementById('cp-confirm').value;
+        if (npw !== conf) { alert('New passwords do not match.'); return; }
+        try {
+            const resp = await adminFetch('/me/password', { method: 'PUT', body: JSON.stringify({ current_password: current, new_password: npw }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to change password.'); return; }
+            ['cp-current','cp-new','cp-confirm'].forEach(id => document.getElementById(id).value = '');
+            hideModal('change-password-modal');
+            alert('Password updated.');
+        } catch (err) { alert('Failed to change password.'); }
+    }
+
+    async function resetAdminPassword(id, email) {
+        const npw = prompt(`Set a new password for ${email} (min 8 chars, with uppercase, lowercase, and a number):`);
+        if (!npw) return;
+        try {
+            const resp = await adminFetch(`/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ new_password: npw }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to reset password.'); return; }
+            alert(d.message || 'Password reset.');
+        } catch (err) { alert('Failed to reset password.'); }
+    }
+
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+    async function loadAuditLog() {
+        try {
+            const resp = await adminFetch('/audit-log');
+            const data = await resp.json();
+            const tbody = document.getElementById('audit-tbody');
+            tbody.innerHTML = (data.logs || []).map(l => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 text-xs text-gray-400">${new Date(l.created_at).toLocaleString()}</td>
+                    <td class="px-4 py-3 text-sm">${esc(l.admin_users?.name || '-')}</td>
+                    <td class="px-4 py-3 text-sm font-mono">${esc(l.action)}</td>
+                    <td class="px-4 py-3 text-xs text-gray-400">${JSON.stringify(l.details || {}).substring(0, 80)}</td>
+                </tr>
+            `).join('') || '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400">No audit log entries.</td></tr>';
+        } catch (err) { console.error('Audit log load failed:', err); }
+    }
+
+    // ============================================================
+    // BRANDING
+    // ============================================================
+    async function loadBrandingInfo() {
+        try {
+            const resp = await adminFetch('/branding/logo');
+            const data = await resp.json();
+            const infoEl = document.getElementById('branding-logo-info');
+            const img = document.getElementById('branding-logo-img');
+
+            if (data.exists && data.url) {
+                const sizeKB = data.size ? (data.size / 1024).toFixed(1) : '?';
+                const updated = data.updated ? new Date(data.updated).toLocaleDateString() : '';
+                infoEl.textContent = `${sizeKB} KB${updated ? ' · Updated ' + updated : ''}`;
+                img.src = data.url;
+                img.style.display = '';
+                img.nextElementSibling.style.display = 'none';
+            } else {
+                infoEl.textContent = 'No logo uploaded yet';
+                img.style.display = 'none';
+                img.nextElementSibling.style.display = 'flex';
+            }
+        } catch (err) { console.error('Branding info load failed:', err); }
+    }
+
+    function previewMasterLogo(input) {
+        const file = input.files[0];
+        if (!file) return;
+        const selectedEl = document.getElementById('branding-file-selected');
+        const nameEl = document.getElementById('branding-file-name');
+        const uploadBtn = document.getElementById('branding-upload-btn');
+
+        nameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        selectedEl.classList.remove('hidden');
+        uploadBtn.disabled = false;
+    }
+
+    function clearMasterLogoFile() {
+        document.getElementById('branding-logo-file').value = '';
+        document.getElementById('branding-file-selected').classList.add('hidden');
+        document.getElementById('branding-upload-btn').disabled = true;
+    }
+
+    async function uploadMasterLogo() {
+        const fileInput = document.getElementById('branding-logo-file');
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        const btn = document.getElementById('branding-upload-btn');
+        const statusEl = document.getElementById('branding-upload-status');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Uploading...';
+        statusEl.classList.add('hidden');
+
+        try {
+            const formData = new FormData();
+            formData.append('logo', file);
+
+            const resp = await adminFetchRaw('/branding/logo', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Upload failed');
+
+            // Success
+            statusEl.className = 'mt-3 text-sm rounded-lg px-4 py-2 bg-green-50 border border-green-200 text-green-700';
+            statusEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Logo updated successfully! It will now appear on all storefronts.';
+            statusEl.classList.remove('hidden');
+
+            // Refresh preview with the Supabase Storage URL
+            const logoUrl = data.url + '?t=' + Date.now();
+            const img = document.getElementById('branding-logo-img');
+            img.src = logoUrl;
+            img.style.display = '';
+            img.nextElementSibling.style.display = 'none';
+
+            // Also refresh sidebar logo
+            document.querySelectorAll('img[alt="CHC"]').forEach(el => {
+                el.src = logoUrl;
+            });
+
+            clearMasterLogoFile();
+            loadBrandingInfo();
+
+        } catch (err) {
+            statusEl.className = 'mt-3 text-sm rounded-lg px-4 py-2 bg-red-50 border border-red-200 text-red-700';
+            statusEl.innerHTML = `<i class="fas fa-exclamation-circle mr-1"></i> ${esc(err.message)}`;
+            statusEl.classList.remove('hidden');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-upload mr-2"></i> Upload Logo';
+        }
+    }
+    </script>
+</body>
+</html>
