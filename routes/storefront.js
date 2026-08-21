@@ -622,4 +622,14 @@ router.get('/:slug/orders/:orderId/invoice', requireCompanyAuth, async (req, res
     }
 });
 
+// ============================================================
+// refinishAI INVENTORY (optional module, per company)
+//
+// Mounted here rather than in server.js so the whole module can be added or
+// removed without touching application bootstrap. The sub-router applies its
+// own requireCompanyAuth and refuses companies that have not enabled it, so a
+// customer on the ordering portal alone is unaffected by its presence.
+// ============================================================
+router.use('/:slug/inventory', require('./inventory-store'));
+
 module.exports = router;

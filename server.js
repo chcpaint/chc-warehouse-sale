@@ -25,12 +25,22 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com", "https://cdnjs.cloudflare.com"],
+            // 'wasm-unsafe-eval' is required by the html5-qrcode decoder, which is the
+            // camera path refinishAI Inventory falls back to on iOS and iPadOS (Safari
+            // has no BarcodeDetector). Without it the decoder is blocked by CSP and
+            // phone scanning fails silently on every iPhone.
+            scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", "https://cdn.tailwindcss.com", "https://cdnjs.cloudflare.com"],
             scriptSrcAttr: ["'self'", "'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com", "https://cdnjs.cloudflare.com"],
             imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"],
             connectSrc: ["'self'", "https://*.supabase.co"],
             fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+            // Each of these would otherwise fall back to defaultSrc ('self'), which
+            // happens to be right — but the inventory module depends on all three, so
+            // they are stated rather than inherited.
+            workerSrc: ["'self'"],          // the inventory service worker
+            manifestSrc: ["'self'"],        // the per-company home-screen manifest
+            mediaSrc: ["'self'", "blob:"],  // the camera preview stream
         }
     },
     crossOriginEmbedderPolicy: false
@@ -148,6 +158,29 @@ app.get('/admin', (req, res) => {
 
 app.get('/admin/*', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin', 'index.html'));
+});
+
+// refinishAI Inventory — per-company home-screen manifest.
+//
+// Served rather than built as a data: URL in the page, because start_url has to
+// point at this company's store and the site's CSP (correctly) refuses data:
+// manifests. Registered before /store/:slug/* so the catch-all does not swallow
+// it. Public on purpose: it carries a slug and nothing else, and the browser
+// fetches a manifest without the session's Authorization header.
+app.get('/store/:slug/manifest.webmanifest', (req, res) => {
+    const slug = String(req.params.slug || '').replace(/[^a-z0-9-]/gi, '').slice(0, 80);
+    if (!slug) return res.status(404).json({ error: 'Not found.' });
+    res.type('application/manifest+json');
+    res.json({
+        name: 'refinishAI Inventory',
+        short_name: 'refinishAI',
+        start_url: `/store/${slug}`,
+        scope: '/',
+        display: 'standalone',
+        background_color: '#f9fafb',
+        theme_color: '#1e40af',
+        icons: [{ src: '/assets/refinishai-icon.png', sizes: '512x512', type: 'image/png', purpose: 'any' }]
+    });
 });
 
 // Company storefront (slug-based routing)

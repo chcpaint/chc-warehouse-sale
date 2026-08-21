@@ -189,6 +189,7 @@
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Contact</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Order Email</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Inventory</th>
                                     <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                                 </tr>
                             </thead>
@@ -1253,7 +1254,7 @@
     function renderCompaniesTable() {
         const tbody = document.getElementById('companies-tbody');
         if (!admin.companies.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No companies yet. Add your first company!</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No companies yet. Add your first company!</td></tr>';
             return;
         }
         tbody.innerHTML = admin.companies.map(c => `
@@ -1268,9 +1269,11 @@
                 <td class="px-4 py-3 text-sm text-gray-500">${esc(c.contact_email || '-')}</td>
                 <td class="px-4 py-3 text-sm text-gray-500">${esc(c.email_config?.notification_email || c.contact_email || '-')}</td>
                 <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${c.is_active ? 'Active' : 'Inactive'}</span></td>
+                <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.settings?.inventory?.enabled ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'}">${c.settings?.inventory?.enabled ? 'Inventory on' : 'Ordering only'}</span></td>
                 <td class="px-4 py-3 text-right">
                     <button onclick="editNotificationEmail('${c.id}', '${esc(c.email_config?.notification_email || c.contact_email || '').replace(/'/g, "\\'")}')" class="text-orange-500 hover:text-orange-700 text-sm mr-3" title="Change order notification email"><i class="fas fa-envelope"></i></button>
                     <button onclick="manageManagerEmails('${c.id}', '${esc((c.email_config?.manager_emails || []).join(', ')).replace(/'/g, "\\'")}')" class="text-purple-500 hover:text-purple-700 text-sm mr-3" title="Manager notification emails (${(c.email_config?.manager_emails || []).length})"><i class="fas fa-users"></i></button>
+                    <button onclick="toggleInventory('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}', ${c.settings?.inventory?.enabled ? 'true' : 'false'})" class="${c.settings?.inventory?.enabled ? 'text-green-600 hover:text-green-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="refinishAI Inventory: ${c.settings?.inventory?.enabled ? 'on — click to turn off' : 'off — click to turn on'}"><i class="fas fa-boxes-stacked"></i></button>
                     <button onclick="openLocationsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-blue-500 hover:text-blue-700 text-sm mr-3" title="Manage locations"><i class="fas fa-map-marker-alt"></i></button>
                     <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
@@ -1351,6 +1354,34 @@
     function parseEmailList(raw) {
         return [...new Set((raw || '').split(/[\s,;]+/).map(e => e.trim().toLowerCase())
             .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))];
+    }
+
+    /**
+     * refinishAI Inventory is optional per company: the ordering portal works
+     * exactly as before when it is off, and the module's front end is not even
+     * downloaded. This is the only switch — everything else keys off it.
+     */
+    async function toggleInventory(companyId, companyName, currentlyEnabled) {
+        const turningOn = !currentlyEnabled;
+        const message = turningOn
+            ? `Turn refinishAI Inventory ON for ${companyName}?\n\nAn Inventory tab appears in their store. Stock has to be seeded from a master file before it is useful.`
+            : `Turn refinishAI Inventory OFF for ${companyName}?\n\nThe tab disappears and the store goes back to ordering only. Stock levels and history are kept, so turning it back on restores everything.`;
+        if (!confirm(message)) return;
+
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/inventory/settings`, {
+                method: 'PUT',
+                body: JSON.stringify({ enabled: turningOn })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to update inventory setting.'); return; }
+            alert(turningOn
+                ? `refinishAI Inventory is on for ${companyName}.`
+                : `refinishAI Inventory is off for ${companyName}. Nothing was deleted.`);
+            loadCompanies();
+        } catch (err) {
+            alert('Failed to update inventory setting.');
+        }
     }
 
     async function manageManagerEmails(companyId, currentCsv) {

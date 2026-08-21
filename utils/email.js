@@ -202,6 +202,118 @@ async function sendOrderClosed(options) {
 }
 
 /**
+ * refinishAI Inventory — low-stock digest.
+ *
+ * One email per company covering every location, rather than one per shop: a
+ * three-site group otherwise gets three emails every morning and starts
+ * ignoring all of them.
+ *
+ * @param {Object} options
+ * @param {string[]} options.to
+ * @param {string} options.companyName
+ * @param {Object} options.byLocation  { [locationName]: item[] }
+ * @param {number} options.count       total low/out items
+ * @param {string} [options.storeUrl]  deep link back into the console
+ * @param {string} [options.replyTo]
+ */
+async function sendLowStockAlert(options) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+
+    const { to, companyName, byLocation, count, storeUrl, replyTo } = options;
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) return { sent: false, reason: 'no_recipient' };
+    if (!count) return { sent: false, reason: 'nothing_to_report' };
+
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+
+    const sections = Object.entries(byLocation || {}).map(([location, items]) => {
+        const rows = items.slice(0, 40).map(i => `
+            <tr>
+                <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">
+                    <strong>${escHtml(i.product_name)}</strong><br>
+                    <span style="color:#6b7280;font-size:12px;">${escHtml(i.sku || '')}${i.brand ? ' &middot; ' + escHtml(i.brand) : ''}</span>
+                </td>
+                <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;
+                           color:${Number(i.on_hand) <= 0 ? '#b91c1c' : '#b45309'};font-weight:600;">
+                    ${escHtml(String(i.on_hand))}
+                </td>
+                <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;color:#6b7280;">
+                    ${escHtml(String(i.min_point ?? '—'))}
+                </td>
+                <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">
+                    ${escHtml(String(i.suggested_order_qty ?? ''))}
+                </td>
+            </tr>`).join('');
+
+        const more = items.length > 40
+            ? `<p style="color:#6b7280;font-size:12px;margin:6px 0 0;">…and ${items.length - 40} more at this location.</p>`
+            : '';
+
+        return `
+        <h3 style="margin:22px 0 8px;font-size:15px;color:#111827;">${escHtml(location)}
+            <span style="color:#6b7280;font-weight:400;font-size:13px;">— ${items.length} item${items.length === 1 ? '' : 's'}</span>
+        </h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+                <tr style="text-align:left;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">
+                    <th style="padding:4px 8px;">Item</th>
+                    <th style="padding:4px 8px;text-align:right;">On hand</th>
+                    <th style="padding:4px 8px;text-align:right;">Min</th>
+                    <th style="padding:4px 8px;text-align:right;">Suggested</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>${more}`;
+    }).join('');
+
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+        <div style="background:#1e40af;color:#fff;padding:20px;border-radius:8px 8px 0 0;">
+            <h2 style="margin:0;">Low stock &mdash; ${escHtml(companyName)}</h2>
+            <p style="margin:5px 0 0;opacity:.9;">${count} item${count === 1 ? '' : 's'} at or below the shelf minimum</p>
+        </div>
+        <div style="padding:20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;">
+            ${sections}
+            ${storeUrl ? `<p style="margin-top:24px;">
+                <a href="${escHtml(storeUrl)}" style="background:#1e40af;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;">
+                    Review the reorder queue</a></p>` : ''}
+            <p style="margin-top:24px;color:#9ca3af;font-size:12px;">
+                Automated digest from refinishAI Inventory, part of the CHC Paint &amp; Auto Body Supplies ordering platform.
+                Reorder suggestions are drafts only &mdash; nothing is ordered until someone approves it.
+            </p>
+        </div>
+    </div>`;
+
+    const textLines = [`Low stock for ${companyName} — ${count} item(s) at or below minimum.`, ''];
+    for (const [location, items] of Object.entries(byLocation || {})) {
+        textLines.push(`${location} (${items.length}):`);
+        for (const i of items.slice(0, 40)) {
+            textLines.push(`  - ${i.sku || ''} ${i.product_name}: ${i.on_hand} on hand (min ${i.min_point ?? '-'})`);
+        }
+        textLines.push('');
+    }
+    if (storeUrl) textLines.push(storeUrl);
+
+    try {
+        const msg = {
+            to: recipients,
+            from: fromAddress,
+            subject: `Low stock — ${companyName} (${count} item${count === 1 ? '' : 's'})`,
+            text: textLines.join('\n'),
+            html
+        };
+        if (replyTo) msg.replyTo = replyTo;
+        await sgMail.send(msg);
+        console.log(`Email: Low-stock digest sent to ${recipients.join(', ')} (${count} items)`);
+        return { sent: true, recipients, count };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Email: Failed to send low-stock digest:', errMsg);
+        return { sent: false, reason: 'send_failed', error: errMsg };
+    }
+}
+
+/**
  * Send a test email to verify configuration.
  */
 async function sendTestEmail(toAddress) {
@@ -230,4 +342,4 @@ function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendOrderNotification, sendInvoiceReady, sendOrderClosed, sendTestEmail };
+module.exports = { sendOrderNotification, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert };

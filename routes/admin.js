@@ -16,6 +16,15 @@ const router = express.Router();
 router.use(requireAdminAuth);
 
 // ============================================================
+// refinishAI INVENTORY (optional module, per company)
+//
+// Mounted here rather than in server.js so the whole module can be added or
+// removed without touching application bootstrap. The sub-router re-applies
+// requireCompanyAccess itself.
+// ============================================================
+router.use('/companies/:companyId/inventory', require('./inventory-admin'));
+
+// ============================================================
 // DASHBOARD STATS
 // ============================================================
 
@@ -86,7 +95,7 @@ router.get('/companies', async (req, res) => {
     try {
         let query = supabaseAdmin
             .from('companies')
-            .select('id, name, slug, logo_url, contact_email, email_config, is_active, created_at, updated_at')
+            .select('id, name, slug, logo_url, contact_email, email_config, settings, is_active, created_at, updated_at')
             .order('name');
 
         if (req.admin.role !== 'super_admin') {
