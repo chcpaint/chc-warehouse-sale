@@ -77,6 +77,11 @@ async function resolveLocation(companyId, locationId) {
 router.use('/labels', require('./inventory-labels'));
 
 // ============================================================
+// REPAIR KITS — access, mapping and company-owned kits
+// ============================================================
+router.use('/kits', require('./inventory-kits-admin'));
+
+// ============================================================
 // SETTINGS — the per-company on/off switch
 // ============================================================
 

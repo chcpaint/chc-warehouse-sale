@@ -651,6 +651,61 @@
         </div>
     </div>
 
+    <!-- Modules Modal -->
+    <div id="modules-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-boxes-stacked text-blue-500 mr-2"></i> Modules — <span id="modules-company-name"></span></h3>
+                <button onclick="hideModal('modules-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">
+                Ordering is always on. Everything below is optional and priced separately.
+                Turning one off keeps every setting, stock level and history behind it, so it can be turned back on
+                without losing anything.
+            </p>
+            <div id="modules-list" class="space-y-3">
+                <p class="text-center text-gray-400 py-4">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Repair Kits Modal -->
+    <div id="kits-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-boxes-packing text-blue-500 mr-2"></i> Repair kits — <span id="kits-company-name"></span></h3>
+                <button onclick="hideModal('kits-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">
+                A kit expenses a job's materials in one action. Kits arrive with the part numbers of
+                whoever wrote them, so each line has to be matched to this company's catalogue once
+                before the kit can be used.
+            </p>
+
+            <div id="kits-list" class="space-y-2">
+                <p class="text-center text-gray-400 py-4">Loading...</p>
+            </div>
+
+            <!-- Mapping view for one kit -->
+            <div id="kit-mapping" class="hidden mt-5 pt-5 border-t">
+                <div class="flex justify-between items-center mb-3">
+                    <h4 class="font-bold text-gray-800"><span id="kit-mapping-name"></span></h4>
+                    <div class="flex items-center gap-3">
+                        <button onclick="acceptAllExactMatches()" class="text-sm font-semibold text-green-600 hover:text-green-800">
+                            <i class="fas fa-wand-magic-sparkles mr-1"></i> Accept exact matches
+                        </button>
+                        <button onclick="closeKitMapping()" class="text-sm text-gray-400 hover:text-gray-600">Close</button>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">
+                    Suggestions are ranked, never applied on their own — matching a line to the wrong
+                    product would expense the wrong material and mis-cost every job that uses the kit.
+                </p>
+                <div id="kit-mapping-lines" class="space-y-2"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Edit Location Modal -->
     <div id="edit-location-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
@@ -1273,7 +1328,8 @@
                 <td class="px-4 py-3 text-right">
                     <button onclick="editNotificationEmail('${c.id}', '${esc(c.email_config?.notification_email || c.contact_email || '').replace(/'/g, "\\'")}')" class="text-orange-500 hover:text-orange-700 text-sm mr-3" title="Change order notification email"><i class="fas fa-envelope"></i></button>
                     <button onclick="manageManagerEmails('${c.id}', '${esc((c.email_config?.manager_emails || []).join(', ')).replace(/'/g, "\\'")}')" class="text-purple-500 hover:text-purple-700 text-sm mr-3" title="Manager notification emails (${(c.email_config?.manager_emails || []).length})"><i class="fas fa-users"></i></button>
-                    <button onclick="toggleInventory('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}', ${c.settings?.inventory?.enabled ? 'true' : 'false'})" class="${c.settings?.inventory?.enabled ? 'text-green-600 hover:text-green-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="refinishAI Inventory: ${c.settings?.inventory?.enabled ? 'on — click to turn off' : 'off — click to turn on'}"><i class="fas fa-boxes-stacked"></i></button>
+                    <button onclick="openModulesModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.inventory?.enabled ? 'text-green-600 hover:text-green-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Modules this customer has"><i class="fas fa-boxes-stacked"></i></button>
+                    <button onclick="openKitsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.inventory?.enabled ? 'text-indigo-500 hover:text-indigo-700' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Repair kits"><i class="fas fa-boxes-packing"></i></button>
                     <button onclick="openLocationsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-blue-500 hover:text-blue-700 text-sm mr-3" title="Manage locations"><i class="fas fa-map-marker-alt"></i></button>
                     <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
@@ -1361,26 +1417,314 @@
      * exactly as before when it is off, and the module's front end is not even
      * downloaded. This is the only switch — everything else keys off it.
      */
-    async function toggleInventory(companyId, companyName, currentlyEnabled) {
-        const turningOn = !currentlyEnabled;
-        const message = turningOn
-            ? `Turn refinishAI Inventory ON for ${companyName}?\n\nAn Inventory tab appears in their store. Stock has to be seeded from a master file before it is useful.`
-            : `Turn refinishAI Inventory OFF for ${companyName}?\n\nThe tab disappears and the store goes back to ordering only. Stock levels and history are kept, so turning it back on restores everything.`;
-        if (!confirm(message)) return;
+    // ============================================================
+    // MODULES
+    //
+    // One screen for every optional part of the platform, driven by the
+    // registry the server exposes rather than a button per feature. A module
+    // that cannot be turned on says why — a dependency is off, or it has not
+    // shipped — instead of offering a switch that would do nothing.
+    // ============================================================
+
+    let modulesCompanyId = null;
+    let modulesCompanyName = '';
+
+    async function openModulesModal(companyId, companyName) {
+        modulesCompanyId = companyId;
+        modulesCompanyName = companyName;
+        document.getElementById('modules-company-name').textContent = companyName;
+        showModal('modules-modal');
+        await loadModules();
+    }
+
+    async function loadModules() {
+        const host = document.getElementById('modules-list');
+        host.innerHTML = '<p class="text-center text-gray-400 py-4">Loading...</p>';
 
         try {
-            const resp = await adminFetch(`/companies/${companyId}/inventory/settings`, {
+            const resp = await adminFetch(`/companies/${modulesCompanyId}/modules`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load modules.');
+
+            host.innerHTML = (data.modules || []).map(m => {
+                const canToggle = m.enabled || m.available;
+                const why = !m.released
+                    ? 'Not shipped yet — the switch is here so it can be turned on the day it is.'
+                    : m.blocked_by.length
+                        ? `Needs ${m.blocked_by.join(' and ')} on first.`
+                        : '';
+
+                return `
+                <div class="flex items-start gap-4 border rounded-lg px-4 py-3 ${m.enabled ? 'bg-green-50 border-green-200' : 'bg-white'}">
+                    <div class="flex-1">
+                        <p class="font-semibold text-gray-800">
+                            ${esc(m.label)}
+                            ${!m.released ? '<span class="ml-2 text-xs bg-gray-100 text-gray-500 rounded px-2 py-0.5">Coming</span>' : ''}
+                        </p>
+                        <p class="text-sm text-gray-500 mt-0.5">${esc(m.blurb)}</p>
+                        ${why ? `<p class="text-xs text-amber-700 mt-1">${esc(why)}</p>` : ''}
+                    </div>
+                    <button onclick="setModule('${m.name}', ${m.enabled ? 'false' : 'true'})"
+                        ${canToggle ? '' : 'disabled'}
+                        class="text-2xl ${m.enabled ? 'text-green-600 hover:text-green-800' : canToggle ? 'text-gray-300 hover:text-gray-500' : 'text-gray-200 cursor-not-allowed'}"
+                        title="${m.enabled ? 'On — click to turn off' : canToggle ? 'Off — click to turn on' : esc(why)}">
+                        <i class="fas fa-${m.enabled ? 'toggle-on' : 'toggle-off'}"></i>
+                    </button>
+                </div>`;
+            }).join('');
+        } catch (err) {
+            host.innerHTML = `<p class="text-center text-red-600 py-4">${esc(err.message)}</p>`;
+        }
+    }
+
+    async function setModule(name, enable, confirmDependents = false) {
+        try {
+            const resp = await adminFetch(`/companies/${modulesCompanyId}/modules/${name}`, {
                 method: 'PUT',
-                body: JSON.stringify({ enabled: turningOn })
+                body: JSON.stringify({ enabled: enable, confirm_dependents: confirmDependents })
             });
             const data = await resp.json();
-            if (!resp.ok) { alert(data.error || 'Failed to update inventory setting.'); return; }
-            alert(turningOn
-                ? `refinishAI Inventory is on for ${companyName}.`
-                : `refinishAI Inventory is off for ${companyName}. Nothing was deleted.`);
+
+            // 409 means turning this off would stop something else. Say what,
+            // then let the operator decide.
+            if (resp.status === 409 && data.dependents) {
+                if (confirm(`${data.error}\n\nNothing is deleted — turning it back on restores everything. Continue?`)) {
+                    return setModule(name, enable, true);
+                }
+                return;
+            }
+            if (!resp.ok) { alert(data.error || 'Failed to change that module.'); return; }
+
+            await loadModules();
             loadCompanies();
         } catch (err) {
-            alert('Failed to update inventory setting.');
+            alert('Failed to change that module.');
+        }
+    }
+
+    // ============================================================
+    // REPAIR KITS
+    //
+    // Two screens in one modal: which kits a company may use, and — for one kit
+    // at a time — what each of its lines means in that company's catalogue.
+    //
+    // The mapping screen is where the real work is. A kit imported from another
+    // system carries that system's part numbers; 13 of the 17 SKUs in the kits
+    // currently loaded are not CHC numbers at all. Suggestions narrow the search
+    // and show why each candidate was offered, but a person confirms every one.
+    // ============================================================
+
+    let kitsCompanyId = null;
+    let kitMappingState = { kitId: null, lines: [] };
+
+    async function openKitsModal(companyId, companyName) {
+        kitsCompanyId = companyId;
+        document.getElementById('kits-company-name').textContent = companyName;
+        closeKitMapping();
+        showModal('kits-modal');
+        await loadKitsAdmin();
+    }
+
+    async function loadKitsAdmin() {
+        const host = document.getElementById('kits-list');
+        host.innerHTML = '<p class="text-center text-gray-400 py-4">Loading...</p>';
+
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load kits.');
+
+            const kits = data.kits || [];
+            if (kits.length === 0) {
+                host.innerHTML = '<p class="text-center text-gray-400 py-4">No kits exist yet.</p>';
+                return;
+            }
+
+            host.innerHTML = kits.map(k => `
+                <div class="flex flex-wrap items-center gap-3 border rounded-lg px-4 py-3 ${k.enabled ? 'bg-white' : 'bg-gray-50'}">
+                    <div class="flex-1 min-w-[200px]">
+                        <p class="font-semibold text-gray-800">
+                            ${esc(k.name)}
+                            ${k.is_master ? '<span class="ml-2 text-xs bg-gray-100 text-gray-500 rounded px-2 py-0.5">CHC master</span>' : '<span class="ml-2 text-xs bg-indigo-100 text-indigo-700 rounded px-2 py-0.5">Theirs</span>'}
+                        </p>
+                        <p class="text-xs text-gray-500">
+                            ${k.line_count} line${k.line_count === 1 ? '' : 's'} &middot;
+                            ${k.mapped} matched${k.excluded ? ` &middot; ${k.excluded} excluded` : ''}
+                            ${k.unmapped ? ` &middot; <span class="text-amber-700 font-semibold">${k.unmapped} to match</span>` : ''}
+                        </p>
+                    </div>
+                    <span class="px-2 py-1 rounded-full text-xs font-semibold ${k.ready ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}">
+                        ${k.ready ? 'Ready' : 'Needs mapping'}
+                    </span>
+                    <button onclick="openKitMapping('${k.id}', '${esc(k.name).replace(/'/g, "\\'")}')"
+                        class="text-blue-600 hover:text-blue-800 text-sm font-semibold">
+                        <i class="fas fa-link mr-1"></i> Map
+                    </button>
+                    ${k.is_master ? `
+                    <button onclick="toggleKitAccess('${k.id}', ${k.enabled ? 'false' : 'true'})"
+                        class="text-sm font-semibold ${k.enabled ? 'text-green-600 hover:text-green-800' : 'text-gray-400 hover:text-gray-600'}">
+                        <i class="fas fa-${k.enabled ? 'toggle-on' : 'toggle-off'} mr-1"></i>${k.enabled ? 'On' : 'Off'}
+                    </button>` : ''}
+                </div>
+            `).join('');
+        } catch (err) {
+            host.innerHTML = `<p class="text-center text-red-600 py-4">${esc(err.message)}</p>`;
+        }
+    }
+
+    async function toggleKitAccess(kitId, enable) {
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits/${kitId}/access`, {
+                method: 'PUT',
+                body: JSON.stringify({ enabled: enable })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to change kit access.'); return; }
+            loadKitsAdmin();
+        } catch (err) {
+            alert('Failed to change kit access.');
+        }
+    }
+
+    function closeKitMapping() {
+        kitMappingState = { kitId: null, lines: [] };
+        document.getElementById('kit-mapping')?.classList.add('hidden');
+    }
+
+    async function openKitMapping(kitId, kitName) {
+        kitMappingState.kitId = kitId;
+        document.getElementById('kit-mapping-name').textContent = kitName;
+        document.getElementById('kit-mapping').classList.remove('hidden');
+        document.getElementById('kit-mapping-lines').innerHTML = '<p class="text-gray-400 py-3">Loading lines...</p>';
+
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits/${kitId}/mapping`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load the mapping.');
+
+            kitMappingState.lines = data.lines || [];
+            renderKitMapping();
+            document.getElementById('kit-mapping').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (err) {
+            document.getElementById('kit-mapping-lines').innerHTML =
+                `<p class="text-red-600 py-3">${esc(err.message)}</p>`;
+        }
+    }
+
+    function renderKitMapping() {
+        const host = document.getElementById('kit-mapping-lines');
+        host.innerHTML = kitMappingState.lines.map(line => {
+            const resolved = !!line.mapped_product;
+            const excluded = line.is_excluded;
+
+            const status = excluded
+                ? '<span class="text-xs bg-gray-100 text-gray-600 rounded px-2 py-0.5">Not used here</span>'
+                : resolved
+                    ? `<span class="text-xs bg-green-100 text-green-800 rounded px-2 py-0.5">${esc(line.mapped_product.sku)}</span>`
+                    : '<span class="text-xs bg-amber-100 text-amber-800 rounded px-2 py-0.5">Unmatched</span>';
+
+            const suggestions = (line.suggestions || []).map(s => `
+                <button onclick="applyKitSuggestion('${line.kit_item_id}', '${s.product_id}')"
+                    class="text-left border rounded-lg px-3 py-2 hover:border-blue-400 hover:bg-blue-50 w-full">
+                    <span class="font-mono text-xs text-gray-700">${esc(s.sku)}</span>
+                    <span class="text-xs text-gray-500"> — ${esc(s.name)}</span>
+                    <span class="block text-xs ${s.confidence === 'exact' ? 'text-green-700' : 'text-gray-400'}">${esc(s.why)}</span>
+                </button>`).join('');
+
+            return `
+            <div class="border rounded-lg p-3 ${resolved || excluded ? 'bg-gray-50' : 'bg-amber-50 border-amber-200'}">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="flex-1 min-w-[180px]">
+                        <p class="font-mono text-sm font-semibold text-gray-800">${esc(line.kit_sku)}</p>
+                        <p class="text-xs text-gray-500">
+                            Kit quantity ${line.kit_quantity} ${esc(line.unit)}
+                            ${line.quantity_override !== null ? ` &middot; this shop uses ${line.quantity_override}` : ''}
+                        </p>
+                        ${line.mapped_product ? `<p class="text-xs text-gray-600 mt-1">&rarr; ${esc(line.mapped_product.name)}</p>` : ''}
+                    </div>
+                    ${status}
+                    ${resolved || excluded
+                        ? `<button onclick="clearKitMapping('${line.kit_item_id}')" class="text-xs text-gray-400 hover:text-red-600">Clear</button>`
+                        : `<button onclick="excludeKitLine('${line.kit_item_id}')" class="text-xs text-gray-500 hover:text-gray-700">They don't use this</button>`}
+                </div>
+                ${!resolved && !excluded && suggestions
+                    ? `<div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">${suggestions}</div>`
+                    : ''}
+                ${!resolved && !excluded && !suggestions
+                    ? '<p class="mt-2 text-xs text-gray-500">Nothing in this catalogue looks like this part number. Either it needs adding to the catalogue, or this shop does not use it.</p>'
+                    : ''}
+            </div>`;
+        }).join('');
+    }
+
+    async function saveKitMapping(kitItemId, body) {
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits/mapping/${kitItemId}`, {
+                method: 'PUT',
+                body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to save that mapping.'); return false; }
+            return true;
+        } catch (err) {
+            alert('Failed to save that mapping.');
+            return false;
+        }
+    }
+
+    async function applyKitSuggestion(kitItemId, productId) {
+        if (await saveKitMapping(kitItemId, { product_id: productId })) {
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+            loadKitsAdmin();
+        }
+    }
+
+    async function excludeKitLine(kitItemId) {
+        if (await saveKitMapping(kitItemId, { is_excluded: true })) {
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+            loadKitsAdmin();
+        }
+    }
+
+    async function clearKitMapping(kitItemId) {
+        if (await saveKitMapping(kitItemId, { product_id: null, is_excluded: false })) {
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+            loadKitsAdmin();
+        }
+    }
+
+    /**
+     * Only the lines whose top suggestion is an exact part-number match. Anything
+     * less certain stays for a person — that is the whole point of the screen.
+     */
+    async function acceptAllExactMatches() {
+        const exact = kitMappingState.lines.filter(l =>
+            !l.mapped_product && !l.is_excluded &&
+            l.suggestions?.[0]?.confidence === 'exact'
+        );
+
+        if (exact.length === 0) {
+            alert('No exact part-number matches to accept. The remaining lines need a decision.');
+            return;
+        }
+        if (!confirm(`Accept ${exact.length} exact part-number match${exact.length === 1 ? '' : 'es'}?\n\nOnly lines where the catalogue has the identical part number are included.`)) return;
+
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits/mapping/bulk`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mappings: exact.map(l => ({ kit_item_id: l.kit_item_id, product_id: l.suggestions[0].product_id }))
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to save those mappings.'); return; }
+            if (data.rejected?.length) {
+                alert(`${data.saved} saved. ${data.rejected.length} could not be: ${data.rejected.map(r => r.error).join('; ')}`);
+            }
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+            loadKitsAdmin();
+        } catch (err) {
+            alert('Failed to save those mappings.');
         }
     }
 
