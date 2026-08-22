@@ -237,10 +237,37 @@ app.use((req, res) => {
 // START SERVER
 // ============================================================
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`\n🏭 CHC B2B Platform running on port ${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   Store: http://localhost:${PORT}/store/{company-slug}`);
     console.log(`   Admin: http://localhost:${PORT}/admin`);
     console.log(`   API:   http://localhost:${PORT}/api/health\n`);
+
+    // Scheduled work — currently the refinishAI low-stock digest, which goes
+    // out in the morning of the shop's own time zone. Runs in this process
+    // rather than an external cron, so there is no service token and no public
+    // endpoint whose job is to make the server send email. Safe with several
+    // instances: the jobs claim their work through a unique constraint.
+    // Disabled automatically under NODE_ENV=test, or with SCHEDULER_ENABLED=false.
+    try {
+        const scheduler = require('./utils/scheduler');
+        const outcome = scheduler.start();
+        if (!outcome.started) console.log(`   Scheduler: not started (${outcome.reason})`);
+    } catch (err) {
+        // A broken scheduler must not stop the console from serving orders.
+        console.error('   Scheduler failed to start (the app is unaffected):', err.message);
+    }
 });
+
+// Stop taking new work before the process goes, so a digest half-sent on a
+// redeploy does not look like a hang.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.on(signal, () => {
+        console.log(`\n${signal} received — shutting down.`);
+        try { require('./utils/scheduler').stop(); } catch (_) { /* never block the exit */ }
+        server.close(() => process.exit(0));
+        // Do not wait forever on a lingering connection.
+        setTimeout(() => process.exit(0), 10000).unref();
+    });
+}

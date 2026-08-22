@@ -20,6 +20,7 @@ const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendOrderNotification } = require('../utils/email');
+const { notifyReorderRaised } = require('../utils/inventory-alerts');
 const {
     STORE_MOVEMENT_TYPES,
     MOVEMENT_TYPES,
@@ -103,6 +104,25 @@ function actorLabel(req) {
 // ============================================================
 router.use('/', require('./inventory-counts'));          // /counts, /transfers
 router.use('/analytics', require('./inventory-analytics'));
+
+/**
+ * Repair kits reuse this file's location resolution, level lookup, text
+ * sanitising and reorder drafting. They are handed over on the request rather
+ * than imported, because inventory-kits.js is mounted *by* this file and a
+ * plain require in the other direction would be a cycle.
+ *
+ * Everything passed here is already tenancy-aware: resolveLocation and levelsFor
+ * both take a company id and filter on it, so the kit routes cannot widen their
+ * own access by using them.
+ */
+router.use('/kits', (req, res, next) => {
+    req.resolveLocation = resolveLocation;
+    req.levelsFor = levelsFor;
+    req.maybeDraftReplenishment = maybeDraftReplenishment;
+    req.text = text;
+    req.actorLabel = () => actorLabel(req);
+    next();
+}, require('./inventory-kits'));
 
 // ============================================================
 // READ: STOCK LEVELS
@@ -672,6 +692,11 @@ async function maybeDraftReplenishment({ companyId, location, product, actor, on
             .in('status', ['draft', 'pending_approval'])
             .maybeSingle();
 
+        // Only a brand-new order is worth telling anyone about. Lines land on
+        // an open order all morning, and one email per line would teach the
+        // recipient to ignore the lot.
+        const isNewOrder = !open;
+
         if (!open) {
             const { data: created, error: createErr } = await supabaseAdmin
                 .from('replenishment_orders')
@@ -723,6 +748,21 @@ async function maybeDraftReplenishment({ companyId, location, product, actor, on
             .from('replenishment_orders')
             .update({ updated_at: new Date().toISOString() })
             .eq('id', open.id);
+
+        // Deliberately not awaited. The technician is standing at the counter
+        // waiting for the scan to land; an email round trip is not their
+        // problem, and notifyReorderRaised swallows its own failures.
+        if (isNewOrder) {
+            const orderId = open.id;
+            setImmediate(() => {
+                notifyReorderRaised({
+                    companyId,
+                    locationId: location.id,
+                    locationName: location.name,
+                    orderId
+                }).catch(() => { /* already logged inside */ });
+            });
+        }
 
         return {
             order_id: open.id,

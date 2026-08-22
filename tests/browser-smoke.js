@@ -20,11 +20,12 @@ const ROOT = path.resolve(__dirname, '..');
 const COMPANY_ID  = '11111111-1111-4111-8111-111111111111';
 const LOCATION_ID = '33333333-3333-4333-8333-333333333333';
 const PRODUCT_ID  = '55555555-5555-4555-8555-555555555555';
+const KIT_ID      = 'aaaaaaa1-1111-4111-8111-111111111111';
 
 /** A stub console just complete enough to boot the page. */
 function makeServer({ inventoryEnabled }) {
     const app = express();
-    const hits = { module: 0, lookup: [], movements: [], countSession: null, countLines: [] };
+    const hits = { module: 0, lookup: [], movements: [], countSession: null, countLines: [], kitConsumes: [] };
 
     app.use(express.json());
     app.use('/assets', express.static(path.join(ROOT, 'public/assets')));
@@ -128,6 +129,59 @@ function makeServer({ inventoryEnabled }) {
     });
 
     app.get('/api/store/:slug/inventory/transfers', (req, res) => res.json({ transfers: [] }));
+
+    // ---- kits ----
+    // One ready kit and one that CHC has not finished mapping, because the
+    // "not set up" state is the one a real shop meets first.
+    app.get('/api/store/:slug/inventory/kits', (req, res) => res.json({
+        kits: [
+            { id: KIT_ID, name: 'Door Skin', description: 'Skin swap', is_master: true,
+              ready: true, line_count: 2, unresolved_count: 0, excluded_count: 1, estimated_cost: 7 },
+            { id: '99999999-9999-4999-8999-999999999999', name: 'Roof Replace', description: null,
+              is_master: true, ready: false, line_count: 0, unresolved_count: 3, excluded_count: 0, estimated_cost: 0 }
+        ]
+    }));
+
+    app.get('/api/store/:slug/inventory/kits/consumptions', (req, res) =>
+        res.json({ consumptions: hits.kitConsumes.map((c, i) => ({
+            id: 'kc-' + i, kit_name: 'Door Skin', job_ref: c.job_ref, multiplier: c.multiplier || 1,
+            line_count: 2, total_cost: 7, actor_label: c.actor_label, created_at: new Date().toISOString()
+        })) }));
+
+    app.get('/api/store/:slug/inventory/kits/:kitId/preview', (req, res) => {
+        const m = Number(req.query.multiplier) || 1;
+        res.json({
+            kit: { id: req.params.kitId, name: 'Door Skin', description: 'Skin swap' },
+            location: { id: LOCATION_ID, name: 'Burlington' },
+            multiplier: m,
+            lines: [
+                { kit_item_id: 'bbbbbbb1-1111-4111-8111-111111111111', kit_sku: 'PRF611N',
+                  product_id: PRODUCT_ID, sku: 'PRF611N', name: 'ProForm Clear Ga', category: 'Paint',
+                  unit: 'each', quantity: 0.02 * m, on_hand: 5, shortfall: 0, unit_price: 200,
+                  line_cost: 4 * m, would_go_negative: false, category_blocked: false, blocking: false },
+                { kit_item_id: 'bbbbbbb2-2222-4222-8222-222222222222', kit_sku: 'MMM08852',
+                  product_id: '77777777-7777-4777-8777-777777777777', sku: 'MMM08852', name: '3M Masking Tape',
+                  category: 'Masking', unit: 'each', quantity: 0.3 * m, on_hand: 20, shortfall: 0,
+                  unit_price: 10, line_cost: 3 * m, would_go_negative: false, category_blocked: false, blocking: false }
+            ],
+            unresolved: [],
+            excluded: [{ kit_item_id: 'bbbbbbb3-3333-4333-8333-333333333333', sku: 'FUS123EZ', note: null }],
+            total_cost: 7 * m,
+            blocked: false,
+            blocked_reason: null
+        });
+    });
+
+    app.post('/api/store/:slug/inventory/kits/:kitId/consume', (req, res) => {
+        hits.kitConsumes.push(req.body);
+        res.status(201).json({
+            message: '2 items expensed to ' + req.body.job_ref + '.',
+            consumption: { id: 'kc-1', kit_name: 'Door Skin', job_ref: req.body.job_ref,
+                           multiplier: req.body.multiplier, line_count: 2, total_cost: 7,
+                           created_at: new Date().toISOString() },
+            movements: [], replenishments_drafted: 0
+        });
+    });
 
     app.get('/api/store/:slug/inventory/analytics/summary', (req, res) => res.json({
         period: { label: 'Last 30 days', from: null, to: null },
@@ -485,14 +539,162 @@ check('every view switches without leaving two panes visible', async (browser) =
         await login(page, `http://127.0.0.1:${port}`);
         await page.waitForSelector('#nav-inventory:not(.hidden)');
         await page.click('#nav-inventory');
-        for (const v of ['scan', 'stock', 'replen', 'count', 'transfer', 'analytics', 'history']) {
+        for (const v of ['scan', 'stock', 'replen', 'kits', 'count', 'transfer', 'analytics', 'history']) {
             await page.click(`[data-invview="${v}"]`);
             await page.waitForTimeout(150);
             const visible = await page.evaluate(() =>
-                ['scan','stock','replen','count','transfer','analytics','history']
+                ['scan','stock','replen','kits','count','transfer','analytics','history']
                     .filter(k => !document.getElementById('inv-view-' + k).classList.contains('hidden')));
             assert.deepEqual(visible, [v], `expected only ${v} visible, saw ${visible}`);
         }
+    } finally { await page.close(); server.close(); }
+});
+
+// ==================================================================
+// KITS
+// ==================================================================
+
+check('a kit that CHC has not finished mapping is shown but cannot be applied', async (browser) => {
+    const { app } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.click('[data-invview="kits"]');
+        await page.waitForSelector('#inv-kit-list button');
+
+        const cards = await page.$$('#inv-kit-list button');
+        assert.equal(cards.length, 2, 'both kits are listed, including the unready one');
+
+        // The unready kit says why, rather than silently doing nothing.
+        const text = await page.textContent('#inv-kit-list');
+        assert.match(text, /Not set up/);
+        assert.match(text, /not matched to your catalogue/);
+
+        const disabled = await page.$$eval('#inv-kit-list button', els => els.filter(e => e.disabled).length);
+        assert.equal(disabled, 1, 'exactly the unready kit is disabled');
+    } finally { await page.close(); server.close(); }
+});
+
+check('opening a kit previews the lines and prices them without posting', async (browser) => {
+    const { app, hits } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.click('[data-invview="kits"]');
+        await page.waitForSelector('#inv-kit-list button:not([disabled])');
+        await page.click('#inv-kit-list button:not([disabled])');
+        await page.waitForSelector('#inv-kit-panel:not(.hidden)');
+        await page.waitForFunction(() => document.querySelectorAll('#inv-kit-lines tr').length > 1);
+
+        assert.equal(await page.textContent('#inv-kit-total'), '$7.00');
+        // The excluded line is disclosed rather than hidden.
+        assert.match(await page.textContent('#inv-kit-lines'), /Not used by your shop/);
+        assert.equal(hits.kitConsumes.length, 0, 'previewing must never post');
+    } finally { await page.close(); server.close(); }
+});
+
+check('the commit button stays disabled until there is a repair order', async (browser) => {
+    const { app } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.click('[data-invview="kits"]');
+        await page.waitForSelector('#inv-kit-list button:not([disabled])');
+        await page.click('#inv-kit-list button:not([disabled])');
+        await page.waitForFunction(() => document.querySelectorAll('#inv-kit-lines tr').length > 1);
+
+        assert.equal(await page.$eval('#inv-kit-commit', b => b.disabled), true);
+        await page.fill('#inv-kit-job', 'RO-4242');
+        assert.equal(await page.$eval('#inv-kit-commit', b => b.disabled), false);
+
+        // Clearing it disables the button again — the guard is live, not one-shot.
+        await page.fill('#inv-kit-job', '');
+        assert.equal(await page.$eval('#inv-kit-commit', b => b.disabled), true);
+    } finally { await page.close(); server.close(); }
+});
+
+check('the multiplier rescales the preview and its cost', async (browser) => {
+    const { app } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.click('[data-invview="kits"]');
+        await page.waitForSelector('#inv-kit-list button:not([disabled])');
+        await page.click('#inv-kit-list button:not([disabled])');
+        await page.waitForFunction(() => document.querySelectorAll('#inv-kit-lines tr').length > 1);
+
+        await page.fill('#inv-kit-mult', '2');
+        await page.dispatchEvent('#inv-kit-mult', 'change');
+        await page.waitForFunction(() => document.getElementById('inv-kit-total').textContent === '$14.00');
+    } finally { await page.close(); server.close(); }
+});
+
+check('skipping a line drops it from the total and from what is sent', async (browser) => {
+    const { app, hits } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+
+        await page.fill('#inv-actor', 'Sam');
+        await page.click('[data-invview="kits"]');
+        await page.waitForSelector('#inv-kit-list button:not([disabled])');
+        await page.click('#inv-kit-list button:not([disabled])');
+        await page.waitForFunction(() => document.querySelectorAll('#inv-kit-lines tr').length > 1);
+
+        // Untick the $4 clear line; $3 of tape should remain.
+        await page.uncheck('#inv-kit-lines tr:first-child input[type="checkbox"]');
+        await page.waitForFunction(() => document.getElementById('inv-kit-total').textContent === '$3.00');
+
+        await page.fill('#inv-kit-job', 'RO-77');
+        await page.click('#inv-kit-commit');
+        await page.waitForFunction(() => document.getElementById('inv-kit-result').textContent.includes('RO-77'));
+
+        assert.equal(hits.kitConsumes.length, 1);
+        const sent = hits.kitConsumes[0];
+        assert.equal(sent.job_ref, 'RO-77');
+        assert.equal(sent.actor_label, 'Sam');
+        const skipped = sent.lines.filter(l => l.skip);
+        assert.equal(skipped.length, 1, 'the unticked line is sent as skipped, not silently dropped');
+    } finally { await page.close(); server.close(); }
+});
+
+check('a kit cannot be expensed without a name to attribute it to', async (browser) => {
+    const { app, hits } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    let alerted = false;
+    page.on('dialog', d => { alerted = true; d.dismiss(); });
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.fill('#inv-actor', '');
+        await page.click('[data-invview="kits"]');
+        await page.waitForSelector('#inv-kit-list button:not([disabled])');
+        await page.click('#inv-kit-list button:not([disabled])');
+        await page.waitForFunction(() => document.querySelectorAll('#inv-kit-lines tr').length > 1);
+
+        await page.fill('#inv-kit-job', 'RO-1');
+        await page.click('#inv-kit-commit');
+        await page.waitForTimeout(300);
+
+        assert.equal(hits.kitConsumes.length, 0, 'nothing is posted anonymously');
+        assert.ok(alerted, 'the operator is told why');
     } finally { await page.close(); server.close(); }
 });
 

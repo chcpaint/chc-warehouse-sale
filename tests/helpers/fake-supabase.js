@@ -102,6 +102,9 @@ class Query {
                     out.company_locations = clone((this.db.company_locations || []).find(l => l.id === r.location_id)) || null;
                 } else if (rel === 'replenishment_order_lines') {
                     out.replenishment_order_lines = clone((this.db.replenishment_order_lines || []).filter(l => l.order_id === r.id));
+                } else if (rel === 'repair_kits' && (r.kit_id || r.id)) {
+                    // company_kit_access embeds by kit_id; kit_items by kit_id too.
+                    out.repair_kits = clone((this.db.repair_kits || []).find(k => k.id === (r.kit_id || r.id))) || null;
                 }
             }
             return out;
@@ -180,12 +183,25 @@ function createFakeSupabase(seed = {}) {
         replenishment_orders: [], replenishment_order_lines: [], inventory_uploads: [],
         inventory_count_sessions: [], inventory_count_lines: [], inventory_transfers: [],
         inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
+        repair_kits: [], kit_items: [], company_kit_access: [],
+        kit_product_map: [], kit_consumptions: [],
+        scheduler_runs: [], inventory_status: [],
         ...clone(seed)
     };
 
     db.__insert = (table, payload) => {
         counter++;
         const row = { id: payload.id || fakeUuid(), created_at: new Date().toISOString(), ...payload };
+
+        // Column defaults the routes rely on reading back. Without these a
+        // suppression check that filters on the timestamp finds nothing and
+        // every alert looks like the first one.
+        if (table === 'inventory_alert_log' && row.sent_at === undefined) {
+            row.sent_at = new Date().toISOString();
+        }
+        if (table === 'scheduler_runs' && row.started_at === undefined) {
+            row.started_at = new Date().toISOString();
+        }
 
         // Reproduce the apply_stock_movement trigger: on-hand is the running sum
         // of the ledger, and the resulting balance is stamped on the movement.
@@ -217,6 +233,23 @@ function createFakeSupabase(seed = {}) {
         if (table === 'inventory_count_sessions' && row.status === 'open') {
             const clash = db.inventory_count_sessions.find(c =>
                 c.location_id === row.location_id && c.status === 'open');
+            if (clash) { const e = new Error('duplicate key value violates unique constraint'); e.code = '23505'; throw e; }
+        }
+
+        // Reproduce scheduler_runs_unique. This one is load-bearing rather than
+        // defensive: the scheduler's whole multi-instance safety IS this
+        // constraint, so a fake that let both inserts through would test the
+        // opposite of the real behaviour.
+        if (table === 'scheduler_runs') {
+            const clash = (db.scheduler_runs || []).find(r =>
+                r.job === row.job && r.run_key === row.run_key);
+            if (clash) { const e = new Error('duplicate key value violates unique constraint'); e.code = '23505'; throw e; }
+        }
+
+        // Reproduce kit_product_map_unique (company_id, kit_item_id).
+        if (table === 'kit_product_map') {
+            const clash = (db.kit_product_map || []).find(m =>
+                m.company_id === row.company_id && m.kit_item_id === row.kit_item_id);
             if (clash) { const e = new Error('duplicate key value violates unique constraint'); e.code = '23505'; throw e; }
         }
 

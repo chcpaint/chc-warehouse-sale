@@ -87,6 +87,11 @@
         "                            <i class=\"fas fa-cart-arrow-down mr-1\"></i> Reorder",
         "                            <span id=\"inv-replen-badge\"",
         "                                class=\"hidden absolute -top-1 -right-1 bg-amber-500 text-white text-xs rounded-full w-5 h-5 items-center justify-center\">0</span>",
+        "                        </button>",
+        "                        <button onclick=\"RAI.showInvView('kits')\" data-invview=\"kits\"",
+        "                            class=\"px-3 py-1.5 rounded-lg hover:bg-gray-100 inv-view-btn\">",
+        "                            <i class=\"fas fa-boxes-packing mr-1\"></i> Kits",
+        "                        </button>",
         "                        <button onclick=\"RAI.showInvView('count')\" data-invview=\"count\"",
         "                            class=\"px-3 py-1.5 rounded-lg hover:bg-gray-100 inv-view-btn\">",
         "                            <i class=\"fas fa-clipboard-check mr-1\"></i> Count",
@@ -98,7 +103,6 @@
         "                        <button onclick=\"RAI.showInvView('analytics')\" data-invview=\"analytics\"",
         "                            class=\"px-3 py-1.5 rounded-lg hover:bg-gray-100 inv-view-btn\">",
         "                            <i class=\"fas fa-chart-simple mr-1\"></i> Usage",
-        "                        </button>",
         "                        </button>",
         "                        <button onclick=\"RAI.showInvView('history')\" data-invview=\"history\"",
         "                            class=\"px-3 py-1.5 rounded-lg hover:bg-gray-100 inv-view-btn\">",
@@ -255,6 +259,86 @@
         "                        </button>",
         "                    </div>",
         "                    <div id=\"inv-replen-list\"></div>",
+        "                </div>",
+        "",
+        "                <!-- ---------- KITS VIEW ---------- -->",
+        "                <div id=\"inv-view-kits\" class=\"hidden\">",
+        "                    <div class=\"bg-white rounded-xl shadow-sm p-4 mb-4\">",
+        "                        <p class=\"text-sm text-gray-600\">",
+        "                            Pick the job you are doing and the materials it uses come off the shelf together,",
+        "                            booked against the repair order. Nothing moves until you review the list.",
+        "                        </p>",
+        "                    </div>",
+        "                    <div id=\"inv-kit-list\" class=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3\"></div>",
+        "",
+        "                    <!-- The preview panel: what a kit would take, before it takes it -->",
+        "                    <div id=\"inv-kit-panel\" class=\"hidden mt-4 bg-white rounded-xl shadow-sm p-4\">",
+        "                        <div class=\"flex flex-wrap items-start justify-between gap-3 mb-4\">",
+        "                            <div>",
+        "                                <h3 id=\"inv-kit-title\" class=\"text-lg font-semibold text-gray-800\"></h3>",
+        "                                <p id=\"inv-kit-sub\" class=\"text-sm text-gray-500\"></p>",
+        "                            </div>",
+        "                            <button onclick=\"RAI.closeKit()\" class=\"text-gray-400 hover:text-gray-600\">",
+        "                                <i class=\"fas fa-xmark text-xl\"></i>",
+        "                            </button>",
+        "                        </div>",
+        "",
+        "                        <div class=\"flex flex-wrap gap-3 mb-4\">",
+        "                            <div>",
+        "                                <label class=\"block text-xs font-medium text-gray-500 mb-1\">Repair order</label>",
+        "                                <input id=\"inv-kit-job\" type=\"text\" placeholder=\"RO-1234\"",
+        "                                    class=\"border rounded-lg px-3 py-2 w-40 focus:ring-2 focus:ring-blue-500 focus:outline-none\"",
+        "                                    oninput=\"RAI.updateKitButton()\">",
+        "                            </div>",
+        "                            <div>",
+        "                                <label class=\"block text-xs font-medium text-gray-500 mb-1\">How many</label>",
+        "                                <div class=\"flex items-center gap-1\">",
+        "                                    <button onclick=\"RAI.bumpKitMultiplier(-1)\" type=\"button\"",
+        "                                        class=\"w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700\">&minus;</button>",
+        "                                    <input id=\"inv-kit-mult\" type=\"number\" min=\"0.25\" max=\"100\" step=\"0.25\" value=\"1\"",
+        "                                        class=\"border rounded-lg px-3 py-2 w-20 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none\"",
+        "                                        onchange=\"RAI.loadKitPreview()\">",
+        "                                    <button onclick=\"RAI.bumpKitMultiplier(1)\" type=\"button\"",
+        "                                        class=\"w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700\">+</button>",
+        "                                </div>",
+        "                            </div>",
+        "                            <div class=\"flex-1 min-w-[180px]\">",
+        "                                <label class=\"block text-xs font-medium text-gray-500 mb-1\">Note (optional)</label>",
+        "                                <input id=\"inv-kit-note\" type=\"text\" placeholder=\"Anything unusual about this job\"",
+        "                                    class=\"border rounded-lg px-3 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
+        "                            </div>",
+        "                        </div>",
+        "",
+        "                        <div id=\"inv-kit-warning\" class=\"hidden mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800\"></div>",
+        "                        <div id=\"inv-kit-result\" class=\"hidden mb-4 p-3 rounded-lg text-sm\" role=\"status\" aria-live=\"polite\"></div>",
+        "",
+        "                        <div class=\"overflow-x-auto\">",
+        "                            <table class=\"w-full text-sm\">",
+        "                                <thead class=\"text-left text-gray-500 border-b\">",
+        "                                    <tr>",
+        "                                        <th class=\"py-2 pr-3\">Item</th>",
+        "                                        <th class=\"py-2 pr-3 text-right\">Qty</th>",
+        "                                        <th class=\"py-2 pr-3 text-right\">On hand</th>",
+        "                                        <th class=\"py-2 pr-3 text-right\">Cost</th>",
+        "                                        <th class=\"py-2 pr-3 text-center\">Use</th>",
+        "                                    </tr>",
+        "                                </thead>",
+        "                                <tbody id=\"inv-kit-lines\"></tbody>",
+        "                            </table>",
+        "                        </div>",
+        "",
+        "                        <div class=\"flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t\">",
+        "                            <p class=\"text-sm text-gray-600\">",
+        "                                Total <span id=\"inv-kit-total\" class=\"font-semibold text-gray-900\">$0.00</span>",
+        "                            </p>",
+        "                            <button id=\"inv-kit-commit\" onclick=\"RAI.consumeKit()\" disabled",
+        "                                class=\"px-5 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed\">",
+        "                                <i class=\"fas fa-check mr-1\"></i> Expense to job",
+        "                            </button>",
+        "                        </div>",
+        "                    </div>",
+        "",
+        "                    <div id=\"inv-kit-recent\" class=\"mt-4\"></div>",
         "                </div>",
         "",
         "                <!-- ---------- HISTORY VIEW ---------- -->",
@@ -619,7 +703,7 @@
     // ------------------------------------------------------------
     // VIEW SWITCHING
     // ------------------------------------------------------------
-    RAI.VIEWS = ['scan', 'stock', 'replen', 'count', 'transfer', 'analytics', 'history'];
+    RAI.VIEWS = ['scan', 'stock', 'replen', 'kits', 'count', 'transfer', 'analytics', 'history'];
 
     RAI.showInvView = function (view) {
         inv.view = view;
@@ -638,6 +722,7 @@
         if (view === 'stock') RAI.loadInvStock();
         if (view === 'replen') RAI.loadReplenishment();
         if (view === 'history') RAI.loadInvHistory();
+        if (view === 'kits') RAI.loadKits();
         if (view === 'count') RAI.loadCount();
         if (view === 'transfer') RAI.loadTransfers();
         if (view === 'analytics') RAI.loadAnalytics();
@@ -1923,6 +2008,400 @@
                 URL.revokeObjectURL(href);
             })
             .catch(() => alert('Could not export that data.'));
+    };
+
+    // ============================================================
+    // KITS — a job's materials, expensed together
+    //
+    // The shape of this view is deliberate: a kit is never applied from the
+    // picker. Choosing one opens a priced list of exactly what would leave the
+    // shelf, and the commit button stays disabled until there is a repair order
+    // to book it against and nothing is blocking. The technician sees the whole
+    // consequence before any of it happens.
+    // ============================================================
+
+    RAI.kits = { list: [], current: null, preview: null, skipped: new Set(), overrides: {} };
+
+    RAI.loadKits = async function () {
+        const host = document.getElementById('inv-kit-list');
+        if (!host) return;
+        host.innerHTML = '<p class="text-sm text-gray-400 col-span-full">Loading kits…</p>';
+
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/kits`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load kits.');
+
+            RAI.kits.list = data.kits || [];
+
+            if (RAI.kits.list.length === 0) {
+                host.innerHTML =
+                    '<div class="col-span-full bg-white rounded-xl shadow-sm p-6 text-center">' +
+                    '<p class="text-gray-600">No kits are set up for your shop yet.</p>' +
+                    '<p class="text-sm text-gray-400 mt-1">CHC can build these from the jobs you do most.</p>' +
+                    '</div>';
+                RAI.loadKitHistory();
+                return;
+            }
+
+            host.innerHTML = RAI.kits.list.map(kit => {
+                // A kit that is not ready is shown, not hidden. Hiding it would
+                // make the shop think CHC never set it up; saying so plainly
+                // tells them what to ask for.
+                const ready = kit.ready;
+                return `
+                <button onclick="RAI.openKit('${kit.id}')" ${ready ? '' : 'disabled'}
+                    class="text-left bg-white rounded-xl shadow-sm p-4 border-2 transition
+                           ${ready ? 'border-transparent hover:border-blue-400 cursor-pointer'
+                                   : 'border-transparent opacity-60 cursor-not-allowed'}">
+                    <div class="flex items-start justify-between gap-2">
+                        <h4 class="font-semibold text-gray-800">${RAI.esc(kit.name)}</h4>
+                        ${ready
+                            ? `<span class="text-xs text-gray-400 whitespace-nowrap">${kit.line_count} item${kit.line_count === 1 ? '' : 's'}</span>`
+                            : '<span class="text-xs bg-amber-100 text-amber-800 rounded-full px-2 py-0.5 whitespace-nowrap">Not set up</span>'}
+                    </div>
+                    ${kit.description ? `<p class="text-sm text-gray-500 mt-1">${RAI.esc(kit.description)}</p>` : ''}
+                    <p class="text-sm mt-2 ${ready ? 'text-gray-600' : 'text-amber-700'}">
+                        ${ready
+                            ? `About ${RAI.money(kit.estimated_cost)} of materials`
+                            : `${kit.unresolved_count} item${kit.unresolved_count === 1 ? '' : 's'} not matched to your catalogue — ask CHC to finish this one`}
+                    </p>
+                </button>`;
+            }).join('');
+
+            RAI.loadKitHistory();
+        } catch (err) {
+            host.innerHTML = `<p class="text-sm text-red-600 col-span-full">${RAI.esc(err.message)}</p>`;
+        }
+    };
+
+    RAI.openKit = function (kitId) {
+        const kit = RAI.kits.list.find(k => k.id === kitId);
+        if (!kit || !kit.ready) return;
+
+        RAI.kits.current = kit;
+        RAI.kits.skipped = new Set();
+        RAI.kits.overrides = {};
+
+        RAI.setText('inv-kit-title', kit.name);
+        RAI.setText('inv-kit-sub', kit.description || '');
+        const panel = document.getElementById('inv-kit-panel');
+        if (panel) panel.classList.remove('hidden');
+
+        const mult = document.getElementById('inv-kit-mult');
+        if (mult) mult.value = '1';
+        RAI.clearKitResult();
+
+        RAI.loadKitPreview();
+        panel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+
+    RAI.closeKit = function () {
+        RAI.kits.current = null;
+        RAI.kits.preview = null;
+        document.getElementById('inv-kit-panel')?.classList.add('hidden');
+    };
+
+    RAI.bumpKitMultiplier = function (step) {
+        const el = document.getElementById('inv-kit-mult');
+        if (!el) return;
+        const next = Math.round(Math.min(100, Math.max(0.25, (Number(el.value) || 1) + step * 0.25)) * 100) / 100;
+        el.value = String(next);
+        RAI.loadKitPreview();
+    };
+
+    RAI.loadKitPreview = async function () {
+        const kit = RAI.kits.current;
+        if (!kit) return;
+
+        const body = document.getElementById('inv-kit-lines');
+        if (body) body.innerHTML = '<tr><td colspan="5" class="py-3 text-sm text-gray-400">Checking the shelf…</td></tr>';
+
+        const multiplier = Number(document.getElementById('inv-kit-mult')?.value) || 1;
+
+        try {
+            const resp = await RAI.api(
+                `/store/${RAI.ctx.slug}/inventory/kits/${kit.id}/preview` +
+                `?location_id=${RAI.invLocationId()}&multiplier=${encodeURIComponent(multiplier)}`
+            );
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to preview that kit.');
+
+            RAI.kits.preview = data;
+            RAI.renderKitPreview();
+        } catch (err) {
+            if (body) body.innerHTML = `<tr><td colspan="5" class="py-3 text-sm text-red-600">${RAI.esc(err.message)}</td></tr>`;
+            RAI.updateKitButton();
+        }
+    };
+
+    RAI.renderKitPreview = function () {
+        const data = RAI.kits.preview;
+        const body = document.getElementById('inv-kit-lines');
+        if (!data || !body) return;
+
+        body.innerHTML = (data.lines || []).map(line => {
+            const skipped = RAI.kits.skipped.has(line.kit_item_id);
+            const override = RAI.kits.overrides[line.kit_item_id];
+            const qty = override !== undefined ? override : line.quantity;
+
+            // Short and skipped are different colours because they are different
+            // problems: one blocks, the other is a choice the operator made.
+            const rowClass = skipped ? 'opacity-40'
+                : line.blocking ? 'bg-red-50'
+                : '';
+
+            return `
+            <tr class="border-b last:border-0 ${rowClass}">
+                <td class="py-2 pr-3">
+                    <span class="font-medium text-gray-800">${RAI.esc(line.name)}</span>
+                    <span class="block text-xs text-gray-400">${RAI.esc(line.sku || '')}</span>
+                    ${line.category_blocked
+                        ? '<span class="block text-xs text-red-600">This location does not stock that category</span>' : ''}
+                </td>
+                <td class="py-2 pr-3 text-right">
+                    <input type="number" min="0" step="0.01" value="${qty}"
+                        ${skipped ? 'disabled' : ''}
+                        onchange="RAI.setKitQty('${line.kit_item_id}', this.value)"
+                        class="border rounded px-2 py-1 w-24 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <span class="block text-xs text-gray-400">${RAI.esc(line.unit || 'each')}</span>
+                </td>
+                <td class="py-2 pr-3 text-right ${line.would_go_negative && !skipped ? 'text-red-600 font-semibold' : 'text-gray-600'}">
+                    ${RAI.formatQty(line.on_hand)}
+                </td>
+                <td class="py-2 pr-3 text-right text-gray-700">${RAI.money(qty * line.unit_price)}</td>
+                <td class="py-2 pr-3 text-center">
+                    <input type="checkbox" data-line="${line.kit_item_id}" ${skipped ? '' : 'checked'}
+                        onchange="RAI.toggleKitLine('${line.kit_item_id}')"
+                        class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                </td>
+            </tr>`;
+        }).join('');
+
+        // Excluded lines are shown, quietly. A technician who knows the job
+        // should be able to see that a step was deliberately left out rather
+        // than wonder whether the kit is wrong.
+        if ((data.excluded || []).length) {
+            body.innerHTML += `
+            <tr>
+                <td colspan="5" class="py-2 text-xs text-gray-400">
+                    Not used by your shop: ${data.excluded.map(e => RAI.esc(e.sku)).join(', ')}
+                </td>
+            </tr>`;
+        }
+
+        const warning = document.getElementById('inv-kit-warning');
+        if (warning) {
+            if (data.blocked_reason) {
+                warning.textContent = data.blocked_reason;
+                warning.classList.remove('hidden');
+            } else {
+                warning.classList.add('hidden');
+            }
+        }
+
+        RAI.updateKitTotal();
+        RAI.updateKitButton();
+    };
+
+    RAI.setKitQty = function (kitItemId, value) {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n < 0) return;
+        RAI.kits.overrides[kitItemId] = n;
+        RAI.updateKitTotal();
+        RAI.updateKitButton();
+    };
+
+    /**
+     * Ticking a line in or out updates that row in place rather than rebuilding
+     * the table. Rebuilding would destroy the checkbox the operator just
+     * touched — taking the focus with it, which on a phone closes the keyboard
+     * mid-edit and on a desktop loses the tab position.
+     */
+    RAI.toggleKitLine = function (kitItemId) {
+        const skipped = RAI.kits.skipped.has(kitItemId);
+        if (skipped) RAI.kits.skipped.delete(kitItemId);
+        else RAI.kits.skipped.add(kitItemId);
+
+        const nowSkipped = !skipped;
+        const line = (RAI.kits.preview?.lines || []).find(l => l.kit_item_id === kitItemId);
+        const box = document.querySelector(`#inv-kit-lines input[type="checkbox"][data-line="${kitItemId}"]`);
+        const row = box ? box.closest('tr') : null;
+
+        if (row) {
+            row.classList.toggle('opacity-40', nowSkipped);
+            row.classList.toggle('bg-red-50', !nowSkipped && !!line?.blocking);
+            const qtyInput = row.querySelector('input[type="number"]');
+            if (qtyInput) qtyInput.disabled = nowSkipped;
+        }
+
+        RAI.updateKitTotal();
+        RAI.updateKitButton();
+    };
+
+    /** Lines as they will actually be posted, after skips and edits. */
+    RAI.kitPlannedLines = function () {
+        const data = RAI.kits.preview;
+        if (!data) return [];
+        return (data.lines || [])
+            .filter(l => !RAI.kits.skipped.has(l.kit_item_id))
+            .map(l => ({
+                ...l,
+                quantity: RAI.kits.overrides[l.kit_item_id] !== undefined
+                    ? RAI.kits.overrides[l.kit_item_id]
+                    : l.quantity
+            }));
+    };
+
+    RAI.updateKitTotal = function () {
+        const total = RAI.kitPlannedLines().reduce((s, l) => s + l.quantity * l.unit_price, 0);
+        RAI.setText('inv-kit-total', RAI.money(total));
+    };
+
+    RAI.updateKitButton = function () {
+        const btn = document.getElementById('inv-kit-commit');
+        if (!btn) return;
+
+        const job = (document.getElementById('inv-kit-job')?.value || '').trim();
+        const planned = RAI.kitPlannedLines();
+
+        // A line the operator skipped cannot block: they have already decided
+        // not to take it. Only the lines actually being posted matter.
+        const blocked = planned.some(l => l.blocking) || planned.some(l => !(l.quantity > 0));
+
+        btn.disabled = !RAI.kits.preview || !job || planned.length === 0 || blocked;
+    };
+
+    RAI.consumeKit = async function () {
+        const kit = RAI.kits.current;
+        if (!kit || inv.busy) return;
+        if (!RAI.requireActor()) return;
+
+        const job = (document.getElementById('inv-kit-job')?.value || '').trim();
+        if (!job) return;
+
+        const planned = RAI.kitPlannedLines();
+        if (planned.length === 0) return;
+
+        const btn = document.getElementById('inv-kit-commit');
+        inv.busy = true;
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Expensing…'; }
+
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/kits/${kit.id}/consume`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    location_id: RAI.invLocationId(),
+                    job_ref: job,
+                    actor_label: RAI.invActor(),
+                    multiplier: Number(document.getElementById('inv-kit-mult')?.value) || 1,
+                    note: (document.getElementById('inv-kit-note')?.value || '').trim() || undefined,
+                    // Send every line explicitly, so a skip or an edit made on
+                    // screen is exactly what the server posts. Relying on the
+                    // multiplier alone would silently discard both.
+                    lines: (RAI.kits.preview.lines || []).map(l => ({
+                        kit_item_id: l.kit_item_id,
+                        skip: RAI.kits.skipped.has(l.kit_item_id),
+                        quantity: RAI.kits.overrides[l.kit_item_id] !== undefined
+                            ? RAI.kits.overrides[l.kit_item_id]
+                            : l.quantity
+                    }))
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to expense that kit.');
+
+            RAI.showKitResult('ok', data.message +
+                (data.replenishments_drafted ? ` ${data.replenishments_drafted} item(s) added to the reorder list.` : ''));
+
+            const jobEl = document.getElementById('inv-kit-job');
+            const noteEl = document.getElementById('inv-kit-note');
+            if (jobEl) jobEl.value = '';
+            if (noteEl) noteEl.value = '';
+
+            RAI.kits.skipped = new Set();
+            RAI.kits.overrides = {};
+
+            await RAI.loadKitPreview();          // on-hand has moved
+            await RAI.loadKitHistory();
+            RAI.loadInvSummary();
+        } catch (err) {
+            RAI.showKitResult('error', err.message);
+        } finally {
+            inv.busy = false;
+            if (btn) btn.innerHTML = '<i class="fas fa-check mr-1"></i> Expense to job';
+            RAI.updateKitButton();
+        }
+    };
+
+    /**
+     * The outcome of a commit, in its own banner.
+     *
+     * It cannot share the warning banner: the commit reloads the preview to
+     * pick up the new on-hand, and the renderer clears that banner every time.
+     * A confirmation the operator never sees is worse than none, because they
+     * cannot tell whether the job was booked.
+     */
+    RAI.showKitResult = function (kind, message) {
+        const el = document.getElementById('inv-kit-result');
+        if (!el) return;
+        el.className = kind === 'ok'
+            ? 'mb-4 p-3 rounded-lg text-sm bg-green-50 border border-green-200 text-green-800'
+            : 'mb-4 p-3 rounded-lg text-sm bg-red-50 border border-red-200 text-red-800';
+        el.textContent = message;
+    };
+
+    RAI.clearKitResult = function () {
+        const el = document.getElementById('inv-kit-result');
+        if (el) { el.textContent = ''; el.className = 'hidden mb-4 p-3 rounded-lg text-sm'; }
+    };
+
+    RAI.loadKitHistory = async function () {
+        const host = document.getElementById('inv-kit-recent');
+        if (!host) return;
+
+        try {
+            const resp = await RAI.api(
+                `/store/${RAI.ctx.slug}/inventory/kits/consumptions?location_id=${RAI.invLocationId()}&limit=10`
+            );
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || '');
+
+            const rows = data.consumptions || [];
+            if (rows.length === 0) { host.innerHTML = ''; return; }
+
+            host.innerHTML = `
+            <div class="bg-white rounded-xl shadow-sm p-4">
+                <h4 class="font-semibold text-gray-800 mb-3">Recently expensed</h4>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="text-left text-gray-500 border-b">
+                            <tr>
+                                <th class="py-2 pr-3">Job</th>
+                                <th class="py-2 pr-3">Kit</th>
+                                <th class="py-2 pr-3 text-right">Items</th>
+                                <th class="py-2 pr-3 text-right">Cost</th>
+                                <th class="py-2 pr-3">By</th>
+                                <th class="py-2 pr-3">When</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.map(r => `
+                            <tr class="border-b last:border-0">
+                                <td class="py-2 pr-3 font-medium text-gray-800">${RAI.esc(r.job_ref)}</td>
+                                <td class="py-2 pr-3 text-gray-600">${RAI.esc(r.kit_name)}${Number(r.multiplier) !== 1 ? ` &times;${r.multiplier}` : ''}</td>
+                                <td class="py-2 pr-3 text-right text-gray-600">${r.line_count}</td>
+                                <td class="py-2 pr-3 text-right text-gray-700">${RAI.money(r.total_cost)}</td>
+                                <td class="py-2 pr-3 text-gray-500">${RAI.esc(r.actor_label || '')}</td>
+                                <td class="py-2 pr-3 text-gray-400">${new Date(r.created_at).toLocaleString()}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+        } catch (err) {
+            host.innerHTML = '';
+        }
     };
 
     // ============================================================

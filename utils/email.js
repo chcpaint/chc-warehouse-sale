@@ -314,6 +314,105 @@ async function sendLowStockAlert(options) {
 }
 
 /**
+ * refinishAI Inventory — a reorder the shelf raised, waiting for approval.
+ *
+ * Sent once per order rather than once per line: a busy morning adds many lines
+ * to the same open order, and an email for each would train the recipient to
+ * ignore all of them.
+ */
+async function sendReorderRaised(options) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+
+    const { to, companyName, locationName, lines, storeUrl, replyTo } = options;
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) return { sent: false, reason: 'no_recipient' };
+
+    const items = Array.isArray(lines) ? lines : [];
+    if (!items.length) return { sent: false, reason: 'nothing_to_report' };
+
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+
+    const rows = items.slice(0, 40).map(l => `
+        <tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">
+                <strong>${escHtml(l.name)}</strong><br>
+                <span style="color:#6b7280;font-size:12px;">${escHtml(l.sku || '')}</span>
+            </td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;color:#b45309;font-weight:600;">
+                ${escHtml(String(l.on_hand_at_draft ?? ''))}
+            </td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;color:#6b7280;">
+                ${escHtml(String(l.min_point ?? '\u2014'))}
+            </td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600;">
+                ${escHtml(String(l.quantity ?? ''))}
+            </td>
+        </tr>`).join('');
+
+    const more = items.length > 40
+        ? `<p style="color:#6b7280;font-size:12px;margin:6px 0 0;">\u2026and ${items.length - 40} more on this order.</p>`
+        : '';
+
+    const html = `
+    <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;">
+        <h2 style="color:#0F2F6B;margin:0 0 4px;">Reorder ready for approval</h2>
+        <p style="color:#6b7280;margin:0 0 16px;">
+            ${escHtml(companyName)} &middot; ${escHtml(locationName)}
+        </p>
+        <p style="color:#374151;margin:0 0 16px;">
+            ${items.length} item${items.length === 1 ? ' has' : 's have'} reached the shelf minimum and
+            ${items.length === 1 ? 'is' : 'are'} queued. <strong>Nothing has been ordered.</strong>
+            Review the quantities and approve when you are ready.
+        </p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+            <thead>
+                <tr style="text-align:left;color:#6b7280;font-size:12px;">
+                    <th style="padding:6px 8px;">Item</th>
+                    <th style="padding:6px 8px;text-align:right;">On hand</th>
+                    <th style="padding:6px 8px;text-align:right;">Min</th>
+                    <th style="padding:6px 8px;text-align:right;">Suggested</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+        ${more}
+        ${storeUrl ? `<p style="margin:20px 0 0;">
+            <a href="${escHtml(storeUrl)}" style="background:#2B9BE8;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;">
+                Review the reorder
+            </a></p>` : ''}
+        <p style="color:#9ca3af;font-size:12px;margin-top:24px;">
+            refinishAI Inventory &middot; a CHC Paint and Auto Body Supplies company
+        </p>
+    </div>`;
+
+    const textLines = [
+        `Reorder ready for approval - ${companyName} / ${locationName}`,
+        `${items.length} item(s) reached their shelf minimum. Nothing has been ordered yet.`,
+        '',
+        ...items.slice(0, 40).map(l => `  ${l.sku || ''} ${l.name} - on hand ${l.on_hand_at_draft ?? ''}, suggested ${l.quantity ?? ''}`)
+    ];
+    if (storeUrl) textLines.push('', storeUrl);
+
+    try {
+        const msg = {
+            to: recipients,
+            from: fromAddress,
+            subject: `Reorder ready for approval - ${locationName} (${items.length} item${items.length === 1 ? '' : 's'})`,
+            text: textLines.join('\n'),
+            html
+        };
+        if (replyTo) msg.replyTo = replyTo;
+        await sgMail.send(msg);
+        console.log(`Email: Reorder-raised notice sent to ${recipients.join(', ')} (${items.length} items)`);
+        return { sent: true, recipients, count: items.length };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Email: Failed to send reorder notice:', errMsg);
+        return { sent: false, reason: 'send_failed', error: errMsg };
+    }
+}
+
+/**
  * Send a test email to verify configuration.
  */
 async function sendTestEmail(toAddress) {
@@ -342,4 +441,4 @@ function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendOrderNotification, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert };
+module.exports = { sendOrderNotification, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised };

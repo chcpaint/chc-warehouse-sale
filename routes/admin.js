@@ -23,6 +23,7 @@ router.use(requireAdminAuth);
 // requireCompanyAccess itself.
 // ============================================================
 router.use('/companies/:companyId/inventory', require('./inventory-admin'));
+router.use('/companies/:companyId/modules', require('./modules-admin'));
 
 // ============================================================
 // DASHBOARD STATS
