@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>CHC B2B Platform</title>
+    <!-- Home-screen install for the shop floor, used by the optional refinishAI
+         Inventory module. iOS ignores the web manifest and reads these tags, so
+         both paths are covered. The manifest itself is built at runtime (see
+         RAI.installPwa) because start_url depends on the company slug. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="refinishAI Inventory">
+    <meta name="theme-color" content="#1e40af">
+    <link rel="apple-touch-icon" href="/assets/refinishai-icon.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -124,6 +133,11 @@
                     <button onclick="showTab('orders')" data-tab="orders"
                         class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
                         <i class="fas fa-receipt mr-1"></i> Order History
+                    </button>
+                    <button onclick="showTab('inventory')" data-tab="inventory" id="nav-inventory"
+                        class="hidden relative px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-boxes-stacked mr-1"></i> Inventory
+                        <span id="inv-low-badge" class="hidden absolute -top-1 -right-1 bg-amber-500 text-white text-xs rounded-full w-5 h-5 items-center justify-center">0</span>
                     </button>
                     <button onclick="showTab('reports')" data-tab="reports"
                         class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
@@ -431,6 +445,7 @@
                 </div>
             </section>
 
+
         </main>
     </div>
 
@@ -651,6 +666,7 @@
     }
 
     function logout() {
+        if (window.RAI) window.RAI.teardown();
         sessionStorage.removeItem('chc_token');
         sessionStorage.removeItem('chc_company');
         sessionStorage.removeItem('chc_location');
@@ -701,6 +717,10 @@
         if (state.location && document.getElementById('checkout-location-name')) {
             document.getElementById('checkout-location-name').textContent = state.location.name;
         }
+
+        // Inventory is opt-in per company; initInventory() reveals the tab only
+        // when the company has it switched on.
+        initInventory();
     }
 
     let allLocations = [];
@@ -831,6 +851,8 @@
         if (tab === 'cart') renderCart();
         if (tab === 'orders') loadOrders();
         if (tab === 'reports') loadReports();
+        if (tab === 'inventory') { if (window.RAI) window.RAI.show(); }
+        else if (window.RAI) window.RAI.teardown();
     }
 
     // ============================================================
@@ -1591,6 +1613,65 @@
         } catch (err) {
             list.innerHTML = '<div class="text-center py-8 text-red-500">Failed to load orders.</div>';
         }
+    }
+
+
+    // ============================================================
+    // refinishAI INVENTORY (optional module)
+    //
+    // The inventory half of the console lives in its own file. It is fetched
+    // only when this company has it switched on, so a customer using the
+    // ordering portal alone downloads none of it. Everything below is the
+    // handshake; the module itself owns its markup, state and behaviour.
+    // ============================================================
+
+    async function initInventory() {
+        try {
+            const resp = await fetch(`${API_BASE}/store/${state.slug}/info`);
+            if (!resp.ok) return;
+
+            const { company } = await resp.json();
+            const settings = (company && company.settings && company.settings.inventory) || {};
+            if (!settings.enabled) return;          // ordering portal only — nothing more loads
+
+            await loadInventoryModule();
+            if (!window.RAI || typeof window.RAI.init !== 'function') return;
+
+            const started = window.RAI.init({
+                apiBase: API_BASE,
+                slug: state.slug,
+                settings,
+                mount: document.querySelector('main'),
+                getToken: () => state.token,
+                getLocation: () => state.location,
+                getCompany: () => state.company,
+                // The module raises real CHC orders; this lets the console
+                // refresh its own order history when one is placed.
+                onOrderPlaced: () => loadOrders()
+            });
+
+            // The tab is only revealed once the module is loaded and mounted,
+            // so it can never be clicked into a half-initialised state.
+            if (started) {
+                const navBtn = document.getElementById('nav-inventory');
+                if (navBtn) navBtn.classList.remove('hidden');
+            }
+        } catch (err) {
+            // The ordering portal must keep working whatever happens here.
+            console.error('[refinishAI Inventory] unavailable:', err);
+        }
+    }
+
+    function loadInventoryModule() {
+        return new Promise((resolve, reject) => {
+            const src = '/refinishai-inventory.js';
+            if (document.querySelector(`script[src="${src}"]`)) return resolve();
+            const el = document.createElement('script');
+            el.src = src;
+            el.onload = resolve;
+            el.onerror = () => reject(new Error('module failed to load'));
+            document.head.appendChild(el);
+        });
     }
 
     // ============================================================
