@@ -223,8 +223,14 @@ router.get('/by-job', async (req, res) => {
         const jobs = (data || []).map(j => ({
             ...j,
             units_used: round2(Number(j.units_used || 0)),
-            value_used: round2(Number(j.value_used || 0))
+            value_used: round2(Number(j.value_used || 0)),
+            // Items on this job the branch prices at purchase. value_used
+            // excludes them, so this is what turns a possibly-misleading number
+            // into an honest one on screen.
+            items_unpriced: Number(j.items_unpriced || 0)
         }));
+
+        const jobsWithUnpriced = jobs.filter(j => j.items_unpriced > 0).length;
 
         res.json({
             period: { label: range.label, from: range.from, to: range.to },
@@ -233,7 +239,8 @@ router.get('/by-job', async (req, res) => {
                 jobs: jobs.length,
                 value_used: round2(jobs.reduce((s, j) => s + j.value_used, 0)),
                 avg_value_per_job: jobs.length
-                    ? round2(jobs.reduce((s, j) => s + j.value_used, 0) / jobs.length) : 0
+                    ? round2(jobs.reduce((s, j) => s + j.value_used, 0) / jobs.length) : 0,
+                jobs_with_unpriced_items: jobsWithUnpriced
             }
         });
     } catch (err) {

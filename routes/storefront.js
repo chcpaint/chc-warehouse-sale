@@ -301,7 +301,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         const productIds = items.map(i => i.product_id);
         const { data: products } = await supabaseAdmin
             .from('products')
-            .select('id, name, sku, price, case_qty, category')
+            .select('id, name, sku, price, case_qty, category, price_on_request')
             .eq('company_id', companyId)
             .in('id', productIds);
 
@@ -349,10 +349,22 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         let subtotal = 0;
         const verifiedItems = items.map(item => {
             const product = productMap[item.product_id];
-            const effectivePrice = promoMap[item.product_id] || product.price;
             const qty = parseInt(item.quantity) || 1;
-            const lineTotal = effectivePrice * qty;
-            subtotal += lineTotal;
+
+            // A price-on-request item is quoted by the branch when the order is
+            // picked. It must not be totalled at zero: that would tell the
+            // customer the order costs less than it does, and give the branch
+            // nothing to notice. It is carried at null with an explicit flag,
+            // and the order records that it is not fully priced.
+            //
+            // A promotion on a quoted item still applies — a real promo price
+            // is a real price, and overrides the quote.
+            const promoPrice = promoMap[item.product_id];
+            const quoted = product.price_on_request === true && promoPrice === undefined;
+
+            const effectivePrice = quoted ? null : (promoPrice || product.price);
+            const lineTotal = quoted ? null : effectivePrice * qty;
+            if (!quoted) subtotal += lineTotal;
 
             return {
                 product_id: product.id,
@@ -360,11 +372,16 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 sku: product.sku,
                 quantity: qty,
                 unit_price: effectivePrice,
-                was_promo: !!promoMap[item.product_id],
+                was_promo: !!promoPrice,
+                price_on_request: quoted,
                 subtotal: lineTotal
             };
         });
 
+        // Not stored as its own column: every line already carries the flag, so
+        // a separate count would be a second source of truth able to disagree
+        // with the lines beneath it. Derived where it is needed instead.
+        const quotedItems = verifiedItems.filter(i => i.price_on_request);
         const total = subtotal; // Tax can be added here if needed
 
         const { data: order, error } = await supabaseAdmin
@@ -383,7 +400,12 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 total,
                 notes: stripHtml(notes || ''),
                 status: 'pending',
-                status_history: [{ status: 'pending', timestamp: now, note: 'Order placed' }]
+                status_history: [{
+                    status: 'pending', timestamp: now,
+                    note: quotedItems.length
+                        ? `Order placed — ${quotedItems.length} item(s) to be priced by the branch`
+                        : 'Order placed'
+                }]
             })
             .select()
             .single();

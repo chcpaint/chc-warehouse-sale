@@ -1127,7 +1127,9 @@
                 <h3 class="font-semibold text-gray-800 text-sm mb-1 leading-tight">${escapeHtml(p.name)}</h3>
                 ${p.sku ? `<p class="text-xs text-gray-400 mb-2">SKU: ${escapeHtml(p.sku)}</p>` : ''}
                 <div class="flex items-baseline gap-2 mb-3">
-                    <span class="text-xl font-bold text-gray-800">$${parseFloat(p.price).toFixed(2)}</span>
+                    ${p.price_on_request
+                        ? `<span class="text-sm font-semibold text-blue-700">${PRICE_ON_REQUEST_LABEL}</span>`
+                        : `<span class="text-xl font-bold text-gray-800">$${parseFloat(p.price).toFixed(2)}</span>`}
                     <!-- Product "was" price hidden in catalog; sale pricing/strikethrough is handled by Promotions. -->
                     ${p.case_qty > 1 ? `<span class="text-xs text-gray-400">/ case of ${p.case_qty}</span>` : ''}
                 </div>
@@ -1225,6 +1227,7 @@
                 sku: product.sku,
                 price: promo ? parseFloat(promo.promo_price) : parseFloat(product.price),
                 original_price: parseFloat(product.price),
+                price_on_request: product.price_on_request === true,
                 is_promo: !!promo,
                 quantity: 1
             });
@@ -1261,6 +1264,33 @@
         }
     }
 
+    // ------------------------------------------------------------
+    // Pricing display
+    //
+    // A product can be marked price-on-request: the branch quotes it at the
+    // moment of purchase, once it has a true cost. That is NOT the same as
+    // $0.00, and showing it as $0.00 would be a lie the customer acts on. One
+    // helper decides this everywhere so the catalogue, the cart and the order
+    // can never disagree.
+    // ------------------------------------------------------------
+    const PRICE_ON_REQUEST_LABEL = 'Contact for current pricing';
+
+    function isPriceOnRequest(item) {
+        return item && item.price_on_request === true;
+    }
+
+    /** What to show where a price would go. */
+    function priceLabel(item, amount) {
+        return isPriceOnRequest(item)
+            ? PRICE_ON_REQUEST_LABEL
+            : '$' + Number(amount).toFixed(2);
+    }
+
+    /** Cart lines that the branch still has to price. */
+    function quotedCartLines() {
+        return state.cart.filter(isPriceOnRequest);
+    }
+
     function renderCart() {
         const empty = document.getElementById('cart-empty');
         const content = document.getElementById('cart-content');
@@ -1279,7 +1309,10 @@
 
         let total = 0;
         itemsEl.innerHTML = state.cart.map(item => {
-            const subtotal = item.price * item.quantity;
+            // A quoted line contributes nothing to the running total, because
+            // nobody yet knows what it contributes. The total is labelled below
+            // so it never reads as the final figure when it is not.
+            const subtotal = isPriceOnRequest(item) ? 0 : item.price * item.quantity;
             total += subtotal;
             return `
             <div class="bg-white rounded-lg shadow-sm border p-4 flex items-center justify-between">
@@ -1287,7 +1320,9 @@
                     <h4 class="font-semibold text-gray-800">${escapeHtml(item.name)}</h4>
                     <p class="text-sm text-gray-400">${escapeHtml(item.brand)} ${item.sku ? '| ' + escapeHtml(item.sku) : ''}</p>
                     <div class="flex items-baseline gap-2 mt-1">
-                        <span class="font-bold ${item.is_promo ? 'text-red-600' : 'text-gray-800'}">$${item.price.toFixed(2)}</span>
+                        ${isPriceOnRequest(item)
+                            ? `<span class="text-sm font-semibold text-blue-700">${PRICE_ON_REQUEST_LABEL}</span>`
+                            : `<span class="font-bold ${item.is_promo ? 'text-red-600' : 'text-gray-800'}">$${item.price.toFixed(2)}</span>`}
                         ${item.is_promo ? `<span class="text-xs text-gray-400 line-through">$${item.original_price.toFixed(2)}</span><span class="text-xs text-red-500 font-semibold">PROMO</span>` : ''}
                     </div>
                 </div>
@@ -1295,12 +1330,30 @@
                     <button onclick="updateCart('${item.product_id}', ${item.quantity - 1})" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-bold">-</button>
                     <span class="w-8 text-center font-semibold">${item.quantity}</span>
                     <button onclick="updateCart('${item.product_id}', ${item.quantity + 1})" class="w-8 h-8 bg-blue-100 hover:bg-blue-200 rounded text-blue-700 font-bold">+</button>
-                    <span class="ml-3 font-bold text-gray-800 w-20 text-right">$${subtotal.toFixed(2)}</span>
+                    <span class="ml-3 font-bold text-gray-800 w-20 text-right">${isPriceOnRequest(item) ? '&mdash;' : '$' + subtotal.toFixed(2)}</span>
                 </div>
             </div>`;
         }).join('');
 
         document.getElementById('cart-total').textContent = `$${total.toFixed(2)}`;
+
+        // Say plainly that the total is not the whole bill. A customer who is
+        // not told will read the figure as final and be surprised by the invoice.
+        const quoted = quotedCartLines().length;
+        let note = document.getElementById('cart-quoted-note');
+        if (!note) {
+            const totalEl = document.getElementById('cart-total');
+            note = document.createElement('p');
+            note.id = 'cart-quoted-note';
+            note.className = 'text-xs text-blue-700 mt-1';
+            if (totalEl && totalEl.parentElement) totalEl.parentElement.appendChild(note);
+        }
+        if (note) {
+            note.textContent = quoted
+                ? `Plus ${quoted} item${quoted === 1 ? '' : 's'} your branch will price when the order is picked.`
+                : '';
+            note.classList.toggle('hidden', quoted === 0);
+        }
     }
 
     function showCheckout() {

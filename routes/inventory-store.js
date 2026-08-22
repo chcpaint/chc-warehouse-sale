@@ -192,17 +192,29 @@ router.get('/summary', async (req, res) => {
 
         const { data, error } = await supabaseAdmin
             .from('inventory_status')
-            .select('stock_status, on_hand, price')
+            .select('stock_status, on_hand, price, price_on_request, line_value')
             .eq('company_id', companyId)
             .eq('location_id', location.id);
         if (error) throw error;
 
         const rows = data || [];
-        const summary = { tracked: 0, ok: 0, low: 0, out: 0, untracked: 0, stock_value: 0 };
+        const summary = {
+            tracked: 0, ok: 0, low: 0, out: 0, untracked: 0,
+            stock_value: 0,
+            // Lines the shelf holds that cannot be valued, because the branch
+            // prices them at purchase. Reported rather than counted as zero, so
+            // stock_value is understood as a floor instead of a total.
+            unvalued_lines: 0
+        };
         for (const r of rows) {
             summary[r.stock_status] = (summary[r.stock_status] || 0) + 1;
             if (r.stock_status !== 'untracked') summary.tracked++;
-            summary.stock_value += Number(r.on_hand || 0) * Number(r.price || 0);
+
+            if (r.price_on_request) {
+                if (Number(r.on_hand || 0) > 0) summary.unvalued_lines++;
+            } else {
+                summary.stock_value += Number(r.line_value ?? (Number(r.on_hand || 0) * Number(r.price || 0)));
+            }
         }
         summary.stock_value = Math.round(summary.stock_value * 100) / 100;
 
