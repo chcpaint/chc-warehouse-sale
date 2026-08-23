@@ -322,6 +322,108 @@ test('the digest runs for a company at its chosen local hour and not otherwise',
     assert.equal(sent.digests.length, 1);
 });
 
+// ------------------------------------------------------------------
+// The window decision, checked at every hour against every target rather
+// than only at whatever time the suite happens to run.
+// ------------------------------------------------------------------
+
+test('a digest is due at its target hour, at every hour of the day', () => {
+    for (let target = 0; target < 24; target++) {
+        const { due, late } = scheduler.digestDue(target, target);
+        assert.equal(due, true, `target ${target} should be due at ${target}`);
+        assert.equal(late, false, 'on time is not late');
+    }
+});
+
+test('a digest is never due before its target hour', () => {
+    for (let target = 0; target < 24; target++) {
+        for (let hour = 0; hour < target; hour++) {
+            assert.equal(scheduler.digestDue(hour, target).due, false,
+                `target ${target} must not fire at ${hour}`);
+        }
+    }
+});
+
+test('a digest is caught up within the window and marked late', () => {
+    const N = scheduler.DIGEST_CATCHUP_HOURS;
+    for (let target = 0; target < 24; target++) {
+        for (let offset = 1; offset < N; offset++) {
+            const hour = target + offset;
+            if (hour > 23) continue;                 // window is clamped at the day end
+            const { due, late } = scheduler.digestDue(hour, target);
+            assert.equal(due, true, `target ${target} should still catch up at ${hour}`);
+            assert.equal(late, true, 'a caught-up digest must be recorded as late');
+        }
+    }
+});
+
+test('the window is bounded, so a digest is never sent hours after it mattered', () => {
+    const N = scheduler.DIGEST_CATCHUP_HOURS;
+    for (let target = 0; target < 24; target++) {
+        for (let hour = target + N; hour < 24; hour++) {
+            assert.equal(scheduler.digestDue(hour, target).due, false,
+                `target ${target} must not fire as late as ${hour}`);
+        }
+    }
+});
+
+test('the window never wraps past midnight into a new run key', () => {
+    // A late-evening target must not still be "due" at hour 0, which belongs to
+    // the next local date and therefore a different run key — that is the one
+    // way widening the window could produce a second email.
+    for (let target = 22; target < 24; target++) {
+        assert.equal(scheduler.digestDue(0, target).due, false);
+        assert.equal(scheduler.digestDue(1, target).due, false);
+    }
+});
+
+test('a digest missed at its exact hour still goes out during the catch-up window', async () => {
+    reset();
+    const { hour } = scheduler.localNow('America/Toronto');
+
+    // Pretend the target was an hour ago — i.e. the tick that should have run
+    // at the target never happened, because the process was restarting.
+    fake.db.companies[0].settings.inventory.digest_hour = (hour - 1 + 24) % 24;
+
+    const outcome = await scheduler.lowStockDigestJob();
+
+    // Only meaningful when the catch-up window has not wrapped past midnight;
+    // at hour 0 the "previous hour" is yesterday and a new run key applies.
+    if (hour >= 1) {
+        assert.equal(outcome.sent, 1, 'a missed digest is caught up, not skipped for the day');
+        assert.equal(outcome.caught_up, 1, 'and it is recorded as late rather than passed off as on time');
+    }
+});
+
+test('the catch-up window is bounded — a long-missed digest is not sent at midnight', async () => {
+    reset();
+    const { hour } = scheduler.localNow('America/Toronto');
+
+    // Target far enough back to be outside the window.
+    fake.db.companies[0].settings.inventory.digest_hour =
+        (hour - (scheduler.DIGEST_CATCHUP_HOURS + 2) + 24) % 24;
+
+    const outcome = await scheduler.lowStockDigestJob();
+    if (hour >= scheduler.DIGEST_CATCHUP_HOURS + 2) {
+        assert.equal(outcome.due, 0, 'past the window it waits for tomorrow rather than sending late');
+        assert.equal(sent.digests.length, 0);
+    }
+});
+
+test('catching up still cannot send twice', async () => {
+    reset();
+    const { hour } = scheduler.localNow('America/Toronto');
+    if (hour < 1) return;                       // window would wrap; covered above
+
+    fake.db.companies[0].settings.inventory.digest_hour = (hour - 1 + 24) % 24;
+
+    await scheduler.lowStockDigestJob();
+    await scheduler.lowStockDigestJob();
+    // The claim is what guarantees this, and widening the window must not have
+    // weakened it — this is the whole reason the window is safe to widen.
+    assert.equal(sent.digests.length, 1);
+});
+
 test('a company without inventory is never considered', async () => {
     reset();
     const { hour } = scheduler.localNow('America/Toronto');
