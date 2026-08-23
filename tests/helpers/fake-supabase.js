@@ -34,7 +34,12 @@ const KNOWN_COLUMNS = {
         'company_name', 'po_number', 'location', 'location_id', 'items', 'subtotal', 'total',
         'notes', 'status', 'status_history', 'created_at', 'updated_at',
         'invoice_url', 'invoice_uploaded_at', 'closed_at', 'closed_by', 'payment_status',
-        'payment_intent_id', 'paid_at', 'supplier_branch_id'
+        'payment_intent_id', 'paid_at', 'supplier_branch_id',
+        'po_source', 'po_normalized'
+    ]),
+    company_po_sequences: new Set([
+        'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',
+        'created_at', 'updated_at', 'updated_by'
     ]),
     stock_movements: new Set([
         'id', 'company_id', 'location_id', 'product_id', 'qty_change', 'movement_type',
@@ -237,7 +242,7 @@ function createFakeSupabase(seed = {}) {
         inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
         repair_kits: [], kit_items: [], company_kit_access: [],
         kit_product_map: [], kit_consumptions: [],
-        scheduler_runs: [], inventory_status: [],
+        scheduler_runs: [], inventory_status: [], company_po_sequences: [],
         ...clone(seed)
     };
 
