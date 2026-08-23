@@ -370,6 +370,30 @@ function createFakeSupabase(seed = {}) {
                 }
                 return { data: fixed, error: null };
             }
+            if (name === 'allocate_po_number') {
+                // Mirrors allocate_po_number(): consume the current number and
+                // advance the counter. The REAL guarantee is the row lock that
+                // makes this atomic under concurrency, and no stub can
+                // reproduce that — a single-threaded fake would "prove" safety
+                // it has not got. That property is tested for real in
+                // qa/e2e-po.js against the live database. What this covers is
+                // the shape of the call and the arithmetic.
+                const seq = (db.company_po_sequences || [])
+                    .find(r => r.company_id === args.p_company_id);
+                if (!seq) return { data: [], error: null };
+
+                const issued = Number(seq.next_number);
+                seq.next_number = issued + 1;
+                return {
+                    data: [{
+                        prefix: seq.prefix,
+                        seq: issued,
+                        pad_width: seq.pad_width,
+                        use_check_digit: seq.use_check_digit
+                    }],
+                    error: null
+                };
+            }
             return { data: null, error: { message: `unknown rpc ${name}` } };
         }
     };

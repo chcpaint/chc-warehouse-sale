@@ -3,6 +3,7 @@ const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
 const { sendOrderNotification } = require('../utils/email');
+const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 
 const router = express.Router();
