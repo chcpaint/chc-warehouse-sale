@@ -1178,6 +1178,23 @@
             RAI.setText('inv-stat-out', summary.out);
             RAI.setText('inv-stat-value', '$' + Number(summary.stock_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
+            // Some items are priced by the branch at purchase and cannot be
+            // valued. Saying so turns a number that would quietly be too low
+            // into one the reader can trust.
+            const valueEl = document.getElementById('inv-stat-value');
+            if (valueEl && valueEl.parentElement) {
+                let hint = document.getElementById('inv-stat-value-note');
+                if (!hint) {
+                    hint = document.createElement('div');
+                    hint.id = 'inv-stat-value-note';
+                    hint.className = 'text-xs text-blue-700 mt-0.5';
+                    valueEl.parentElement.appendChild(hint);
+                }
+                const n = Number(summary.unvalued_lines || 0);
+                hint.textContent = n ? `+ ${n} item${n === 1 ? '' : 's'} priced by your branch` : '';
+                hint.classList.toggle('hidden', !n);
+            }
+
             const badge = document.getElementById('inv-replen-badge');
             if (badge) {
                 badge.textContent = pending_replenishment;
@@ -1932,6 +1949,20 @@
                 const j = await jobResp.json();
                 RAI.setText('inv-an-jobs', j.totals.jobs);
                 RAI.setText('inv-an-perjob', RAI.money(j.totals.avg_value_per_job));
+
+                const perJobEl = document.getElementById('inv-an-perjob');
+                if (perJobEl && perJobEl.parentElement) {
+                    let hint = document.getElementById('inv-an-perjob-note');
+                    if (!hint) {
+                        hint = document.createElement('div');
+                        hint.id = 'inv-an-perjob-note';
+                        hint.className = 'text-xs text-blue-700 mt-0.5';
+                        perJobEl.parentElement.appendChild(hint);
+                    }
+                    const n = Number(j.totals.jobs_with_unpriced_items || 0);
+                    hint.textContent = n ? `${n} job${n === 1 ? '' : 's'} include items your branch prices` : '';
+                    hint.classList.toggle('hidden', !n);
+                }
                 const body = document.getElementById('inv-an-jobs-body');
                 body.innerHTML = j.jobs.length
                     ? j.jobs.map(job => `

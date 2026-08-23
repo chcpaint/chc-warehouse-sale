@@ -16,6 +16,58 @@
 function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
 
 /**
+ * Columns the real tables actually have, for the tables whose inserts are built
+ * by hand in route code.
+ *
+ * This exists because of a bug that reached a commit: an insert added
+ * `orders.needs_pricing`, a column that does not exist. Every test passed —
+ * the fake happily stored the unknown key — and it would have 500'd every
+ * order in production. A stub that accepts more than the database does is worse
+ * than no stub, because it converts a certain failure into a confident pass.
+ *
+ * Only tables worth guarding are listed; an unlisted table is not checked.
+ * Kept in sync by hand with migrations/.
+ */
+const KNOWN_COLUMNS = {
+    orders: new Set([
+        'id', 'company_id', 'order_number', 'contact_name', 'contact_email', 'contact_phone',
+        'company_name', 'po_number', 'location', 'location_id', 'items', 'subtotal', 'total',
+        'notes', 'status', 'status_history', 'created_at', 'updated_at',
+        'invoice_url', 'invoice_uploaded_at', 'closed_at', 'closed_by', 'payment_status',
+        'payment_intent_id', 'paid_at', 'supplier_branch_id',
+        'po_source', 'po_normalized'
+    ]),
+    company_po_sequences: new Set([
+        'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',
+        'created_at', 'updated_at', 'updated_by'
+    ]),
+    stock_movements: new Set([
+        'id', 'company_id', 'location_id', 'product_id', 'qty_change', 'movement_type',
+        'reason', 'source_doc_type', 'source_doc_id', 'scanned_barcode', 'created_by',
+        'created_at', 'actor_type', 'actor_label', 'job_ref', 'on_hand_after'
+    ]),
+    kit_consumptions: new Set([
+        'id', 'company_id', 'location_id', 'kit_id', 'kit_name', 'job_ref', 'multiplier',
+        'line_count', 'total_cost', 'actor_label', 'actor_type', 'created_by', 'created_at'
+    ]),
+    scheduler_runs: new Set(['id', 'job', 'run_key', 'detail', 'result', 'started_at', 'finished_at'])
+};
+
+function assertKnownColumns(table, payload) {
+    const known = KNOWN_COLUMNS[table];
+    if (!known) return;
+    for (const key of Object.keys(payload || {})) {
+        if (!known.has(key)) {
+            const e = new Error(
+                `column "${key}" of relation "${table}" does not exist ` +
+                `(fake-supabase: add it to KNOWN_COLUMNS if a migration added it)`);
+            e.code = '42703';
+            throw e;
+        }
+    }
+}
+
+/**
  * Deterministic UUID-shaped ids. The routes guard on isValidUUID(), so ids that
  * merely look unique are not enough — they have to be shaped like real ones.
  */
@@ -141,6 +193,11 @@ class Query {
         }
 
         if (this.mode === 'update') {
+            try {
+                assertKnownColumns(table, this.payload);
+            } catch (e) {
+                return { data: null, error: { message: e.message, code: e.code } };
+            }
             const hit = this.rows();
             hit.forEach(r => Object.assign(r, this.payload));
             if (this._single && hit.length === 0) {
@@ -185,12 +242,13 @@ function createFakeSupabase(seed = {}) {
         inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
         repair_kits: [], kit_items: [], company_kit_access: [],
         kit_product_map: [], kit_consumptions: [],
-        scheduler_runs: [], inventory_status: [],
+        scheduler_runs: [], inventory_status: [], company_po_sequences: [],
         ...clone(seed)
     };
 
     db.__insert = (table, payload) => {
         counter++;
+        assertKnownColumns(table, payload);
         const row = { id: payload.id || fakeUuid(), created_at: new Date().toISOString(), ...payload };
 
         // Column defaults the routes rely on reading back. Without these a
@@ -278,7 +336,11 @@ function createFakeSupabase(seed = {}) {
                     location_name: loc.name, sku: p.sku, product_name: p.name, brand: p.brand,
                     category: p.category, price: p.price, case_qty: p.case_qty, unit: p.unit,
                     stock_status: status,
-                    suggested_order_qty: Math.max((l.max_point ?? l.min_point ?? 0) - onHand, 0)
+                    suggested_order_qty: Math.max((l.max_point ?? l.min_point ?? 0) - onHand, 0),
+                    // Mirrors migration 018: a price-on-request line has no
+                    // value, which is NULL rather than 0 so a sum skips it.
+                    price_on_request: p.price_on_request === true,
+                    line_value: p.price_on_request === true ? null : onHand * Number(p.price || 0)
                 };
             });
         }

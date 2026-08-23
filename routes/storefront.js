@@ -264,8 +264,15 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             return res.status(400).json({ error: 'Contact name, email, and at least one item are required.' });
         }
 
-        if (!po_number || !po_number.trim()) {
-            return res.status(400).json({ error: 'PO Number is required.' });
+        // How the PO is handled is a per-company choice. Until this existed the
+        // field was mandatory for everybody, which is why a shop with no
+        // purchase-order system ended up typing the same number every time.
+        const { data: poCompany } = await supabaseAdmin
+            .from('companies').select('settings').eq('id', companyId).maybeSingle();
+
+        const poDecision = resolveOrderPo(poCompany?.settings, po_number);
+        if (!poDecision.ok) {
+            return res.status(400).json({ error: poDecision.error });
         }
 
         if (!isValidUUID(companyId)) {
@@ -301,7 +308,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         const productIds = items.map(i => i.product_id);
         const { data: products } = await supabaseAdmin
             .from('products')
-            .select('id, name, sku, price, case_qty, category')
+            .select('id, name, sku, price, case_qty, category, price_on_request')
             .eq('company_id', companyId)
             .in('id', productIds);
 
@@ -349,10 +356,22 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         let subtotal = 0;
         const verifiedItems = items.map(item => {
             const product = productMap[item.product_id];
-            const effectivePrice = promoMap[item.product_id] || product.price;
             const qty = parseInt(item.quantity) || 1;
-            const lineTotal = effectivePrice * qty;
-            subtotal += lineTotal;
+
+            // A price-on-request item is quoted by the branch when the order is
+            // picked. It must not be totalled at zero: that would tell the
+            // customer the order costs less than it does, and give the branch
+            // nothing to notice. It is carried at null with an explicit flag,
+            // and the order records that it is not fully priced.
+            //
+            // A promotion on a quoted item still applies — a real promo price
+            // is a real price, and overrides the quote.
+            const promoPrice = promoMap[item.product_id];
+            const quoted = product.price_on_request === true && promoPrice === undefined;
+
+            const effectivePrice = quoted ? null : (promoPrice || product.price);
+            const lineTotal = quoted ? null : effectivePrice * qty;
+            if (!quoted) subtotal += lineTotal;
 
             return {
                 product_id: product.id,
@@ -360,12 +379,54 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 sku: product.sku,
                 quantity: qty,
                 unit_price: effectivePrice,
-                was_promo: !!promoMap[item.product_id],
+                was_promo: !!promoPrice,
+                price_on_request: quoted,
                 subtotal: lineTotal
             };
         });
 
+        // Not stored as its own column: every line already carries the flag, so
+        // a separate count would be a second source of truth able to disagree
+        // with the lines beneath it. Derived where it is needed instead.
+        const quotedItems = verifiedItems.filter(i => i.price_on_request);
         const total = subtotal; // Tax can be added here if needed
+
+        // ------------------------------------------------------------------
+        // Allocate the PO number LAST, immediately before the insert.
+        //
+        // Deliberately not earlier: every validation above can still reject the
+        // order, and a number consumed by an order that was then refused is a
+        // gap in the shop's sequence with nothing to explain it. Allocating
+        // here means the only way to burn a number is to actually place an
+        // order — which is the behaviour a shop expects and can reconcile.
+        // ------------------------------------------------------------------
+        let finalPo = null;
+        let poSource = 'none';
+
+        if (poDecision.action === 'manual') {
+            finalPo = poDecision.po_number;
+            poSource = 'manual';
+        } else if (poDecision.action === 'allocate') {
+            const { data: allocated, error: allocError } = await supabaseAdmin
+                .rpc('allocate_po_number', { p_company_id: companyId });
+
+            const row = Array.isArray(allocated) ? allocated[0] : allocated;
+            if (allocError || !row) {
+                // No sequence configured. Refusing is right: silently falling
+                // back to a typed PO, or to none, would produce an order whose
+                // numbering nobody can account for later.
+                console.error('PO allocation failed:', allocError?.message || 'no sequence for company');
+                return res.status(409).json({
+                    error: 'Purchase order numbering is not set up for this account yet. Please contact CHC.'
+                });
+            }
+
+            finalPo = formatPo(row.prefix, row.seq, {
+                padWidth: row.pad_width,
+                checkDigit: row.use_check_digit
+            });
+            poSource = 'generated';
+        }
 
         const { data: order, error } = await supabaseAdmin
             .from('orders')
@@ -375,7 +436,8 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 contact_email: stripHtml(contact_email),
                 contact_phone: stripHtml(contact_phone || ''),
                 company_name: req.company.name,
-                po_number: stripHtml(po_number),
+                po_number: finalPo,
+                po_source: poSource,
                 location: resolvedLocationName,
                 location_id: locationRow.id,
                 items: verifiedItems,
@@ -383,12 +445,30 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 total,
                 notes: stripHtml(notes || ''),
                 status: 'pending',
-                status_history: [{ status: 'pending', timestamp: now, note: 'Order placed' }]
+                status_history: [{
+                    status: 'pending', timestamp: now,
+                    note: quotedItems.length
+                        ? `Order placed — ${quotedItems.length} item(s) to be priced by the branch`
+                        : 'Order placed'
+                }]
             })
             .select()
             .single();
 
         if (error) {
+            // 23505 on the PO index means this number has been used before by
+            // this company. That is the constraint doing its job — the whole
+            // point of the feature — so it deserves a message the shop can act
+            // on rather than a generic failure.
+            if (error.code === '23505' && /po/i.test(error.message || '')) {
+                return res.status(409).json({
+                    error: poSource === 'generated'
+                        ? 'That purchase order number has already been used. Please try again.'
+                        : `Purchase order ${finalPo} has already been used on another order. Please use a different number.`,
+                    po_number: finalPo,
+                    field: 'po_number'
+                });
+            }
             console.error('Order insert error:', error);
             return res.status(500).json({ error: 'Failed to submit order.' });
         }
@@ -439,7 +519,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                     contactName: stripHtml(contact_name),
                     contactEmail: stripHtml(contact_email),
                     contactPhone: stripHtml(contact_phone || ''),
-                    poNumber: stripHtml(po_number),
+                    poNumber: finalPo,
                     location: resolvedLocationName,
                     notes: stripHtml(notes || '')
                 }).catch(err => console.error('Order email failed (non-blocking):', err.message));
@@ -453,6 +533,11 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             order: {
                 id: order.id,
                 order_number: order.order_number,
+                // Returned so the confirmation can show it. When CHC issued the
+                // number this is the only moment the shop sees it, and their
+                // accounts department will be asked for it later.
+                po_number: order.po_number,
+                po_source: order.po_source,
                 total: order.total,
                 status: order.status,
                 created_at: order.created_at
@@ -630,6 +715,50 @@ router.get('/:slug/orders/:orderId/invoice', requireCompanyAuth, async (req, res
 // own requireCompanyAuth and refuses companies that have not enabled it, so a
 // customer on the ordering portal alone is unaffected by its presence.
 // ============================================================
+/**
+ * GET /api/store/:slug/po/config
+ *
+ * What the checkout should do about purchase orders. Returned rather than
+ * inferred client-side, so the form and the server can never disagree about
+ * whether a PO is required.
+ */
+router.get('/:slug/po/config', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: company } = await supabaseAdmin
+            .from('companies').select('settings').eq('id', req.company.id).maybeSingle();
+
+        const settings = poSettings(company?.settings);
+
+        let example = null;
+        if (settings.issued_by_chc) {
+            const { data: seq } = await supabaseAdmin
+                .from('company_po_sequences')
+                .select('prefix, next_number, pad_width, use_check_digit')
+                .eq('company_id', req.company.id)
+                .maybeSingle();
+            // The NEXT number, shown so the shop knows what to expect — not
+            // allocated, because looking at a checkout page must never consume
+            // a number from the sequence.
+            if (seq) {
+                example = formatPo(seq.prefix, seq.next_number, {
+                    padWidth: seq.pad_width, checkDigit: seq.use_check_digit
+                });
+            }
+        }
+
+        res.json({
+            mode: settings.mode,
+            required: settings.required,
+            issued_by_chc: settings.issued_by_chc,
+            configured: settings.issued_by_chc ? Boolean(example) : true,
+            next_example: example
+        });
+    } catch (err) {
+        console.error('PO config error:', err);
+        res.status(500).json({ error: 'Failed to load purchase order settings.' });
+    }
+});
+
 router.use('/:slug/inventory', require('./inventory-store'));
 
 module.exports = router;

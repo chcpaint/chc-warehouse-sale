@@ -258,10 +258,11 @@
                                 </div>
                             </div>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">PO Number *</label>
+                        <div id="checkout-po-wrap">
+                            <label class="block text-sm font-medium text-gray-700 mb-1" id="checkout-po-label">PO Number *</label>
                             <input type="text" id="checkout-po" required placeholder="Enter your Purchase Order number"
                                 class="w-full px-3 py-2 border rounded-lg">
+                            <p id="checkout-po-hint" class="hidden text-xs text-blue-700 mt-1"></p>
                         </div>
 
                         <!-- Online payment (pre-wired, hidden unless this account has payments enabled) -->
@@ -458,6 +459,7 @@
             <h3 class="text-2xl font-bold text-gray-800 mb-2">Order Submitted!</h3>
             <p class="text-gray-500 mb-2">Your order has been received and is being processed.</p>
             <p class="font-mono text-lg font-bold text-blue-700 mb-4" id="order-confirmation-number"></p>
+                    <p id="order-confirmation-po" class="hidden text-sm text-gray-700 mt-2"></p>
             <button onclick="closeOrderModal()" class="bg-blue-700 hover:bg-blue-800 text-white px-6 py-2 rounded-lg">Continue Shopping</button>
         </div>
     </div>
@@ -1127,7 +1129,9 @@
                 <h3 class="font-semibold text-gray-800 text-sm mb-1 leading-tight">${escapeHtml(p.name)}</h3>
                 ${p.sku ? `<p class="text-xs text-gray-400 mb-2">SKU: ${escapeHtml(p.sku)}</p>` : ''}
                 <div class="flex items-baseline gap-2 mb-3">
-                    <span class="text-xl font-bold text-gray-800">$${parseFloat(p.price).toFixed(2)}</span>
+                    ${p.price_on_request
+                        ? `<span class="text-sm font-semibold text-blue-700">${PRICE_ON_REQUEST_LABEL}</span>`
+                        : `<span class="text-xl font-bold text-gray-800">$${parseFloat(p.price).toFixed(2)}</span>`}
                     <!-- Product "was" price hidden in catalog; sale pricing/strikethrough is handled by Promotions. -->
                     ${p.case_qty > 1 ? `<span class="text-xs text-gray-400">/ case of ${p.case_qty}</span>` : ''}
                 </div>
@@ -1225,6 +1229,7 @@
                 sku: product.sku,
                 price: promo ? parseFloat(promo.promo_price) : parseFloat(product.price),
                 original_price: parseFloat(product.price),
+                price_on_request: product.price_on_request === true,
                 is_promo: !!promo,
                 quantity: 1
             });
@@ -1261,6 +1266,33 @@
         }
     }
 
+    // ------------------------------------------------------------
+    // Pricing display
+    //
+    // A product can be marked price-on-request: the branch quotes it at the
+    // moment of purchase, once it has a true cost. That is NOT the same as
+    // $0.00, and showing it as $0.00 would be a lie the customer acts on. One
+    // helper decides this everywhere so the catalogue, the cart and the order
+    // can never disagree.
+    // ------------------------------------------------------------
+    const PRICE_ON_REQUEST_LABEL = 'Contact for current pricing';
+
+    function isPriceOnRequest(item) {
+        return item && item.price_on_request === true;
+    }
+
+    /** What to show where a price would go. */
+    function priceLabel(item, amount) {
+        return isPriceOnRequest(item)
+            ? PRICE_ON_REQUEST_LABEL
+            : '$' + Number(amount).toFixed(2);
+    }
+
+    /** Cart lines that the branch still has to price. */
+    function quotedCartLines() {
+        return state.cart.filter(isPriceOnRequest);
+    }
+
     function renderCart() {
         const empty = document.getElementById('cart-empty');
         const content = document.getElementById('cart-content');
@@ -1279,7 +1311,10 @@
 
         let total = 0;
         itemsEl.innerHTML = state.cart.map(item => {
-            const subtotal = item.price * item.quantity;
+            // A quoted line contributes nothing to the running total, because
+            // nobody yet knows what it contributes. The total is labelled below
+            // so it never reads as the final figure when it is not.
+            const subtotal = isPriceOnRequest(item) ? 0 : item.price * item.quantity;
             total += subtotal;
             return `
             <div class="bg-white rounded-lg shadow-sm border p-4 flex items-center justify-between">
@@ -1287,7 +1322,9 @@
                     <h4 class="font-semibold text-gray-800">${escapeHtml(item.name)}</h4>
                     <p class="text-sm text-gray-400">${escapeHtml(item.brand)} ${item.sku ? '| ' + escapeHtml(item.sku) : ''}</p>
                     <div class="flex items-baseline gap-2 mt-1">
-                        <span class="font-bold ${item.is_promo ? 'text-red-600' : 'text-gray-800'}">$${item.price.toFixed(2)}</span>
+                        ${isPriceOnRequest(item)
+                            ? `<span class="text-sm font-semibold text-blue-700">${PRICE_ON_REQUEST_LABEL}</span>`
+                            : `<span class="font-bold ${item.is_promo ? 'text-red-600' : 'text-gray-800'}">$${item.price.toFixed(2)}</span>`}
                         ${item.is_promo ? `<span class="text-xs text-gray-400 line-through">$${item.original_price.toFixed(2)}</span><span class="text-xs text-red-500 font-semibold">PROMO</span>` : ''}
                     </div>
                 </div>
@@ -1295,12 +1332,30 @@
                     <button onclick="updateCart('${item.product_id}', ${item.quantity - 1})" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-bold">-</button>
                     <span class="w-8 text-center font-semibold">${item.quantity}</span>
                     <button onclick="updateCart('${item.product_id}', ${item.quantity + 1})" class="w-8 h-8 bg-blue-100 hover:bg-blue-200 rounded text-blue-700 font-bold">+</button>
-                    <span class="ml-3 font-bold text-gray-800 w-20 text-right">$${subtotal.toFixed(2)}</span>
+                    <span class="ml-3 font-bold text-gray-800 w-20 text-right">${isPriceOnRequest(item) ? '&mdash;' : '$' + subtotal.toFixed(2)}</span>
                 </div>
             </div>`;
         }).join('');
 
         document.getElementById('cart-total').textContent = `$${total.toFixed(2)}`;
+
+        // Say plainly that the total is not the whole bill. A customer who is
+        // not told will read the figure as final and be surprised by the invoice.
+        const quoted = quotedCartLines().length;
+        let note = document.getElementById('cart-quoted-note');
+        if (!note) {
+            const totalEl = document.getElementById('cart-total');
+            note = document.createElement('p');
+            note.id = 'cart-quoted-note';
+            note.className = 'text-xs text-blue-700 mt-1';
+            if (totalEl && totalEl.parentElement) totalEl.parentElement.appendChild(note);
+        }
+        if (note) {
+            note.textContent = quoted
+                ? `Plus ${quoted} item${quoted === 1 ? '' : 's'} your branch will price when the order is picked.`
+                : '';
+            note.classList.toggle('hidden', quoted === 0);
+        }
     }
 
     function showCheckout() {
@@ -1310,11 +1365,68 @@
             document.getElementById('checkout-location-name').textContent = state.location.name;
         }
         loadPaymentConfig();
+        loadPoConfig();
         document.getElementById('checkout-name').focus();
     }
 
     // Online payments are pre-wired but disabled by default; the section only appears
     // when the backend reports the tenant has Stripe enabled.
+    // ------------------------------------------------------------
+    // Purchase orders
+    //
+    // Three ways an account can be set up, and the checkout has to look
+    // different for each: off (no field at all), manual (the shop types their
+    // own), generated (CHC issues it when the order is placed, so there is
+    // nothing to type and nothing to get wrong).
+    // ------------------------------------------------------------
+    let poConfig = { mode: 'manual', required: true, issued_by_chc: false };
+
+    async function loadPoConfig() {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/po/config`);
+            if (resp.ok) poConfig = await resp.json();
+        } catch (e) {
+            // Leave the default: ask for a PO. Failing closed here means the
+            // worst case is a shop typing a number they did not have to, rather
+            // than an order arriving with no reference the branch expected.
+        }
+        applyPoConfig();
+    }
+
+    function applyPoConfig() {
+        const wrap  = document.getElementById('checkout-po-wrap');
+        const input = document.getElementById('checkout-po');
+        const label = document.getElementById('checkout-po-label');
+        const hint  = document.getElementById('checkout-po-hint');
+        if (!wrap || !input) return;
+
+        wrap.classList.toggle('hidden', poConfig.mode === 'off');
+        input.required = poConfig.mode === 'manual';
+
+        if (poConfig.mode === 'manual') {
+            label.textContent = 'PO Number *';
+            input.disabled = false;
+            input.placeholder = 'Enter your Purchase Order number';
+            hint.classList.add('hidden');
+            return;
+        }
+
+        if (poConfig.mode === 'generated') {
+            label.textContent = 'PO Number';
+            input.disabled = true;
+            input.value = '';
+            input.placeholder = poConfig.next_example
+                ? `${poConfig.next_example} — assigned when you submit`
+                : 'Assigned by CHC when you submit';
+            hint.textContent = poConfig.configured
+                ? 'CHC assigns this number, so it is never reused. It appears on your confirmation.'
+                : 'Purchase order numbering is not set up for this account yet — contact CHC before ordering.';
+            hint.className = poConfig.configured
+                ? 'text-xs text-blue-700 mt-1'
+                : 'text-xs text-amber-700 mt-1';
+        }
+    }
+
     let paymentConfig = { enabled: false };
     async function loadPaymentConfig() {
         try {
@@ -1389,8 +1501,12 @@
                 return;
             }
 
+            // What the shop must supply depends on how CHC set this account up.
+            // The rule comes from the server (poConfig) rather than being
+            // assumed here, so the form cannot ask for something the API will
+            // ignore, or skip something it will demand.
             const poNumber = document.getElementById('checkout-po').value.trim();
-            if (!poNumber) {
+            if (poConfig.mode === 'manual' && !poNumber) {
                 alert('Please enter a PO Number before submitting.');
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-paper-plane mr-2"></i>Submit Order';
@@ -1403,7 +1519,7 @@
                     contact_name: document.getElementById('checkout-name').value,
                     contact_email: document.getElementById('checkout-email').value,
                     contact_phone: document.getElementById('checkout-phone').value,
-                    po_number: poNumber,
+                    po_number: poConfig.mode === 'manual' ? poNumber : undefined,
                     location_id: state.location.id,
                     location: state.location.name,
                     notes: document.getElementById('checkout-notes').value,
@@ -1420,6 +1536,20 @@
 
             // Show success modal
             document.getElementById('order-confirmation-number').textContent = data.order.order_number;
+
+            // When CHC issued the PO, this is the only place the shop sees it —
+            // so it has to be here, and it has to be readable. Their accounts
+            // department will be asked for this number.
+            const poLine = document.getElementById('order-confirmation-po');
+            if (poLine) {
+                if (data.order.po_number && data.order.po_source === 'generated') {
+                    poLine.innerHTML = `Your PO number is <strong class="font-mono">${escapeHtml(data.order.po_number)}</strong>`;
+                    poLine.classList.remove('hidden');
+                } else {
+                    poLine.classList.add('hidden');
+                }
+            }
+
             document.getElementById('order-success-modal').classList.remove('hidden');
 
             // Clear cart

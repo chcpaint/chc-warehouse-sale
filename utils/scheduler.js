@@ -51,6 +51,40 @@ const FIRST_TICK_DELAY_MS = 60 * 1000;
 /** Default local hour for the digest when a company has not chosen one. */
 const DEFAULT_DIGEST_HOUR = 7;
 
+/**
+ * How many local hours after the target the digest may still go out.
+ *
+ * The first version fired only during the target hour itself, which had a
+ * narrow but silent failure: with a tick every 10 minutes and a 60-second
+ * startup delay, a deploy or restart late in that hour could push the first
+ * tick past it. The day would then be skipped with nothing to show for it, and
+ * a shop would simply not be told about its low stock — the exact failure this
+ * job exists to prevent.
+ *
+ * A catch-up window closes it. The claim already guarantees once per company
+ * per local day, so widening the window cannot produce a second email; it only
+ * gives a restarted process a chance to do the work it missed. It is bounded
+ * rather than open-ended because a "low stock this morning" digest arriving at
+ * midnight is worse than one arriving late morning.
+ */
+const DIGEST_CATCHUP_HOURS = 3;
+
+/**
+ * Should a digest targeted at `target` go out during local hour `hour`?
+ *
+ * Pure and exported so it can be checked at all 24 hours against all 24
+ * targets, rather than only at whatever hour the test suite happens to run.
+ * A schedule that is only exercised at one time of day is a schedule nobody
+ * has really tested.
+ *
+ * @returns {{due: boolean, late: boolean}}
+ */
+function digestDue(hour, target) {
+    const windowEnd = Math.min(target + DIGEST_CATCHUP_HOURS, 24);
+    const due = hour >= target && hour < windowEnd;
+    return { due, late: due && hour !== target };
+}
+
 /** Fallback zone for a company with none recorded. */
 const DEFAULT_TZ = 'America/Toronto';
 
@@ -141,7 +175,10 @@ async function lowStockDigestJob() {
 
     if (error) throw error;
 
-    const outcome = { considered: 0, due: 0, sent: 0, skipped: 0, failed: 0 };
+    // `caught_up` counts digests that went out later than their target hour.
+    // Persistently non-zero means the process is restarting around that time
+    // and is worth looking at, so it is recorded rather than hidden.
+    const outcome = { considered: 0, due: 0, sent: 0, skipped: 0, failed: 0, caught_up: 0 };
 
     for (const company of companies || []) {
         const settings = moduleSettings(company.settings, 'inventory');
@@ -153,8 +190,10 @@ async function lowStockDigestJob() {
         const { date, hour } = localNow(zone);
         const target = Number.isInteger(settings.digest_hour) ? settings.digest_hour : DEFAULT_DIGEST_HOUR;
 
-        if (hour !== target) continue;
+        const when = digestDue(hour, target);
+        if (!when.due) continue;
         outcome.due += 1;
+        if (when.late) outcome.caught_up += 1;
 
         // One run per company per local day.
         const runKey = `low_stock:${company.id}:${date}`;
@@ -245,7 +284,7 @@ function start() {
     // Never hold the process open on account of the scheduler.
     if (typeof timer.unref === 'function') timer.unref();
 
-    console.log(`Scheduler: started (tick every ${TICK_MS / 60000} min, digest default ${DEFAULT_DIGEST_HOUR}:00 local)`);
+    console.log(`Scheduler: started (tick every ${TICK_MS / 60000} min, digest default ${DEFAULT_DIGEST_HOUR}:00 local, ${DIGEST_CATCHUP_HOURS}h catch-up)`);
     return { started: true };
 }
 
@@ -260,6 +299,6 @@ function status() {
 
 module.exports = {
     start, stop, status, tick,
-    localNow, claim, lowStockDigestJob,
-    TICK_MS, DEFAULT_DIGEST_HOUR, DEFAULT_TZ
+    localNow, claim, lowStockDigestJob, digestDue,
+    TICK_MS, DEFAULT_DIGEST_HOUR, DEFAULT_TZ, DIGEST_CATCHUP_HOURS
 };

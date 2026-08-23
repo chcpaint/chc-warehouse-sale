@@ -52,14 +52,23 @@ async function sendOrderNotification(options) {
 
     const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
 
+    // Items the branch has to price at pick. Counted from the line items rather
+    // than trusting a field on the order, so the email can never disagree with
+    // the list printed beneath it.
+    const quotedCount = (order.items || []).filter(i => i.price_on_request).length;
+
     // Build line items HTML
     const itemsHtml = (order.items || []).map(item => `
         <tr>
             <td style="padding: 8px; border-bottom: 1px solid #eee;">${escHtml(item.name)}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee;">${escHtml(item.sku || '-')}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.unit_price).toFixed(2)}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.subtotal).toFixed(2)}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.price_on_request
+                ? '<span style="color:#1d4ed8;font-weight:600;">Price on request</span>'
+                : '$' + Number(item.unit_price).toFixed(2)}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.price_on_request
+                ? '<span style="color:#1d4ed8;font-weight:600;">TO PRICE</span>'
+                : '$' + Number(item.subtotal).toFixed(2)}</td>
         </tr>
     `).join('');
 
@@ -75,6 +84,14 @@ async function sendOrderNotification(options) {
 
             ${poNumber ? `<div style="margin-bottom: 15px; padding: 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;">
                 <strong style="font-size: 16px; color: #1e40af;">PO #: ${escHtml(poNumber)}</strong>
+            </div>` : ''}
+
+            ${quotedCount ? `<div style="margin-bottom: 15px; padding: 12px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px;">
+                <strong style="font-size: 15px; color: #92400e;">${quotedCount} item${quotedCount === 1 ? '' : 's'} on this order need${quotedCount === 1 ? 's' : ''} pricing</strong>
+                <p style="margin: 6px 0 0; color: #92400e; font-size: 13px;">
+                    Marked <strong>TO PRICE</strong> below. The total shown excludes them — add the price at pick,
+                    once you have a true cost.
+                </p>
             </div>` : ''}
 
             <table style="width: 100%; margin-bottom: 15px;">
@@ -110,8 +127,10 @@ async function sendOrderNotification(options) {
         </div>
     </div>`;
 
-    const textItems = (order.items || []).map(i => `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = $${Number(i.subtotal).toFixed(2)}`).join('\n');
-    const text = `New Order #${order.order_number || order.id}\nCompany: ${companyName}${poNumber ? `\nPO #: ${poNumber}` : ''}\nOrdered by: ${contactName} (${contactEmail})${location ? `\nLocation: ${location}` : ''}\n\nItems:\n${textItems}\n\nTotal: $${Number(order.total).toFixed(2)}${notes ? `\n\nNotes: ${notes}` : ''}`;
+    const textItems = (order.items || []).map(i => i.price_on_request
+        ? `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = ** TO PRICE **`
+        : `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = $${Number(i.subtotal).toFixed(2)}`).join('\n');
+    const text = `New Order #${order.order_number || order.id}${quotedCount ? `\n\n*** ${quotedCount} ITEM(S) NEED PRICING — see "TO PRICE" below. The total excludes them. ***` : ''}\nCompany: ${companyName}${poNumber ? `\nPO #: ${poNumber}` : ''}\nOrdered by: ${contactName} (${contactEmail})${location ? `\nLocation: ${location}` : ''}\n\nItems:\n${textItems}\n\nTotal: $${Number(order.total).toFixed(2)}${notes ? `\n\nNotes: ${notes}` : ''}`;
 
     try {
         await sgMail.send({
