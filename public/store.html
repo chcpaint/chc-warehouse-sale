@@ -743,6 +743,16 @@
             allLocations = data.locations || [];
             locationsLoaded = true;
 
+            // Single-location company: skip the location picker and go straight in.
+            if (allLocations.length === 1) {
+                const only = allLocations[0];
+                state.location = { id: only.id, name: only.name, restrict: only.restrict_to_category || '' };
+                const hidden = document.getElementById('selected-location-id');
+                if (hidden) hidden.value = only.id;
+                enterStore();
+                return;
+            }
+
             if (allLocations.length === 0) {
                 document.getElementById('location-search').placeholder = 'Enter your location';
                 document.getElementById('location-chevron').style.display = 'none';
