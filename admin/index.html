@@ -189,6 +189,7 @@
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Contact</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Order Email</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Inventory</th>
                                     <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                                 </tr>
                             </thead>
@@ -208,10 +209,10 @@
                             </select>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="openUploadModal()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <button onclick="openAddImport('file')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
                                 <i class="fas fa-upload mr-1"></i> Upload Catalog
                             </button>
-                            <button onclick="showModal('product-modal')" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <button onclick="openAddImport('manual')" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
                                 <i class="fas fa-plus mr-1"></i> Add Product
                             </button>
                         </div>
@@ -650,6 +651,107 @@
         </div>
     </div>
 
+    <!-- Modules Modal -->
+    <div id="modules-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-boxes-stacked text-blue-500 mr-2"></i> Modules — <span id="modules-company-name"></span></h3>
+                <button onclick="hideModal('modules-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">
+                Ordering is always on. Everything below is optional and priced separately.
+                Turning one off keeps every setting, stock level and history behind it, so it can be turned back on
+                without losing anything.
+            </p>
+            <div id="modules-list" class="space-y-3">
+                <p class="text-center text-gray-400 py-4">Loading...</p>
+            </div>
+
+            <div class="mt-5 pt-5 border-t">
+                <h4 class="font-bold text-gray-800 mb-1"><i class="fas fa-hashtag text-blue-500 mr-2"></i>Purchase orders</h4>
+                <p class="text-sm text-gray-500 mb-3">
+                    Some shops have an accounting system that issues POs, some do not, and some do not use them at all.
+                </p>
+
+                <div class="space-y-2" id="po-modes"></div>
+
+                <div id="po-sequence-setup" class="hidden mt-3 bg-gray-50 rounded-lg p-4">
+                    <div class="grid grid-cols-3 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Prefix</label>
+                            <input type="text" id="po-prefix" maxlength="8" placeholder="ASR"
+                                   oninput="previewPo()" class="px-3 py-2 border rounded-lg text-sm w-full font-mono uppercase">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Digits</label>
+                            <select id="po-pad" onchange="previewPo()" class="px-3 py-2 border rounded-lg text-sm w-full bg-white">
+                                <option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Start at</label>
+                            <input type="number" id="po-start" min="1" placeholder="1"
+                                   class="px-3 py-2 border rounded-lg text-sm w-full">
+                        </div>
+                    </div>
+
+                    <label class="flex items-center gap-2 mt-3 text-sm text-gray-700">
+                        <input type="checkbox" id="po-check-digit" checked onchange="previewPo()"
+                               class="w-4 h-4 rounded border-gray-300 text-blue-600">
+                        Add a check digit — lets a branch spot a mistyped number without looking it up
+                    </label>
+
+                    <div class="mt-3 flex items-center justify-between gap-3">
+                        <p class="text-sm text-gray-600">
+                            Next number: <span id="po-preview" class="font-mono font-semibold text-gray-900">—</span>
+                        </p>
+                        <button onclick="savePoSettings()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            Save
+                        </button>
+                    </div>
+                    <p id="po-warning" class="hidden mt-2 text-xs text-amber-700"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Repair Kits Modal -->
+    <div id="kits-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-boxes-packing text-blue-500 mr-2"></i> Repair kits — <span id="kits-company-name"></span></h3>
+                <button onclick="hideModal('kits-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">
+                A kit expenses a job's materials in one action. Kits arrive with the part numbers of
+                whoever wrote them, so each line has to be matched to this company's catalogue once
+                before the kit can be used.
+            </p>
+
+            <div id="kits-list" class="space-y-2">
+                <p class="text-center text-gray-400 py-4">Loading...</p>
+            </div>
+
+            <!-- Mapping view for one kit -->
+            <div id="kit-mapping" class="hidden mt-5 pt-5 border-t">
+                <div class="flex justify-between items-center mb-3">
+                    <h4 class="font-bold text-gray-800"><span id="kit-mapping-name"></span></h4>
+                    <div class="flex items-center gap-3">
+                        <button onclick="acceptAllExactMatches()" class="text-sm font-semibold text-green-600 hover:text-green-800">
+                            <i class="fas fa-wand-magic-sparkles mr-1"></i> Accept exact matches
+                        </button>
+                        <button onclick="closeKitMapping()" class="text-sm text-gray-400 hover:text-gray-600">Close</button>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">
+                    Suggestions are ranked, never applied on their own — matching a line to the wrong
+                    product would expense the wrong material and mis-cost every job that uses the kit.
+                </p>
+                <div id="kit-mapping-lines" class="space-y-2"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Edit Location Modal -->
     <div id="edit-location-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
@@ -770,7 +872,7 @@
     <div id="upload-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-xl font-bold">Upload Catalog</h3>
+                <h3 class="text-xl font-bold">Add / Import Products</h3>
                 <button onclick="hideModal('upload-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
             <form onsubmit="return false" class="space-y-4">
@@ -780,9 +882,26 @@
                     <p class="text-xs text-gray-400 mt-1">Each company has its own catalog &amp; pricing &mdash; pick the one you're updating.</p>
                 </div>
                 <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">How are you adding items?</label>
+                    <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
+                        <button type="button" id="src-file" onclick="setUploadSource('file')" class="px-4 py-1.5 bg-blue-700 text-white font-semibold"><i class="fas fa-upload mr-1"></i>Upload File</button>
+                        <button type="button" id="src-manual" onclick="setUploadSource('manual')" class="px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50"><i class="fas fa-keyboard mr-1"></i>Enter Manually</button>
+                    </div>
+                </div>
+                <div id="upl-file-section">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Catalog File (CSV or XLSX)</label>
-                    <input type="file" id="upload-file" accept=".csv,.xlsx,.xls" required class="w-full px-3 py-2 border rounded-lg" onchange="resetUploadState()">
-                    <p class="text-xs text-gray-400 mt-1">Columns: SKU, Item Name, AE Selling Price. Multi-tab XLSX supported (each tab name becomes the brand; the <code>itemswb11926</code> &amp; <code>lastcost</code> tabs are ignored). Rows priced $0 are skipped.</p>
+                    <input type="file" id="upload-file" accept=".csv,.xlsx,.xls" class="w-full px-3 py-2 border rounded-lg" onchange="resetUploadState()">
+                    <p class="text-xs text-gray-400 mt-1">Columns: SKU, Item Name, Brand, Category, Price, Case Qty. Multi-tab XLSX supported (tab name becomes the brand). Rows priced $0 are skipped.</p>
+                </div>
+                <div id="upl-manual-section" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Enter items &mdash; one per line</label>
+                    <textarea id="upl-manual" rows="6" oninput="resetUploadState()" placeholder="SKU | Name | Brand | Category | Price | Case Qty&#10;MMM12345 | 3M Masking Tape 24mm | 3M | Abrasives/Masking | 8.50 | 1&#10;FIB135 | Evercoat Rage Optex Ga | Evercoat | Fillers/Putty | 10.74 | 1" class="w-full px-3 py-2 border rounded-lg text-sm font-mono"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">Separate fields with <code>|</code> in this order: SKU, Name, Brand, Category, Price, Case Qty. <b>Name</b> and <b>Price</b> are required; the rest are optional.</p>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-3">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">What should this do?</label>
+                    <label class="flex items-start gap-2 mb-2 cursor-pointer"><input type="radio" name="upl-mode" id="upl-mode-merge" value="merge" checked class="mt-0.5"><span class="text-sm"><b>Add / update</b> &mdash; keep existing items; add new ones and update prices for matching SKUs.</span></label>
+                    <label class="flex items-start gap-2 cursor-pointer"><input type="radio" name="upl-mode" value="replace" class="mt-0.5"><span class="text-sm text-red-700"><b>Replace entire catalog</b> &mdash; delete ALL current items for this company first, then load only these.</span></label>
                 </div>
                 <div id="upload-progress" class="hidden">
                     <div class="bg-blue-50 rounded-lg p-4 text-center">
@@ -1253,7 +1372,7 @@
     function renderCompaniesTable() {
         const tbody = document.getElementById('companies-tbody');
         if (!admin.companies.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No companies yet. Add your first company!</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No companies yet. Add your first company!</td></tr>';
             return;
         }
         tbody.innerHTML = admin.companies.map(c => `
@@ -1268,9 +1387,12 @@
                 <td class="px-4 py-3 text-sm text-gray-500">${esc(c.contact_email || '-')}</td>
                 <td class="px-4 py-3 text-sm text-gray-500">${esc(c.email_config?.notification_email || c.contact_email || '-')}</td>
                 <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${c.is_active ? 'Active' : 'Inactive'}</span></td>
+                <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${c.settings?.inventory?.enabled ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'}">${c.settings?.inventory?.enabled ? 'Inventory on' : 'Ordering only'}</span></td>
                 <td class="px-4 py-3 text-right">
                     <button onclick="editNotificationEmail('${c.id}', '${esc(c.email_config?.notification_email || c.contact_email || '').replace(/'/g, "\\'")}')" class="text-orange-500 hover:text-orange-700 text-sm mr-3" title="Change order notification email"><i class="fas fa-envelope"></i></button>
                     <button onclick="manageManagerEmails('${c.id}', '${esc((c.email_config?.manager_emails || []).join(', ')).replace(/'/g, "\\'")}')" class="text-purple-500 hover:text-purple-700 text-sm mr-3" title="Manager notification emails (${(c.email_config?.manager_emails || []).length})"><i class="fas fa-users"></i></button>
+                    <button onclick="openModulesModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.inventory?.enabled ? 'text-green-600 hover:text-green-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Modules this customer has"><i class="fas fa-boxes-stacked"></i></button>
+                    <button onclick="openKitsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.inventory?.enabled ? 'text-indigo-500 hover:text-indigo-700' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Repair kits"><i class="fas fa-boxes-packing"></i></button>
                     <button onclick="openLocationsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-blue-500 hover:text-blue-700 text-sm mr-3" title="Manage locations"><i class="fas fa-map-marker-alt"></i></button>
                     <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
@@ -1351,6 +1473,464 @@
     function parseEmailList(raw) {
         return [...new Set((raw || '').split(/[\s,;]+/).map(e => e.trim().toLowerCase())
             .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))];
+    }
+
+    /**
+     * refinishAI Inventory is optional per company: the ordering portal works
+     * exactly as before when it is off, and the module's front end is not even
+     * downloaded. This is the only switch — everything else keys off it.
+     */
+    // ============================================================
+    // MODULES
+    //
+    // One screen for every optional part of the platform, driven by the
+    // registry the server exposes rather than a button per feature. A module
+    // that cannot be turned on says why — a dependency is off, or it has not
+    // shipped — instead of offering a switch that would do nothing.
+    // ============================================================
+
+    let modulesCompanyId = null;
+    let modulesCompanyName = '';
+
+    async function openModulesModal(companyId, companyName) {
+        modulesCompanyId = companyId;
+        modulesCompanyName = companyName;
+        document.getElementById('modules-company-name').textContent = companyName;
+        showModal('modules-modal');
+        await loadModules();
+        await loadPoSettings();
+    }
+
+    async function loadModules() {
+        const host = document.getElementById('modules-list');
+        host.innerHTML = '<p class="text-center text-gray-400 py-4">Loading...</p>';
+
+        try {
+            const resp = await adminFetch(`/companies/${modulesCompanyId}/modules`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load modules.');
+
+            host.innerHTML = (data.modules || []).map(m => {
+                const canToggle = m.enabled || m.available;
+                const why = !m.released
+                    ? 'Not shipped yet — the switch is here so it can be turned on the day it is.'
+                    : m.blocked_by.length
+                        ? `Needs ${m.blocked_by.join(' and ')} on first.`
+                        : '';
+
+                return `
+                <div class="flex items-start gap-4 border rounded-lg px-4 py-3 ${m.enabled ? 'bg-green-50 border-green-200' : 'bg-white'}">
+                    <div class="flex-1">
+                        <p class="font-semibold text-gray-800">
+                            ${esc(m.label)}
+                            ${!m.released ? '<span class="ml-2 text-xs bg-gray-100 text-gray-500 rounded px-2 py-0.5">Coming</span>' : ''}
+                        </p>
+                        <p class="text-sm text-gray-500 mt-0.5">${esc(m.blurb)}</p>
+                        ${why ? `<p class="text-xs text-amber-700 mt-1">${esc(why)}</p>` : ''}
+                    </div>
+                    <button onclick="setModule('${m.name}', ${m.enabled ? 'false' : 'true'})"
+                        ${canToggle ? '' : 'disabled'}
+                        class="text-2xl ${m.enabled ? 'text-green-600 hover:text-green-800' : canToggle ? 'text-gray-300 hover:text-gray-500' : 'text-gray-200 cursor-not-allowed'}"
+                        title="${m.enabled ? 'On — click to turn off' : canToggle ? 'Off — click to turn on' : esc(why)}">
+                        <i class="fas fa-${m.enabled ? 'toggle-on' : 'toggle-off'}"></i>
+                    </button>
+                </div>`;
+            }).join('');
+        } catch (err) {
+            host.innerHTML = `<p class="text-center text-red-600 py-4">${esc(err.message)}</p>`;
+        }
+    }
+
+    async function setModule(name, enable, confirmDependents = false) {
+        try {
+            const resp = await adminFetch(`/companies/${modulesCompanyId}/modules/${name}`, {
+                method: 'PUT',
+                body: JSON.stringify({ enabled: enable, confirm_dependents: confirmDependents })
+            });
+            const data = await resp.json();
+
+            // 409 means turning this off would stop something else. Say what,
+            // then let the operator decide.
+            if (resp.status === 409 && data.dependents) {
+                if (confirm(`${data.error}\n\nNothing is deleted — turning it back on restores everything. Continue?`)) {
+                    return setModule(name, enable, true);
+                }
+                return;
+            }
+            if (!resp.ok) { alert(data.error || 'Failed to change that module.'); return; }
+
+            await loadModules();
+            loadCompanies();
+        } catch (err) {
+            alert('Failed to change that module.');
+        }
+    }
+
+    // ============================================================
+    // REPAIR KITS
+    //
+    // Two screens in one modal: which kits a company may use, and — for one kit
+    // at a time — what each of its lines means in that company's catalogue.
+    //
+    // The mapping screen is where the real work is. A kit imported from another
+    // system carries that system's part numbers; 13 of the 17 SKUs in the kits
+    // currently loaded are not CHC numbers at all. Suggestions narrow the search
+    // and show why each candidate was offered, but a person confirms every one.
+    // ============================================================
+
+    let kitsCompanyId = null;
+    let kitMappingState = { kitId: null, lines: [] };
+
+    async function openKitsModal(companyId, companyName) {
+        kitsCompanyId = companyId;
+        document.getElementById('kits-company-name').textContent = companyName;
+        closeKitMapping();
+        showModal('kits-modal');
+        await loadKitsAdmin();
+    }
+
+    async function loadKitsAdmin() {
+        const host = document.getElementById('kits-list');
+        host.innerHTML = '<p class="text-center text-gray-400 py-4">Loading...</p>';
+
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load kits.');
+
+            const kits = data.kits || [];
+            if (kits.length === 0) {
+                host.innerHTML = '<p class="text-center text-gray-400 py-4">No kits exist yet.</p>';
+                return;
+            }
+
+            host.innerHTML = kits.map(k => `
+                <div class="flex flex-wrap items-center gap-3 border rounded-lg px-4 py-3 ${k.enabled ? 'bg-white' : 'bg-gray-50'}">
+                    <div class="flex-1 min-w-[200px]">
+                        <p class="font-semibold text-gray-800">
+                            ${esc(k.name)}
+                            ${k.is_master ? '<span class="ml-2 text-xs bg-gray-100 text-gray-500 rounded px-2 py-0.5">CHC master</span>' : '<span class="ml-2 text-xs bg-indigo-100 text-indigo-700 rounded px-2 py-0.5">Theirs</span>'}
+                        </p>
+                        <p class="text-xs text-gray-500">
+                            ${k.line_count} line${k.line_count === 1 ? '' : 's'} &middot;
+                            ${k.mapped} matched${k.excluded ? ` &middot; ${k.excluded} excluded` : ''}
+                            ${k.unmapped ? ` &middot; <span class="text-amber-700 font-semibold">${k.unmapped} to match</span>` : ''}
+                        </p>
+                    </div>
+                    <span class="px-2 py-1 rounded-full text-xs font-semibold ${k.ready ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}">
+                        ${k.ready ? 'Ready' : 'Needs mapping'}
+                    </span>
+                    <button onclick="openKitMapping('${k.id}', '${esc(k.name).replace(/'/g, "\\'")}')"
+                        class="text-blue-600 hover:text-blue-800 text-sm font-semibold">
+                        <i class="fas fa-link mr-1"></i> Map
+                    </button>
+                    ${k.is_master ? `
+                    <button onclick="toggleKitAccess('${k.id}', ${k.enabled ? 'false' : 'true'})"
+                        class="text-sm font-semibold ${k.enabled ? 'text-green-600 hover:text-green-800' : 'text-gray-400 hover:text-gray-600'}">
+                        <i class="fas fa-${k.enabled ? 'toggle-on' : 'toggle-off'} mr-1"></i>${k.enabled ? 'On' : 'Off'}
+                    </button>` : ''}
+                </div>
+            `).join('');
+        } catch (err) {
+            host.innerHTML = `<p class="text-center text-red-600 py-4">${esc(err.message)}</p>`;
+        }
+    }
+
+    async function toggleKitAccess(kitId, enable) {
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits/${kitId}/access`, {
+                method: 'PUT',
+                body: JSON.stringify({ enabled: enable })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to change kit access.'); return; }
+            loadKitsAdmin();
+        } catch (err) {
+            alert('Failed to change kit access.');
+        }
+    }
+
+    function closeKitMapping() {
+        kitMappingState = { kitId: null, lines: [] };
+        document.getElementById('kit-mapping')?.classList.add('hidden');
+    }
+
+    async function openKitMapping(kitId, kitName) {
+        kitMappingState.kitId = kitId;
+        document.getElementById('kit-mapping-name').textContent = kitName;
+        document.getElementById('kit-mapping').classList.remove('hidden');
+        document.getElementById('kit-mapping-lines').innerHTML = '<p class="text-gray-400 py-3">Loading lines...</p>';
+
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits/${kitId}/mapping`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load the mapping.');
+
+            kitMappingState.lines = data.lines || [];
+            renderKitMapping();
+            document.getElementById('kit-mapping').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (err) {
+            document.getElementById('kit-mapping-lines').innerHTML =
+                `<p class="text-red-600 py-3">${esc(err.message)}</p>`;
+        }
+    }
+
+    function renderKitMapping() {
+        const host = document.getElementById('kit-mapping-lines');
+        host.innerHTML = kitMappingState.lines.map(line => {
+            const resolved = !!line.mapped_product;
+            const excluded = line.is_excluded;
+
+            const status = excluded
+                ? '<span class="text-xs bg-gray-100 text-gray-600 rounded px-2 py-0.5">Not used here</span>'
+                : resolved
+                    ? `<span class="text-xs bg-green-100 text-green-800 rounded px-2 py-0.5">${esc(line.mapped_product.sku)}</span>`
+                    : '<span class="text-xs bg-amber-100 text-amber-800 rounded px-2 py-0.5">Unmatched</span>';
+
+            const suggestions = (line.suggestions || []).map(s => `
+                <button onclick="applyKitSuggestion('${line.kit_item_id}', '${s.product_id}')"
+                    class="text-left border rounded-lg px-3 py-2 hover:border-blue-400 hover:bg-blue-50 w-full">
+                    <span class="font-mono text-xs text-gray-700">${esc(s.sku)}</span>
+                    <span class="text-xs text-gray-500"> — ${esc(s.name)}</span>
+                    <span class="block text-xs ${s.confidence === 'exact' ? 'text-green-700' : 'text-gray-400'}">${esc(s.why)}</span>
+                </button>`).join('');
+
+            return `
+            <div class="border rounded-lg p-3 ${resolved || excluded ? 'bg-gray-50' : 'bg-amber-50 border-amber-200'}">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="flex-1 min-w-[180px]">
+                        <p class="font-mono text-sm font-semibold text-gray-800">${esc(line.kit_sku)}</p>
+                        <p class="text-xs text-gray-500">
+                            Kit quantity ${line.kit_quantity} ${esc(line.unit)}
+                            ${line.quantity_override !== null ? ` &middot; this shop uses ${line.quantity_override}` : ''}
+                        </p>
+                        ${line.mapped_product ? `<p class="text-xs text-gray-600 mt-1">&rarr; ${esc(line.mapped_product.name)}</p>` : ''}
+                    </div>
+                    ${status}
+                    ${resolved || excluded
+                        ? `<button onclick="clearKitMapping('${line.kit_item_id}')" class="text-xs text-gray-400 hover:text-red-600">Clear</button>`
+                        : `<button onclick="excludeKitLine('${line.kit_item_id}')" class="text-xs text-gray-500 hover:text-gray-700">They don't use this</button>`}
+                </div>
+                ${!resolved && !excluded && suggestions
+                    ? `<div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">${suggestions}</div>`
+                    : ''}
+                ${!resolved && !excluded && !suggestions
+                    ? '<p class="mt-2 text-xs text-gray-500">Nothing in this catalogue looks like this part number. Either it needs adding to the catalogue, or this shop does not use it.</p>'
+                    : ''}
+            </div>`;
+        }).join('');
+    }
+
+    async function saveKitMapping(kitItemId, body) {
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits/mapping/${kitItemId}`, {
+                method: 'PUT',
+                body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to save that mapping.'); return false; }
+            return true;
+        } catch (err) {
+            alert('Failed to save that mapping.');
+            return false;
+        }
+    }
+
+    async function applyKitSuggestion(kitItemId, productId) {
+        if (await saveKitMapping(kitItemId, { product_id: productId })) {
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+            loadKitsAdmin();
+        }
+    }
+
+    async function excludeKitLine(kitItemId) {
+        if (await saveKitMapping(kitItemId, { is_excluded: true })) {
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+            loadKitsAdmin();
+        }
+    }
+
+    async function clearKitMapping(kitItemId) {
+        if (await saveKitMapping(kitItemId, { product_id: null, is_excluded: false })) {
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+            loadKitsAdmin();
+        }
+    }
+
+    /**
+     * Only the lines whose top suggestion is an exact part-number match. Anything
+     * less certain stays for a person — that is the whole point of the screen.
+     */
+    async function acceptAllExactMatches() {
+        const exact = kitMappingState.lines.filter(l =>
+            !l.mapped_product && !l.is_excluded &&
+            l.suggestions?.[0]?.confidence === 'exact'
+        );
+
+        if (exact.length === 0) {
+            alert('No exact part-number matches to accept. The remaining lines need a decision.');
+            return;
+        }
+        if (!confirm(`Accept ${exact.length} exact part-number match${exact.length === 1 ? '' : 'es'}?\n\nOnly lines where the catalogue has the identical part number are included.`)) return;
+
+        try {
+            const resp = await adminFetch(`/companies/${kitsCompanyId}/inventory/kits/mapping/bulk`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mappings: exact.map(l => ({ kit_item_id: l.kit_item_id, product_id: l.suggestions[0].product_id }))
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to save those mappings.'); return; }
+            if (data.rejected?.length) {
+                alert(`${data.saved} saved. ${data.rejected.length} could not be: ${data.rejected.map(r => r.error).join('; ')}`);
+            }
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+            loadKitsAdmin();
+        } catch (err) {
+            alert('Failed to save those mappings.');
+        }
+    }
+
+    // ============================================================
+    // PURCHASE ORDERS
+    //
+    // Three modes rather than a toggle, because "we do not use POs" and "we
+    // issue our own" are different situations with different screens. Until
+    // this existed the field was mandatory for everybody, which is why one
+    // customer has the same number on four orders.
+    // ============================================================
+
+    let poState = { mode: 'manual', sequence: null, issued: 0 };
+
+    const PO_MODE_COPY = {
+        off:       ['Not used', 'No PO field at checkout. Orders go straight through.'],
+        manual:    ['The shop supplies it', 'They type their own number. It still has to be unique.'],
+        generated: ['CHC issues it', 'A number is assigned when the order is placed. Never reused.']
+    };
+
+    async function loadPoSettings() {
+        const host = document.getElementById('po-modes');
+        host.innerHTML = '<p class="text-sm text-gray-400">Loading...</p>';
+
+        try {
+            const resp = await adminFetch(`/companies/${modulesCompanyId}/po`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load purchase order settings.');
+
+            poState = { mode: data.mode, sequence: data.sequence, issued: data.issued_count || 0 };
+
+            host.innerHTML = Object.entries(PO_MODE_COPY).map(([mode, [title, blurb]]) => `
+                <label class="flex items-start gap-3 border rounded-lg px-4 py-3 cursor-pointer ${data.mode === mode ? 'bg-blue-50 border-blue-300' : 'bg-white hover:border-gray-300'}">
+                    <input type="radio" name="po-mode" value="${mode}" ${data.mode === mode ? 'checked' : ''}
+                           onchange="onPoModeChange('${mode}')" class="mt-1 w-4 h-4 text-blue-600">
+                    <span>
+                        <span class="font-semibold text-gray-800 block">${esc(title)}</span>
+                        <span class="text-sm text-gray-500">${esc(blurb)}</span>
+                    </span>
+                </label>`).join('');
+
+            if (data.needs_setup) {
+                host.innerHTML += '<p class="text-sm text-amber-700 mt-2"><i class="fas fa-triangle-exclamation mr-1"></i>' +
+                    'Set to CHC-issued but no prefix is configured — every order will be refused until one is saved.</p>';
+            }
+
+            if (data.sequence) {
+                document.getElementById('po-prefix').value = data.sequence.prefix;
+                document.getElementById('po-pad').value = String(data.sequence.pad_width);
+                document.getElementById('po-check-digit').checked = data.sequence.use_check_digit;
+                document.getElementById('po-start').value = '';
+                document.getElementById('po-start').placeholder = String(data.sequence.next_number);
+            }
+
+            onPoModeChange(data.mode, true);
+        } catch (err) {
+            host.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
+        }
+    }
+
+    function onPoModeChange(mode, initial) {
+        document.getElementById('po-sequence-setup').classList.toggle('hidden', mode !== 'generated');
+        previewPo();
+
+        // Switching to off or manual takes effect immediately; there is nothing
+        // further to configure, so making the operator press Save as well would
+        // just be a step to forget.
+        if (!initial && mode !== 'generated') savePoSettings(mode);
+    }
+
+    function previewPo() {
+        const prefix = (document.getElementById('po-prefix')?.value || '').trim().toUpperCase();
+        const pad = Number(document.getElementById('po-pad')?.value || 5);
+        const withCheck = document.getElementById('po-check-digit')?.checked;
+        const out = document.getElementById('po-preview');
+        const warn = document.getElementById('po-warning');
+        if (!out) return;
+
+        if (!/^[A-Z][A-Z0-9]{1,7}$/.test(prefix)) {
+            out.textContent = '—';
+            return;
+        }
+
+        // Mirrors utils/po.js. Preview only — the number that gets issued is
+        // always computed server-side, so a drift here can mislead but cannot
+        // produce a wrong PO.
+        const start = Number(document.getElementById('po-start')?.value)
+            || poState.sequence?.next_number || 1;
+        let digits = '';
+        for (const ch of prefix) digits += (ch >= 'A' && ch <= 'Z') ? String(ch.charCodeAt(0) - 64) : ch;
+        const body = String(start).padStart(pad, '0');
+        digits += body;
+
+        let sum = 0, dbl = true;
+        for (let i = digits.length - 1; i >= 0; i--) {
+            let d = digits.charCodeAt(i) - 48;
+            if (d < 0 || d > 9) continue;
+            if (dbl) { d *= 2; if (d > 9) d -= 9; }
+            dbl = !dbl;
+            sum += d;
+        }
+        const cd = (10 - (sum % 10)) % 10;
+        out.textContent = withCheck ? `${prefix}-${body}-${cd}` : `${prefix}-${body}`;
+
+        // The counter only ever moves forward. Say so before they save, not after.
+        const current = poState.sequence?.next_number;
+        const typedStart = Number(document.getElementById('po-start')?.value);
+        if (warn) {
+            if (current && typedStart && typedStart < current) {
+                warn.textContent = `The counter is already at ${current}. It can move forward but not back — going back would reissue numbers that are on orders already.`;
+                warn.classList.remove('hidden');
+            } else {
+                warn.classList.add('hidden');
+            }
+        }
+    }
+
+    async function savePoSettings(forcedMode) {
+        const mode = forcedMode
+            || document.querySelector('input[name="po-mode"]:checked')?.value
+            || 'manual';
+
+        const payload = { mode };
+        if (mode === 'generated') {
+            payload.prefix = (document.getElementById('po-prefix').value || '').trim().toUpperCase();
+            payload.pad_width = Number(document.getElementById('po-pad').value);
+            payload.use_check_digit = document.getElementById('po-check-digit').checked;
+            const start = document.getElementById('po-start').value;
+            if (start) payload.start_at = Number(start);
+        }
+
+        try {
+            const resp = await adminFetch(`/companies/${modulesCompanyId}/po`, {
+                method: 'PUT', body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to save purchase order settings.'); return; }
+            if (mode === 'generated') alert(data.message);
+            await loadPoSettings();
+        } catch (err) {
+            alert('Failed to save purchase order settings.');
+        }
     }
 
     async function manageManagerEmails(companyId, currentCsv) {
@@ -1871,8 +2451,45 @@
         const up = document.getElementById('upload-company');
         if (sel && up && sel.value) up.value = sel.value;
         const f = document.getElementById('upload-file'); if (f) f.value = '';
+        const m = document.getElementById('upl-manual'); if (m) m.value = '';
+        const mm = document.getElementById('upl-mode-merge'); if (mm) mm.checked = true;
         resetUploadState();
         showModal('upload-modal');
+    }
+
+    let uploadSource = 'file';
+    function openAddImport(source) {
+        openUploadModal();
+        setUploadSource(source || 'file');
+    }
+    function setUploadSource(src) {
+        uploadSource = src;
+        const active = 'px-4 py-1.5 bg-blue-700 text-white font-semibold';
+        const idle = 'px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50';
+        const bf = document.getElementById('src-file'), bm = document.getElementById('src-manual');
+        if (bf) bf.className = src === 'file' ? active : idle;
+        if (bm) bm.className = src === 'manual' ? active : idle;
+        const fs = document.getElementById('upl-file-section'), ms = document.getElementById('upl-manual-section');
+        if (fs) fs.classList.toggle('hidden', src !== 'file');
+        if (ms) ms.classList.toggle('hidden', src !== 'manual');
+        resetUploadState();
+    }
+    function getUploadMode() {
+        const r = document.querySelector('input[name="upl-mode"]:checked');
+        return r ? r.value : 'merge';
+    }
+    function buildManualCsv() {
+        const lines = (document.getElementById('upl-manual').value || '').split('\n').map(l => l.trim()).filter(Boolean);
+        const esc = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+        const out = ['sku,name,brand,category,price,case_qty'];
+        let bad = 0;
+        for (const ln of lines) {
+            const p = ln.split('|').map(x => x.trim());
+            const sku = p[0]||'', name = p[1]||'', brand = p[2]||'', category = p[3]||'', price = p[4]||'', cq = p[5]||'';
+            if (!name || !price) { bad++; continue; }
+            out.push([sku,name,brand,category,price,cq].map(esc).join(','));
+        }
+        return { csv: out.length > 1 ? out.join('\n') : null, rows: out.length - 1, bad };
     }
 
     function resetUploadState() {
@@ -1890,8 +2507,17 @@
 
     async function catalogSend(dryRun) {
         const companyId = document.getElementById('upload-company').value;
-        const file = document.getElementById('upload-file').files[0];
-        if (!companyId || !file) { alert('Select a company and a file.'); return null; }
+        if (!companyId) { alert('Select a company.'); return null; }
+        let file;
+        if (uploadSource === 'manual') {
+            const m = buildManualCsv();
+            if (!m.csv) { alert('Enter at least one item (Name and Price are required).'); return null; }
+            if (m.bad && !confirm(m.bad + ' line(s) are missing a Name or Price and will be skipped. Continue?')) return null;
+            file = new File([m.csv], 'manual-entry.csv', { type: 'text/csv' });
+        } else {
+            file = document.getElementById('upload-file').files[0];
+            if (!file) { alert('Choose a file to upload.'); return null; }
+        }
 
         document.getElementById('upload-progress').classList.remove('hidden');
         document.getElementById('upload-preview-btn').disabled = true;
@@ -1899,6 +2525,7 @@
 
         const fd = new FormData();
         fd.append('catalog', file);
+        fd.append('mode', getUploadMode());
         if (dryRun) fd.append('dry_run', '1');
 
         try {
@@ -1929,8 +2556,12 @@
         }
         const bg = isPreview ? 'bg-blue-50' : 'bg-green-50';
         const title = isPreview ? 'Preview &mdash; nothing written yet' : 'Import complete';
+        const replaceNote = (d.mode === 'replace')
+            ? `<p class="text-sm font-semibold text-red-700 mt-1"><i class="fas fa-triangle-exclamation mr-1"></i>${isPreview ? 'Will delete' : 'Deleted'} <b>${d.deleted || 0}</b> existing item(s) before loading this list.</p>`
+            : '';
         return `<div class="${bg} p-4 rounded-lg">
             <p class="font-semibold text-gray-800">${title}</p>
+            ${replaceNote}
             <p class="text-sm text-gray-700 mt-1">New: <b>${d.inserted}</b> &middot; Updated: <b>${d.updated}</b> &middot; Price changes: <b>${d.price_changes}</b> &middot; Skipped ($0): <b>${d.skipped}</b> &middot; Errors: <b>${d.errors}</b></p>
             ${sample}
         </div>`;
@@ -1945,7 +2576,13 @@
     }
 
     async function catalogApply() {
-        if (!confirm('Apply these changes to the selected company catalog?')) return;
+        const mode = getUploadMode();
+        const companyName = (document.getElementById('upload-company').selectedOptions[0] || {}).text || 'this company';
+        let msg = 'Apply these changes to ' + companyName + "'s catalog?";
+        if (mode === 'replace') {
+            msg = 'REPLACE the ENTIRE catalog for ' + companyName + '?\n\nThis permanently DELETES all current items for this company and loads only the new list. This cannot be undone.';
+        }
+        if (!confirm(msg)) return;
         const d = await catalogSend(false);
         if (!d) return;
         showUploadResult(uploadSummaryHtml(d, false));

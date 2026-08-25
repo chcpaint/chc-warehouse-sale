@@ -16,6 +16,17 @@ const router = express.Router();
 router.use(requireAdminAuth);
 
 // ============================================================
+// refinishAI INVENTORY (optional module, per company)
+//
+// Mounted here rather than in server.js so the whole module can be added or
+// removed without touching application bootstrap. The sub-router re-applies
+// requireCompanyAccess itself.
+// ============================================================
+router.use('/companies/:companyId/inventory', require('./inventory-admin'));
+router.use('/companies/:companyId/modules', require('./modules-admin'));
+router.use('/companies/:companyId/po', require('./po-admin'));
+
+// ============================================================
 // DASHBOARD STATS
 // ============================================================
 
@@ -86,7 +97,7 @@ router.get('/companies', async (req, res) => {
     try {
         let query = supabaseAdmin
             .from('companies')
-            .select('id, name, slug, logo_url, contact_email, email_config, is_active, created_at, updated_at')
+            .select('id, name, slug, logo_url, contact_email, email_config, settings, is_active, created_at, updated_at')
             .order('name');
 
         if (req.admin.role !== 'super_admin') {
@@ -850,6 +861,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         const ext = req.file.originalname.split('.').pop().toLowerCase();
         // Preview mode (dry run): analyze and report, write nothing.
         const dryRun = ['1', 'true', 'yes'].includes(String(req.body.dry_run || req.query.preview || '').toLowerCase());
+        const mode = String(req.body.mode || 'merge').toLowerCase() === 'replace' ? 'replace' : 'merge';
 
         let rows = [];
         const errors = [];
@@ -883,6 +895,15 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         // Upsert products (by SKU if available, otherwise insert new)
         let inserted = 0, updated = 0, priceChanges = 0, skipped = 0;
         const sampleChanges = [];
+
+        // Replace mode: wipe the company's existing catalog first (product_barcodes cascade on delete).
+        let deleted = 0;
+        if (mode === 'replace') {
+            const { count } = await supabaseAdmin.from('products')
+                .select('id', { count: 'exact', head: true }).eq('company_id', companyId);
+            deleted = count || 0;
+            if (!dryRun) await supabaseAdmin.from('products').delete().eq('company_id', companyId);
+        }
 
         for (const row of normalizedRows) {
             row.company_id = companyId;
@@ -934,7 +955,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
                 .single();
 
             await logAction(req.admin.id, 'catalog_uploaded', 'company', companyId, {
-                filename: req.file.originalname, inserted, updated, price_changes: priceChanges, skipped, errors: errors.length
+                filename: req.file.originalname, mode, deleted, inserted, updated, price_changes: priceChanges, skipped, errors: errors.length
             }, req.ip);
         }
 
@@ -947,7 +968,9 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             skipped,
             errors: errors.length,
             error_details: errors.slice(0, 20),
-            sample_changes: sampleChanges
+            sample_changes: sampleChanges,
+            mode,
+            deleted
         });
 
     } catch (err) {
