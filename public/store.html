@@ -47,7 +47,7 @@
 
             <div id="login-error" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm"></div>
 
-            <!-- Step 1: Access code -->
+            <!-- Step 1: Access code (shared company login) -->
             <form id="login-form" class="space-y-4">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Access Code</label>
@@ -58,6 +58,31 @@
                     class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors">
                     <span id="login-btn-text">Continue</span>
                     <i id="login-spinner" class="fas fa-spinner fa-spin ml-2 hidden"></i>
+                </button>
+                <button type="button" id="switch-to-user" onclick="showUserLogin()" class="hidden w-full text-sm text-blue-600 hover:text-blue-800">
+                    Sign in with your own account instead
+                </button>
+            </form>
+
+            <!-- Step 1 (alt): Individual user login (shown when the company has Customer users on) -->
+            <form id="user-login-form" class="space-y-4 hidden">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <input type="email" id="user-email" placeholder="you@example.com"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-lg" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                    <input type="password" id="user-password" placeholder="Your password"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-lg" required>
+                </div>
+                <button type="submit" id="user-login-btn"
+                    class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors">
+                    <span id="user-login-btn-text">Sign in</span>
+                    <i id="user-login-spinner" class="fas fa-spinner fa-spin ml-2 hidden"></i>
+                </button>
+                <button type="button" id="switch-to-code" onclick="showCodeLogin()" class="hidden w-full text-sm text-gray-500 hover:text-gray-700">
+                    Use the shared company access code instead
                 </button>
             </form>
 
@@ -106,6 +131,10 @@
 
                     <!-- Cart & User Info -->
                     <div class="flex items-center gap-4">
+                        <span id="header-user-name" class="hidden sm:inline text-sm text-gray-500"></span>
+                        <button id="team-btn" onclick="openTeam()" class="hidden text-gray-500 hover:text-blue-700 text-sm" title="Manage your team">
+                            <i class="fas fa-user-group"></i> Team
+                        </button>
                         <button onclick="showTab('cart')" class="relative bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-2 rounded-lg transition-colors">
                             <i class="fas fa-shopping-cart"></i>
                             <span id="cart-badge" class="hidden absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center cart-count">0</span>
@@ -464,6 +493,35 @@
         </div>
     </div>
 
+    <!-- Team management (company owner) -->
+    <div id="team-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-1">
+                <h3 class="text-xl font-bold"><i class="fas fa-user-group text-blue-700 mr-2"></i>Your team</h3>
+                <button onclick="document.getElementById('team-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">Invite the people who order for you. Each gets an email to set their own password, and every order shows who placed it.</p>
+            <form onsubmit="inviteTeamMember(event)" class="grid grid-cols-1 md:grid-cols-4 gap-2 items-end bg-gray-50 border rounded-lg p-3 mb-4">
+                <div class="md:col-span-1"><label class="block text-xs font-medium text-gray-600 mb-1">Name *</label>
+                    <input type="text" id="team-name" required class="w-full px-2 py-2 border rounded"></div>
+                <div class="md:col-span-2"><label class="block text-xs font-medium text-gray-600 mb-1">Email *</label>
+                    <input type="email" id="team-email" required class="w-full px-2 py-2 border rounded"></div>
+                <button type="submit" class="md:col-span-1 bg-blue-700 hover:bg-blue-800 text-white font-semibold py-2 rounded">Invite</button>
+            </form>
+            <div class="border rounded-lg overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 border-b"><tr>
+                        <th class="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Name</th>
+                        <th class="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Email</th>
+                        <th class="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                        <th class="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                    </tr></thead>
+                    <tbody id="team-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <script>
     // ============================================================
     // STATE
@@ -471,6 +529,7 @@
     let state = {
         token: null,
         company: null,
+        companyUser: null,
         location: null,
         slug: null,
         products: [],
@@ -522,6 +581,8 @@
         const savedToken = sessionStorage.getItem('chc_token');
         const savedCompany = sessionStorage.getItem('chc_company');
         const savedLocation = sessionStorage.getItem('chc_location');
+        const savedUser = sessionStorage.getItem('chc_user');
+        if (savedUser) { try { state.companyUser = JSON.parse(savedUser); } catch (e) {} }
 
         if (savedToken && savedCompany && savedLocation) {
             state.token = savedToken;
@@ -581,6 +642,7 @@
                 logo.style.display = 'block';
                 document.getElementById('logo-divider').style.display = 'block';
             }
+            configureLoginMode((company.settings && company.settings.users) || {});
         } catch (err) {
             console.error('Failed to load company info:', err);
         }
@@ -633,6 +695,106 @@
         }
     });
 
+    // ---- Individual (customer-user) login, when the module is on ----
+    function configureLoginMode(cfg) {
+        const codeForm = document.getElementById('login-form');
+        const userForm = document.getElementById('user-login-form');
+        const sub = document.querySelector('#login-company-name + p');
+        if (cfg && cfg.enabled) {
+            document.getElementById('switch-to-user').classList.remove('hidden');
+            codeForm.classList.add('hidden');
+            userForm.classList.remove('hidden');
+            if (cfg.require_individual_login === false) {
+                document.getElementById('switch-to-code').classList.remove('hidden');
+            } else {
+                document.getElementById('switch-to-code').classList.add('hidden');
+            }
+            if (sub) sub.textContent = 'Sign in with your account to continue';
+        } else {
+            userForm.classList.add('hidden');
+            codeForm.classList.remove('hidden');
+            document.getElementById('switch-to-user').classList.add('hidden');
+        }
+    }
+    function showUserLogin() {
+        document.getElementById('login-form').classList.add('hidden');
+        document.getElementById('user-login-form').classList.remove('hidden');
+        document.getElementById('login-error').classList.add('hidden');
+    }
+    function showCodeLogin() {
+        document.getElementById('user-login-form').classList.add('hidden');
+        document.getElementById('login-form').classList.remove('hidden');
+        document.getElementById('login-error').classList.add('hidden');
+    }
+
+    document.getElementById('user-login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('user-email').value;
+        const password = document.getElementById('user-password').value;
+        const errorEl = document.getElementById('login-error');
+        const spinner = document.getElementById('user-login-spinner');
+        const btnText = document.getElementById('user-login-btn-text');
+        const btn = document.getElementById('user-login-btn');
+        errorEl.classList.add('hidden'); spinner.classList.remove('hidden'); btnText.textContent = 'Signing in...'; btn.disabled = true;
+        try {
+            const resp = await fetch(`${API_BASE}/auth/company-user-login`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug: state.slug, email, password })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { errorEl.textContent = data.error || 'Sign in failed.'; errorEl.classList.remove('hidden'); return; }
+            state.token = data.token; state.company = data.company; state.companyUser = data.user;
+            sessionStorage.setItem('chc_token', data.token);
+            sessionStorage.setItem('chc_company', JSON.stringify(data.company));
+            sessionStorage.setItem('chc_user', JSON.stringify(data.user));
+            track('login');
+            promptLocationSelection();
+        } catch (err) {
+            errorEl.textContent = 'Connection error. Please try again.'; errorEl.classList.remove('hidden');
+        } finally {
+            spinner.classList.add('hidden'); btnText.textContent = 'Sign in'; btn.disabled = false;
+        }
+    });
+
+    // ---- Owner team management ----
+    function teamEsc(s){ const d=document.createElement('div'); d.textContent=(s==null?'':s); return d.innerHTML; }
+    async function openTeam(){ document.getElementById('team-modal').classList.remove('hidden'); loadTeam(); }
+    async function loadTeam(){
+        try{
+            const resp = await apiFetch(`/store/${state.slug}/users`);
+            const data = await resp.json();
+            if(!resp.ok){ alert(data.error||'Could not load your team.'); return; }
+            const badge = { active:'bg-green-100 text-green-800', invited:'bg-yellow-100 text-yellow-800', disabled:'bg-gray-200 text-gray-600' };
+            const tbody = document.getElementById('team-tbody');
+            tbody.innerHTML = (data.users||[]).map(u=>{
+                const self = state.companyUser && u.id===state.companyUser.id;
+                const acts=[];
+                if(u.status==='invited') acts.push(`<button onclick="resendTeam('${u.id}')" class="text-blue-600 hover:text-blue-800" title="Resend invite"><i class="fas fa-paper-plane"></i></button>`);
+                if(u.status==='active') acts.push(`<button onclick="resendTeam('${u.id}')" class="text-orange-500 hover:text-orange-700" title="Send password-reset link"><i class="fas fa-key"></i></button>`);
+                if(!self) acts.push(u.is_active
+                    ? `<button onclick="setTeamActive('${u.id}',false)" class="text-red-500 hover:text-red-700" title="Deactivate"><i class="fas fa-user-slash"></i></button>`
+                    : `<button onclick="setTeamActive('${u.id}',true)" class="text-green-600 hover:text-green-800" title="Reactivate"><i class="fas fa-user-check"></i></button>`);
+                return `<tr class="border-b hover:bg-gray-50"><td class="px-3 py-2 font-medium">${teamEsc(u.name)}${self?' <span class="text-xs text-gray-400">(you)</span>':''}</td><td class="px-3 py-2 text-gray-500">${teamEsc(u.email)}</td><td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-xs font-semibold ${badge[u.status]||''}">${u.status}</span></td><td class="px-3 py-2 space-x-3 text-gray-400">${acts.join('')||'—'}</td></tr>`;
+            }).join('') || '<tr><td colspan="4" class="px-3 py-6 text-center text-gray-400">No team members yet — invite your first above.</td></tr>';
+        }catch(err){ console.error('Team load failed', err); }
+    }
+    async function inviteTeamMember(e){
+        e.preventDefault();
+        try{
+            const resp = await apiFetch(`/store/${state.slug}/users`, { method:'POST', body: JSON.stringify({ name: document.getElementById('team-name').value, email: document.getElementById('team-email').value }) });
+            const d = await resp.json();
+            if(resp.ok){ document.getElementById('team-name').value=''; document.getElementById('team-email').value=''; loadTeam(); }
+            else alert(d.error||'Failed to invite.');
+        }catch(err){ alert('Failed to invite.'); }
+    }
+    async function resendTeam(id){
+        try{ const resp = await apiFetch(`/store/${state.slug}/users/${id}/resend-invite`, { method:'POST' }); const d=await resp.json(); alert(resp.ok?(d.message||'Invite sent.'):(d.error||'Failed.')); }catch(err){ alert('Failed to send invite.'); }
+    }
+    async function setTeamActive(id, active){
+        if(!active && !confirm('Deactivate this user?')) return;
+        try{ const resp = await apiFetch(`/store/${state.slug}/users/${id}`, { method:'PUT', body: JSON.stringify({ is_active: active }) }); const d=await resp.json(); if(resp.ok) loadTeam(); else alert(d.error||'Failed.'); }catch(err){ alert('Failed to update user.'); }
+    }
+
     // ============================================================
     // LOCATION-BOUND LOGIN (step 2)
     // ============================================================
@@ -672,9 +834,11 @@
         sessionStorage.removeItem('chc_token');
         sessionStorage.removeItem('chc_company');
         sessionStorage.removeItem('chc_location');
+        sessionStorage.removeItem('chc_user');
         state.token = null;
         state.company = null;
         state.location = null;
+        state.companyUser = null;
         state.cart = [];
         document.getElementById('app').classList.add('hidden');
         document.getElementById('login-screen').classList.remove('hidden');
@@ -718,6 +882,20 @@
         // Reflect the location chosen at login in the checkout form
         if (state.location && document.getElementById('checkout-location-name')) {
             document.getElementById('checkout-location-name').textContent = state.location.name;
+        }
+
+        // When signed in as an individual, the order is theirs — prefill and lock
+        // the contact so "who ordered" is always accurate, and reveal the owner's
+        // Team button.
+        if (state.companyUser) {
+            const nm = document.getElementById('checkout-name');
+            const em = document.getElementById('checkout-email');
+            if (nm) { nm.value = state.companyUser.name || ''; nm.readOnly = true; }
+            if (em) { em.value = state.companyUser.email || ''; em.readOnly = true; }
+            const greet = document.getElementById('header-user-name');
+            if (greet) greet.textContent = state.companyUser.name;
+            const teamBtn = document.getElementById('team-btn');
+            if (teamBtn) teamBtn.classList.toggle('hidden', state.companyUser.role !== 'owner');
         }
 
         // Inventory is opt-in per company; initInventory() reveals the tab only

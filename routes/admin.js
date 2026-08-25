@@ -4,16 +4,35 @@ const csv = require('csv-parser');
 const XLSX = require('xlsx');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
-const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess } = require('../middleware/auth');
+const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requireOrderAccess } = require('../middleware/auth');
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed } = require('../utils/email');
+const { scopeOrders, orderInScope } = require('../utils/order-scope');
 
 const router = express.Router();
 
 // All admin routes require admin authentication
 router.use(requireAdminAuth);
+
+// Order-desk accounts are fenced to order-management endpoints only. This runs
+// before every route below, so isolation holds even if a request bypasses the
+// UI. Full admins pass straight through.
+router.use(restrictOrderDesk);
+
+// CHC staff accounts (super-admin only) and per-company customer users.
+router.use('/users', require('./admin-users'));
+router.use('/companies/:companyId/users', require('./company-users-admin'));
+
+// Identity bootstrap — lets the console (including an order-desk account) render
+// the right view without exposing anything the account cannot already see.
+router.get('/whoami', (req, res) => {
+    res.json({
+        id: req.admin.id, name: req.admin.name, email: req.admin.email,
+        role: req.admin.role, company_id: req.admin.company_id, branch_id: req.admin.branch_id
+    });
+});
 
 // ============================================================
 // refinishAI INVENTORY (optional module, per company)
@@ -574,7 +593,7 @@ router.delete('/branches/:id', requireSuperAdmin, async (req, res) => {
  * A CHC employee uploads an invoice for an order; stores it privately and
  * emails the same recipients as the order confirmation.
  */
-router.post('/companies/:companyId/orders/:orderId/invoice', requireCompanyAccess, invoiceUpload.single('invoice'), async (req, res) => {
+router.post('/companies/:companyId/orders/:orderId/invoice', requireOrderAccess, invoiceUpload.single('invoice'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No invoice file provided.' });
         const { companyId, orderId } = req.params;
@@ -622,7 +641,7 @@ router.post('/companies/:companyId/orders/:orderId/invoice', requireCompanyAcces
  * GET /api/admin/companies/:companyId/orders/:orderId/invoice
  * Short-lived signed URL so branch staff can view/verify the uploaded invoice.
  */
-router.get('/companies/:companyId/orders/:orderId/invoice', requireCompanyAccess, async (req, res) => {
+router.get('/companies/:companyId/orders/:orderId/invoice', requireOrderAccess, async (req, res) => {
     try {
         const { companyId, orderId } = req.params;
         const { data: order, error } = await supabaseAdmin
@@ -1043,83 +1062,15 @@ router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req
 });
 
 // ============================================================
-// COMPANY MODULES (optional features toggled per company via settings JSON)
+// COMPANY MODULES + PURCHASE ORDERS
+// ------------------------------------------------------------
+// The module on/off switch (GET/PUT .../modules[/:name]) and the PO settings
+// (GET/PUT .../po) are served by the mounted sub-routers near the top of this
+// file:  require('./modules-admin')  and  require('./po-admin'), which are
+// driven by the registries in utils/modules.js and utils/po.js. The earlier
+// inline copies of those routes were removed to keep a single source of truth
+// (they were shadowed by the mounts and never executed).
 // ============================================================
-const MODULE_REGISTRY = [
-    { name: 'inventory', label: 'Inventory', blurb: 'Per-location stock, scan-to-consume, and auto replenishment orders.', released: false, requires: [] },
-    { name: 'kits', label: 'Repair Kits', blurb: 'Prebuilt, adjustable repair kits customers can add to an order.', released: false, requires: [] }
-];
-
-router.get('/companies/:companyId/modules', requireCompanyAccess, async (req, res) => {
-    try {
-        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', req.params.companyId).single();
-        const settings = company?.settings || {};
-        const modules = MODULE_REGISTRY.map(m => {
-            const missing = (m.requires || []).filter(r => !(settings[r] && settings[r].enabled));
-            return {
-                name: m.name, label: m.label, blurb: m.blurb, released: m.released,
-                enabled: !!(settings[m.name] && settings[m.name].enabled),
-                available: missing.length === 0,
-                blocked_by: missing.map(r => (MODULE_REGISTRY.find(x => x.name === r) || {}).label || r)
-            };
-        });
-        res.json({ modules });
-    } catch (err) { console.error('Modules load error:', err); res.status(500).json({ error: 'Failed to load modules.' }); }
-});
-
-router.put('/companies/:companyId/modules/:name', requireCompanyAccess, async (req, res) => {
-    try {
-        const { companyId, name } = req.params;
-        const enable = req.body.enabled === true || req.body.enabled === 'true';
-        const mod = MODULE_REGISTRY.find(m => m.name === name);
-        if (!mod) return res.status(404).json({ error: 'Unknown module.' });
-        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', companyId).single();
-        const settings = company?.settings || {};
-        if (enable) {
-            const missing = (mod.requires || []).filter(r => !(settings[r] && settings[r].enabled));
-            if (missing.length) return res.status(409).json({ error: `Turn on ${missing.join(' and ')} first.`, dependents: missing });
-        } else {
-            const dependents = MODULE_REGISTRY.filter(m => (m.requires || []).includes(name) && settings[m.name] && settings[m.name].enabled).map(m => m.label);
-            if (dependents.length && !(req.body.confirm_dependents === true || req.body.confirm_dependents === 'true')) {
-                return res.status(409).json({ error: `${dependents.join(' and ')} depend on ${mod.label} and will turn off too.`, dependents });
-            }
-            MODULE_REGISTRY.filter(m => (m.requires || []).includes(name)).forEach(m => { if (settings[m.name]) settings[m.name].enabled = false; });
-        }
-        settings[name] = Object.assign({}, settings[name], { enabled: enable });
-        await supabaseAdmin.from('companies').update({ settings }).eq('id', companyId);
-        await logAction(req.admin.id, 'module_toggled', 'company', companyId, { module: name, enabled: enable }, req.ip);
-        res.json({ ok: true, enabled: enable });
-    } catch (err) { console.error('Module toggle error:', err); res.status(500).json({ error: 'Failed to change that module.' }); }
-});
-
-router.get('/companies/:companyId/po', requireCompanyAccess, async (req, res) => {
-    try {
-        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', req.params.companyId).single();
-        const po = (company?.settings || {}).po || {};
-        const mode = ['off', 'manual', 'generated'].includes(po.mode) ? po.mode : 'manual';
-        res.json({ mode, sequence: po.sequence || null, prefix: po.prefix || '', pad_width: po.pad_width || 5, use_check_digit: !!po.use_check_digit, issued_count: po.issued_count || 0, needs_setup: mode === 'generated' && !po.prefix });
-    } catch (err) { console.error('PO load error:', err); res.status(500).json({ error: 'Failed to load purchase order settings.' }); }
-});
-
-router.put('/companies/:companyId/po', requireCompanyAccess, async (req, res) => {
-    try {
-        const { companyId } = req.params;
-        const mode = ['off', 'manual', 'generated'].includes(req.body.mode) ? req.body.mode : 'manual';
-        const prefix = String(req.body.prefix || '').trim().toUpperCase().slice(0, 8);
-        if (mode === 'generated' && !prefix) return res.status(400).json({ error: 'A prefix is required for CHC-issued PO numbers.' });
-        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', companyId).single();
-        const settings = company?.settings || {};
-        settings.po = Object.assign({}, settings.po, {
-            mode, prefix,
-            pad_width: Number(req.body.pad_width) || (settings.po && settings.po.pad_width) || 5,
-            use_check_digit: req.body.use_check_digit === true || req.body.use_check_digit === 'true',
-            sequence: (settings.po && settings.po.sequence) || Number(req.body.start_at) || 0
-        });
-        await supabaseAdmin.from('companies').update({ settings }).eq('id', companyId);
-        await logAction(req.admin.id, 'po_settings_updated', 'company', companyId, { mode, prefix }, req.ip);
-        res.json({ ok: true, mode, prefix, message: mode === 'generated' ? `CHC-issued PO numbers enabled with prefix ${prefix}.` : 'Purchase order settings saved.' });
-    } catch (err) { console.error('PO save error:', err); res.status(500).json({ error: 'Failed to save purchase order settings.' }); }
-});
 
 // ============================================================
 // PROMOTIONS MANAGEMENT
@@ -1290,11 +1241,7 @@ router.get('/orders', async (req, res) => {
             .select(`*, companies (id, name), company_locations (id, name, supplier_branches (id, name))`, { count: 'exact' })
             .order('created_at', { ascending: false });
 
-        if (req.admin.role !== 'super_admin') {
-            query = query.eq('company_id', req.admin.company_id);
-        } else if (company_id) {
-            query = query.eq('company_id', company_id);
-        }
+        query = await scopeOrders(query, req, { companyId: company_id });
 
         if (status) query = query.eq('status', status);
         if (location_id) query = query.eq('location_id', location_id);
@@ -1327,8 +1274,7 @@ router.get('/orders/export', async (req, res) => {
             .select('order_number, created_at, company_name, location, po_number, contact_name, contact_email, contact_phone, status, subtotal, total, items, companies(name), company_locations(name)')
             .order('created_at', { ascending: false });
 
-        if (req.admin.role !== 'super_admin') query = query.eq('company_id', req.admin.company_id);
-        else if (company_id) query = query.eq('company_id', company_id);
+        query = await scopeOrders(query, req, { companyId: company_id });
         if (status) query = query.eq('status', status);
         if (location_id) query = query.eq('location_id', location_id);
         if (from_date) query = query.gte('created_at', from_date);
@@ -1371,8 +1317,7 @@ router.get('/reports/by-location', async (req, res) => {
             .from('orders')
             .select('total, location, location_id, company_locations(name)');
 
-        if (req.admin.role !== 'super_admin') query = query.eq('company_id', req.admin.company_id);
-        else if (company_id) query = query.eq('company_id', company_id);
+        query = await scopeOrders(query, req, { companyId: company_id });
         if (status) query = query.eq('status', status);
         if (from_date) query = query.gte('created_at', from_date);
         if (to_date) query = query.lte('created_at', to_date);
@@ -1412,11 +1357,7 @@ router.get('/reports/orders', async (req, res) => {
             .select('id, order_number, contact_name, po_number, status, total, location, location_id, company_id, created_at, items, companies (id, name)')
             .order('created_at', { ascending: false })
             .limit(5000);
-        if (req.admin.role !== 'super_admin') {
-            q = q.eq('company_id', req.admin.company_id);
-        } else if (company_id) {
-            q = q.eq('company_id', company_id);
-        }
+        q = await scopeOrders(q, req, { companyId: company_id });
         if (location_id) q = q.eq('location_id', location_id);
         if (from) q = q.gte('created_at', from);
         if (to) q = q.lte('created_at', to);
@@ -1439,6 +1380,13 @@ router.put('/orders/:orderId/status', async (req, res) => {
 
         if (!validStatuses.includes(status)) {
             return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+        }
+
+        // Scope: super admins pass; company admins are held to their company;
+        // order-desk users to orders in their branch.
+        const scope = await orderInScope(req, req.params.orderId);
+        if (!scope.ok) {
+            return res.status(scope.code).json({ error: scope.code === 404 ? 'Order not found.' : 'Access denied for this order.' });
         }
 
         // Get current order
@@ -1479,7 +1427,7 @@ router.put('/orders/:orderId/status', async (req, res) => {
  * Step 3 of the branch workflow: payment received -> mark paid + close the order.
  * Records timestamps, appends status history, notifies recipients, and audit-logs.
  */
-router.put('/companies/:companyId/orders/:orderId/close', requireCompanyAccess, async (req, res) => {
+router.put('/companies/:companyId/orders/:orderId/close', requireOrderAccess, async (req, res) => {
     try {
         const { companyId, orderId } = req.params;
         const note = stripHtml(req.body?.note || '');
@@ -1537,78 +1485,9 @@ router.put('/companies/:companyId/orders/:orderId/close', requireCompanyAccess, 
     }
 });
 
-// ============================================================
-// ADMIN USER MANAGEMENT (Super Admin only)
-// ============================================================
-
-/**
- * GET /api/admin/users
- */
-router.get('/users', requireSuperAdmin, async (req, res) => {
-    try {
-        const { data, error } = await supabaseAdmin
-            .from('admin_users')
-            .select('id, email, name, role, company_id, is_active, last_login, created_at, companies (name)')
-            .order('name');
-
-        if (error) throw error;
-        res.json({ admins: data || [] });
-
-    } catch (err) {
-        console.error('Admin users error:', err);
-        res.status(500).json({ error: 'Failed to load admin users.' });
-    }
-});
-
-/**
- * POST /api/admin/users
- */
-router.post('/users', requireSuperAdmin, async (req, res) => {
-    try {
-        const { email, password, name, role, company_id } = req.body;
-
-        if (!email || !password || !name) {
-            return res.status(400).json({ error: 'Email, password, and name are required.' });
-        }
-
-        if (!validateEmail(email)) {
-            return res.status(400).json({ error: 'Invalid email format.' });
-        }
-
-        if (password.length < 8) {
-            return res.status(400).json({ error: 'Password must be at least 8 characters.' });
-        }
-
-        const passwordHash = await bcrypt.hash(password, 12);
-
-        const { data, error } = await supabaseAdmin
-            .from('admin_users')
-            .insert({
-                email: email.toLowerCase(),
-                password_hash: passwordHash,
-                name: stripHtml(name),
-                role: role || 'company_admin',
-                company_id: company_id || null,
-                is_active: true
-            })
-            .select('id, email, name, role, company_id, is_active')
-            .single();
-
-        if (error) {
-            if (error.code === '23505') {
-                return res.status(409).json({ error: 'An admin with this email already exists.' });
-            }
-            throw error;
-        }
-
-        await logAction(req.admin.id, 'admin_created', 'admin', data.id, { email, role }, req.ip);
-        res.status(201).json({ admin: data });
-
-    } catch (err) {
-        console.error('Create admin error:', err);
-        res.status(500).json({ error: 'Failed to create admin user.' });
-    }
-});
+// NOTE: CHC staff management (list/create/invite/role/branch) now lives in
+// routes/admin-users.js, mounted at /users near the top of this file. The old
+// inline GET/POST /users were removed to keep a single source of truth.
 
 // ============================================================
 // AUDIT LOG

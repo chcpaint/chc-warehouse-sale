@@ -441,6 +441,9 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 po_source: poSource,
                 location: resolvedLocationName,
                 location_id: locationRow.id,
+                // When the customer signed in as an individual, attribute the
+                // order to them so the owner can see who placed it.
+                placed_by_user_id: req.companyUser ? req.companyUser.id : null,
                 items: verifiedItems,
                 subtotal,
                 total,
@@ -761,5 +764,8 @@ router.get('/:slug/po/config', requireCompanyAuth, async (req, res) => {
 });
 
 router.use('/:slug/inventory', require('./inventory-store'));
+
+// Company-owner management of their own customer users (Customer-users module).
+router.use('/:slug/users', require('./company-users-store'));
 
 module.exports = router;

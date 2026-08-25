@@ -59,6 +59,23 @@ const MODULES = {
         }
     },
 
+    users: {
+        name: 'users',
+        label: 'Customer users',
+        blurb: 'Individual logins for this customer’s staff, so every order shows who placed it.',
+        requires: [],
+        released: true,
+        defaults: {
+            enabled: false,
+            // The company owner can invite their own people (CHC can also seed).
+            owner_can_invite: true,
+            // When on, reaching this company's store requires an individual
+            // login; when off, the shared company access code still works and
+            // nothing changes for the customer.
+            require_individual_login: true
+        }
+    },
+
     kits: {
         name: 'kits',
         label: 'Repair kits',

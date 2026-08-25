@@ -460,4 +460,55 @@ function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendOrderNotification, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised };
+/**
+ * Send an invitation to set a password and activate an account.
+ * @param {Object} o
+ * @param {string} o.to           recipient email
+ * @param {string} o.name         recipient name
+ * @param {string} o.inviteUrl    set-password link (carries the token)
+ * @param {string} o.context      short label, e.g. 'CHC order desk' or a company name
+ * @param {string} [o.invitedBy]  who invited them (name)
+ * @param {string} [o.expiresText] e.g. '7 days'
+ */
+async function sendInvite(o) {
+    if (!ensureInit()) {
+        console.warn('Email: Skipping invite — SendGrid not configured.');
+        return { sent: false, reason: 'not_configured' };
+    }
+    const to = String(o.to || '').trim();
+    if (!to) return { sent: false, reason: 'no_recipient' };
+
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    const name = escHtml(o.name || 'there');
+    const context = escHtml(o.context || 'the CHC portal');
+    const invitedBy = o.invitedBy ? `by ${escHtml(o.invitedBy)}` : '';
+    const expires = escHtml(o.expiresText || '7 days');
+    const url = o.inviteUrl;
+
+    const html = `
+        <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1f2937">
+          <h2 style="color:#111827">You've been invited to ${context}</h2>
+          <p>Hi ${name}, you've been invited ${invitedBy} to access ${context}. Click below to set your password and activate your account.</p>
+          <p style="margin:28px 0">
+            <a href="${url}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Set your password</a>
+          </p>
+          <p style="color:#6b7280;font-size:13px">This link expires in ${expires}. If the button doesn't work, paste this into your browser:<br>${escHtml(url)}</p>
+        </div>`;
+
+    try {
+        await sgMail.send({
+            to,
+            from: fromAddress,
+            subject: `Set up your ${o.context || 'CHC'} account`,
+            text: `Hi ${o.name || 'there'}, set your password to activate your account: ${url} (expires in ${expires}).`,
+            html
+        });
+        return { sent: true, to };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Invite email failed:', errMsg);
+        return { sent: false, error: errMsg };
+    }
+}
+
+module.exports = { sendOrderNotification, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite };
