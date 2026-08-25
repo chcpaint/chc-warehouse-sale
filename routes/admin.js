@@ -9,7 +9,7 @@ const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/uplo
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed } = require('../utils/email');
-const { scopeOrders, orderInScope } = require('../utils/order-scope');
+const { orderScopeIds, applyOrderScope, orderInScope } = require('../utils/order-scope');
 
 const router = express.Router();
 
@@ -1241,7 +1241,8 @@ router.get('/orders', async (req, res) => {
             .select(`*, companies (id, name), company_locations (id, name, supplier_branches (id, name))`, { count: 'exact' })
             .order('created_at', { ascending: false });
 
-        query = await scopeOrders(query, req, { companyId: company_id });
+        const _scopeIds = await orderScopeIds(req);
+        query = applyOrderScope(query, req, _scopeIds, company_id);
 
         if (status) query = query.eq('status', status);
         if (location_id) query = query.eq('location_id', location_id);
@@ -1274,7 +1275,8 @@ router.get('/orders/export', async (req, res) => {
             .select('order_number, created_at, company_name, location, po_number, contact_name, contact_email, contact_phone, status, subtotal, total, items, companies(name), company_locations(name)')
             .order('created_at', { ascending: false });
 
-        query = await scopeOrders(query, req, { companyId: company_id });
+        const _scopeIds = await orderScopeIds(req);
+        query = applyOrderScope(query, req, _scopeIds, company_id);
         if (status) query = query.eq('status', status);
         if (location_id) query = query.eq('location_id', location_id);
         if (from_date) query = query.gte('created_at', from_date);
@@ -1317,7 +1319,8 @@ router.get('/reports/by-location', async (req, res) => {
             .from('orders')
             .select('total, location, location_id, company_locations(name)');
 
-        query = await scopeOrders(query, req, { companyId: company_id });
+        const _scopeIds = await orderScopeIds(req);
+        query = applyOrderScope(query, req, _scopeIds, company_id);
         if (status) query = query.eq('status', status);
         if (from_date) query = query.gte('created_at', from_date);
         if (to_date) query = query.lte('created_at', to_date);
@@ -1357,7 +1360,8 @@ router.get('/reports/orders', async (req, res) => {
             .select('id, order_number, contact_name, po_number, status, total, location, location_id, company_id, created_at, items, companies (id, name)')
             .order('created_at', { ascending: false })
             .limit(5000);
-        q = await scopeOrders(q, req, { companyId: company_id });
+        const _scopeIds = await orderScopeIds(req);
+        q = applyOrderScope(q, req, _scopeIds, company_id);
         if (location_id) q = q.eq('location_id', location_id);
         if (from) q = q.gte('created_at', from);
         if (to) q = q.lte('created_at', to);

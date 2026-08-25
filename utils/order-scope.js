@@ -29,20 +29,36 @@ async function branchLocationIds(branchId) {
 }
 
 /**
- * Apply role scoping to a Supabase orders query builder.
- * `companyId` is an optional super-admin filter (from the query string).
+ * Resolve any async data the scope needs BEFORE touching the query builder.
+ * For an order desk that means its branch's location ids. Returns null for
+ * roles that need no pre-fetch.
+ *
+ * Kept separate from applyOrderScope on purpose: a PostgREST builder is a
+ * thenable, so if an async function returned one, `await` would adopt it and
+ * execute the query early — returning a result instead of a builder. Fetching
+ * ids here (async) and applying the filter there (sync) avoids that trap.
  */
-async function scopeOrders(query, req, { companyId } = {}) {
+async function orderScopeIds(req) {
+    if (req.admin.role === 'order_desk') {
+        return branchLocationIds(req.admin.branch_id);
+    }
+    return null;
+}
+
+/**
+ * Apply role scoping to a Supabase orders query builder (synchronous).
+ * `ids` comes from orderScopeIds(); `companyId` is an optional super-admin
+ * filter from the query string.
+ */
+function applyOrderScope(query, req, ids, companyId) {
     const role = req.admin.role;
 
     if (role === 'super_admin') {
-        if (companyId) query = query.eq('company_id', companyId);
-        return query;
+        return companyId ? query.eq('company_id', companyId) : query;
     }
 
     if (role === 'order_desk') {
-        const ids = await branchLocationIds(req.admin.branch_id);
-        return query.in('location_id', ids.length ? ids : [NO_MATCH]);
+        return query.in('location_id', (ids && ids.length) ? ids : [NO_MATCH]);
     }
 
     // Company-scoped admin.
@@ -77,4 +93,4 @@ async function orderInScope(req, orderId) {
         : { ok: false, code: 403 };
 }
 
-module.exports = { branchLocationIds, scopeOrders, orderInScope };
+module.exports = { branchLocationIds, orderScopeIds, applyOrderScope, orderInScope };
