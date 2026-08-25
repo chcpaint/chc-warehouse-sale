@@ -902,6 +902,9 @@
                     <label class="block text-sm font-medium text-gray-700 mb-2">What should this do?</label>
                     <label class="flex items-start gap-2 mb-2 cursor-pointer"><input type="radio" name="upl-mode" id="upl-mode-merge" value="merge" checked class="mt-0.5"><span class="text-sm"><b>Add / update</b> &mdash; keep existing items; add new ones and update prices for matching SKUs.</span></label>
                     <label class="flex items-start gap-2 cursor-pointer"><input type="radio" name="upl-mode" value="replace" class="mt-0.5"><span class="text-sm text-red-700"><b>Replace entire catalog</b> &mdash; delete ALL current items for this company first, then load only these.</span></label>
+                    <div class="border-t mt-3 pt-3">
+                        <label class="flex items-start gap-2 cursor-pointer text-xs text-gray-600"><input type="checkbox" id="upl-unlock-ppg" class="mt-0.5"><span><b class="text-red-700">Unlock PPG prices</b> (admin) &mdash; allow this upload to change PPG list prices (One Choice, Delfleet Essential, Envirobase, Shop-Line). <b>Off by default:</b> PPG prices stay locked to the Assured list on every company.</span></label>
+                    </div>
                 </div>
                 <div id="upload-progress" class="hidden">
                     <div class="bg-blue-50 rounded-lg p-4 text-center">
@@ -2526,6 +2529,7 @@
         const fd = new FormData();
         fd.append('catalog', file);
         fd.append('mode', getUploadMode());
+        fd.append('unlock_ppg', (document.getElementById('upl-unlock-ppg') || {}).checked ? '1' : '0');
         if (dryRun) fd.append('dry_run', '1');
 
         try {
@@ -2559,9 +2563,11 @@
         const replaceNote = (d.mode === 'replace')
             ? `<p class="text-sm font-semibold text-red-700 mt-1"><i class="fas fa-triangle-exclamation mr-1"></i>${isPreview ? 'Will delete' : 'Deleted'} <b>${d.deleted || 0}</b> existing item(s) before loading this list.</p>`
             : '';
+        const ppgNote = (d.ppg_propagated)
+            ? `<p class="text-sm text-blue-700 mt-1"><i class="fas fa-arrows-turn-to-dots mr-1"></i>PPG list-price change propagated to <b>${d.ppg_propagated}</b> item(s) on other companies.</p>` : '';
         return `<div class="${bg} p-4 rounded-lg">
             <p class="font-semibold text-gray-800">${title}</p>
-            ${replaceNote}
+            ${replaceNote}${ppgNote}
             <p class="text-sm text-gray-700 mt-1">New: <b>${d.inserted}</b> &middot; Updated: <b>${d.updated}</b> &middot; Price changes: <b>${d.price_changes}</b> &middot; Skipped ($0): <b>${d.skipped}</b> &middot; Errors: <b>${d.errors}</b></p>
             ${sample}
         </div>`;
@@ -2581,6 +2587,10 @@
         let msg = 'Apply these changes to ' + companyName + "'s catalog?";
         if (mode === 'replace') {
             msg = 'REPLACE the ENTIRE catalog for ' + companyName + '?\n\nThis permanently DELETES all current items for this company and loads only the new list. This cannot be undone.';
+        }
+        const unlock = (document.getElementById('upl-unlock-ppg') || {}).checked;
+        if (unlock) {
+            msg += '\n\nPPG prices are UNLOCKED for this upload' + (/assured/i.test(companyName) ? ' \u2014 changes to Assured PPG prices will propagate to ALL companies.' : '.');
         }
         if (!confirm(msg)) return;
         const d = await catalogSend(false);

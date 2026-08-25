@@ -862,6 +862,15 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         // Preview mode (dry run): analyze and report, write nothing.
         const dryRun = ['1', 'true', 'yes'].includes(String(req.body.dry_run || req.query.preview || '').toLowerCase());
         const mode = String(req.body.mode || 'merge').toLowerCase() === 'replace' ? 'replace' : 'merge';
+        // PPG list-price rule: PPG-brand prices are the Assured list price everywhere; only an admin unlock can change them.
+        const ASSURED_ID = '905175c1-f844-4dc3-85d0-8b40de23d538';
+        const unlockPPG = ['1','true','yes'].includes(String(req.body.unlock_ppg || '').toLowerCase());
+        const assuredPPG = {};
+        {
+            const { data: ap } = await supabaseAdmin.from('products').select('sku, price').eq('company_id', ASSURED_ID).eq('brand', 'PPG');
+            (ap || []).forEach(r => { if (r.sku) assuredPPG[String(r.sku).toUpperCase()] = Number(r.price); });
+        }
+        const ppgUpdates = {};
 
         let rows = [];
         const errors = [];
@@ -908,6 +917,17 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         for (const row of normalizedRows) {
             row.company_id = companyId;
 
+            // PPG list-price rule: non-Assured companies always get the Assured list price for a PPG SKU (unless an admin unlocked this upload).
+            const skuU = row.sku ? String(row.sku).toUpperCase() : '';
+            if (companyId !== ASSURED_ID && !unlockPPG && skuU && assuredPPG[skuU] !== undefined) {
+                row.price = assuredPPG[skuU];
+                if (!row.brand || row.brand === 'Uncategorized') row.brand = 'PPG';
+            }
+            // Assured upload of PPG prices propagates to every other company's price list.
+            if (companyId === ASSURED_ID && skuU && String(row.brand || '').toUpperCase() === 'PPG' && Number(row.price) > 0) {
+                ppgUpdates[skuU] = Number(row.price);
+            }
+
             // Skip rows with no positive price (e.g. blank/0 in source) — keep existing price untouched
             if (!(Number(row.price) > 0)) { skipped++; continue; }
 
@@ -935,6 +955,17 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             } else {
                 inserted++;
                 if (!dryRun) await supabaseAdmin.from('products').insert(row);
+            }
+        }
+
+        // Propagate any PPG list-price changes from an Assured upload to all other companies.
+        let ppgPropagated = 0;
+        if (!dryRun && companyId === ASSURED_ID && Object.keys(ppgUpdates).length) {
+            for (const [sku, price] of Object.entries(ppgUpdates)) {
+                const { count } = await supabaseAdmin.from('products')
+                    .update({ price }, { count: 'exact' })
+                    .eq('sku', sku).eq('brand', 'PPG').neq('company_id', ASSURED_ID);
+                ppgPropagated += count || 0;
             }
         }
 
@@ -970,13 +1001,94 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             error_details: errors.slice(0, 20),
             sample_changes: sampleChanges,
             mode,
-            deleted
+            deleted,
+            ppg_propagated: (typeof ppgPropagated !== 'undefined' ? ppgPropagated : 0),
+            ppg_unlocked: unlockPPG
         });
 
     } catch (err) {
         console.error('Catalog upload error:', err);
         res.status(500).json({ error: 'Failed to process catalog upload.' });
     }
+});
+
+// ============================================================
+// COMPANY MODULES (optional features toggled per company via settings JSON)
+// ============================================================
+const MODULE_REGISTRY = [
+    { name: 'inventory', label: 'Inventory', blurb: 'Per-location stock, scan-to-consume, and auto replenishment orders.', released: false, requires: [] },
+    { name: 'kits', label: 'Repair Kits', blurb: 'Prebuilt, adjustable repair kits customers can add to an order.', released: false, requires: [] }
+];
+
+router.get('/companies/:companyId/modules', requireCompanyAccess, async (req, res) => {
+    try {
+        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', req.params.companyId).single();
+        const settings = company?.settings || {};
+        const modules = MODULE_REGISTRY.map(m => {
+            const missing = (m.requires || []).filter(r => !(settings[r] && settings[r].enabled));
+            return {
+                name: m.name, label: m.label, blurb: m.blurb, released: m.released,
+                enabled: !!(settings[m.name] && settings[m.name].enabled),
+                available: missing.length === 0,
+                blocked_by: missing.map(r => (MODULE_REGISTRY.find(x => x.name === r) || {}).label || r)
+            };
+        });
+        res.json({ modules });
+    } catch (err) { console.error('Modules load error:', err); res.status(500).json({ error: 'Failed to load modules.' }); }
+});
+
+router.put('/companies/:companyId/modules/:name', requireCompanyAccess, async (req, res) => {
+    try {
+        const { companyId, name } = req.params;
+        const enable = req.body.enabled === true || req.body.enabled === 'true';
+        const mod = MODULE_REGISTRY.find(m => m.name === name);
+        if (!mod) return res.status(404).json({ error: 'Unknown module.' });
+        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', companyId).single();
+        const settings = company?.settings || {};
+        if (enable) {
+            const missing = (mod.requires || []).filter(r => !(settings[r] && settings[r].enabled));
+            if (missing.length) return res.status(409).json({ error: `Turn on ${missing.join(' and ')} first.`, dependents: missing });
+        } else {
+            const dependents = MODULE_REGISTRY.filter(m => (m.requires || []).includes(name) && settings[m.name] && settings[m.name].enabled).map(m => m.label);
+            if (dependents.length && !(req.body.confirm_dependents === true || req.body.confirm_dependents === 'true')) {
+                return res.status(409).json({ error: `${dependents.join(' and ')} depend on ${mod.label} and will turn off too.`, dependents });
+            }
+            MODULE_REGISTRY.filter(m => (m.requires || []).includes(name)).forEach(m => { if (settings[m.name]) settings[m.name].enabled = false; });
+        }
+        settings[name] = Object.assign({}, settings[name], { enabled: enable });
+        await supabaseAdmin.from('companies').update({ settings }).eq('id', companyId);
+        await logAction(req.admin.id, 'module_toggled', 'company', companyId, { module: name, enabled: enable }, req.ip);
+        res.json({ ok: true, enabled: enable });
+    } catch (err) { console.error('Module toggle error:', err); res.status(500).json({ error: 'Failed to change that module.' }); }
+});
+
+router.get('/companies/:companyId/po', requireCompanyAccess, async (req, res) => {
+    try {
+        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', req.params.companyId).single();
+        const po = (company?.settings || {}).po || {};
+        const mode = ['off', 'manual', 'generated'].includes(po.mode) ? po.mode : 'manual';
+        res.json({ mode, sequence: po.sequence || null, prefix: po.prefix || '', pad_width: po.pad_width || 5, use_check_digit: !!po.use_check_digit, issued_count: po.issued_count || 0, needs_setup: mode === 'generated' && !po.prefix });
+    } catch (err) { console.error('PO load error:', err); res.status(500).json({ error: 'Failed to load purchase order settings.' }); }
+});
+
+router.put('/companies/:companyId/po', requireCompanyAccess, async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const mode = ['off', 'manual', 'generated'].includes(req.body.mode) ? req.body.mode : 'manual';
+        const prefix = String(req.body.prefix || '').trim().toUpperCase().slice(0, 8);
+        if (mode === 'generated' && !prefix) return res.status(400).json({ error: 'A prefix is required for CHC-issued PO numbers.' });
+        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', companyId).single();
+        const settings = company?.settings || {};
+        settings.po = Object.assign({}, settings.po, {
+            mode, prefix,
+            pad_width: Number(req.body.pad_width) || (settings.po && settings.po.pad_width) || 5,
+            use_check_digit: req.body.use_check_digit === true || req.body.use_check_digit === 'true',
+            sequence: (settings.po && settings.po.sequence) || Number(req.body.start_at) || 0
+        });
+        await supabaseAdmin.from('companies').update({ settings }).eq('id', companyId);
+        await logAction(req.admin.id, 'po_settings_updated', 'company', companyId, { mode, prefix }, req.ip);
+        res.json({ ok: true, mode, prefix, message: mode === 'generated' ? `CHC-issued PO numbers enabled with prefix ${prefix}.` : 'Purchase order settings saved.' });
+    } catch (err) { console.error('PO save error:', err); res.status(500).json({ error: 'Failed to save purchase order settings.' }); }
 });
 
 // ============================================================
