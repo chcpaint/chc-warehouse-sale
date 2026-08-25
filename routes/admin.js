@@ -1013,6 +1013,36 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
 });
 
 // ============================================================
+// EMAIL RECIPIENTS (consolidated per-customer email setup)
+// ============================================================
+router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { data: company } = await supabaseAdmin.from('companies').select('name, contact_email, email_config').eq('id', companyId).single();
+        const { data: branches } = await supabaseAdmin.from('supplier_branches').select('id, name, emails, is_active').order('name');
+        const branchMap = {};
+        (branches || []).forEach(b => { branchMap[b.id] = b; });
+        const { data: locations } = await supabaseAdmin
+            .from('company_locations').select('id, name, city, notify_emails, supplier_branch_id')
+            .eq('company_id', companyId).order('name');
+        const locs = (locations || []).map(l => ({
+            id: l.id, name: l.name, city: l.city,
+            notify_emails: Array.isArray(l.notify_emails) ? l.notify_emails : [],
+            supplier_branch_id: l.supplier_branch_id,
+            branch_name: l.supplier_branch_id && branchMap[l.supplier_branch_id] ? branchMap[l.supplier_branch_id].name : null,
+            branch_emails: l.supplier_branch_id && branchMap[l.supplier_branch_id] ? (branchMap[l.supplier_branch_id].emails || []) : []
+        }));
+        res.json({
+            company_name: company?.name || '',
+            contact_email: company?.contact_email || '',
+            manager_emails: Array.isArray(company?.email_config?.manager_emails) ? company.email_config.manager_emails : [],
+            branches: (branches || []).filter(b => b.is_active !== false).map(b => ({ id: b.id, name: b.name })),
+            locations: locs
+        });
+    } catch (err) { console.error('Email-setup load error:', err); res.status(500).json({ error: 'Failed to load email setup.' }); }
+});
+
+// ============================================================
 // COMPANY MODULES (optional features toggled per company via settings JSON)
 // ============================================================
 const MODULE_REGISTRY = [

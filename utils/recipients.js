@@ -23,13 +23,17 @@ async function resolveOrderRecipients(order) {
     const managers = Array.isArray(cfg.manager_emails) ? cfg.manager_emails : [];
 
     let branchEmails = [];
+    let locationEmails = [];
     if (order.location_id) {
         const { data: loc } = await supabaseAdmin
-            .from('company_locations').select('supplier_branch_id').eq('id', order.location_id).single();
-        if (loc && loc.supplier_branch_id) {
-            const { data: branch } = await supabaseAdmin
-                .from('supplier_branches').select('emails, is_active').eq('id', loc.supplier_branch_id).single();
-            if (branch && branch.is_active !== false && Array.isArray(branch.emails)) branchEmails = branch.emails;
+            .from('company_locations').select('supplier_branch_id, notify_emails').eq('id', order.location_id).single();
+        if (loc) {
+            if (Array.isArray(loc.notify_emails)) locationEmails = loc.notify_emails;
+            if (loc.supplier_branch_id) {
+                const { data: branch } = await supabaseAdmin
+                    .from('supplier_branches').select('emails, is_active').eq('id', loc.supplier_branch_id).single();
+                if (branch && branch.is_active !== false && Array.isArray(branch.emails)) branchEmails = branch.emails;
+            }
         }
     }
 
@@ -38,6 +42,7 @@ async function resolveOrderRecipients(order) {
         ...(orderer ? [orderer] : []),
         ...(companyContact ? [companyContact] : []),
         ...managers,
+        ...locationEmails,
         ...branchEmails
     ]);
     const replyTo = validEmails([...(orderer ? [orderer] : []), ...(companyContact ? [companyContact] : [])])[0];
