@@ -1,0 +1,385 @@
+<title>Order Desk Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  /* Light palette. Every colour used on the page resolves from these, so the
+     dark blocks below only have to redefine tokens, never components. */
+  :root {
+    --ground:      #F5F7FA;
+    --surface:     #FFFFFF;
+    --surface-sunk:#EDF1F6;
+    --ink:         #131C29;
+    --ink-soft:    #4C5C70;
+    --ink-faint:   #7C8BA0;
+    --rule:        #DCE3EC;
+    --brand:       #1D4ED8;
+    --brand-soft:  #E5EDFF;
+    --stage-1:     #B45309;   /* needs invoice  */
+    --stage-1-bg:  #FDF0DC;
+    --stage-2:     #1D4ED8;   /* awaiting payment */
+    --stage-2-bg:  #E5EDFF;
+    --stage-3:     #047857;   /* paid & closed  */
+    --stage-3-bg:  #DEF3EA;
+    --warn:        #9A3412;
+    --warn-bg:     #FDEDE6;
+    --shadow:      0 1px 2px rgba(19,28,41,.06), 0 8px 24px -12px rgba(19,28,41,.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E141C;
+      --surface:     #161E29;
+      --surface-sunk:#1D2733;
+      --ink:         #E8EDF4;
+      --ink-soft:    #A9B6C7;
+      --ink-faint:   #74839A;
+      --rule:        #2A3746;
+      --brand:       #7BA2FF;
+      --brand-soft:  #1B2A47;
+      --stage-1:     #E8A55C;
+      --stage-1-bg:  #34260F;
+      --stage-2:     #7BA2FF;
+      --stage-2-bg:  #1B2A47;
+      --stage-3:     #4FCA9B;
+      --stage-3-bg:  #0F2C23;
+      --warn:        #F0A183;
+      --warn-bg:     #351A11;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E141C;
+    --surface:     #161E29;
+    --surface-sunk:#1D2733;
+    --ink:         #E8EDF4;
+    --ink-soft:    #A9B6C7;
+    --ink-faint:   #74839A;
+    --rule:        #2A3746;
+    --brand:       #7BA2FF;
+    --brand-soft:  #1B2A47;
+    --stage-1:     #E8A55C;
+    --stage-1-bg:  #34260F;
+    --stage-2:     #7BA2FF;
+    --stage-2-bg:  #1B2A47;
+    --stage-3:     #4FCA9B;
+    --stage-3-bg:  #0F2C23;
+    --warn:        #F0A183;
+    --warn-bg:     #351A11;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 40px 20px 72px;
+  }
+
+  .sheet { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; }
+
+  h1, h2, h3, .eyebrow, .step-n {
+    font-family: "Barlow Semi Condensed", ui-sans-serif, system-ui, sans-serif;
+  }
+
+  header { display: flex; flex-direction: column; gap: 6px; }
+  .eyebrow {
+    font-size: 13px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--brand);
+  }
+  h1 {
+    font-size: clamp(38px, 7vw, 52px); font-weight: 700; line-height: 1.02;
+    letter-spacing: -.015em; margin: 0; text-wrap: balance;
+  }
+  .standfirst { color: var(--ink-soft); max-width: 62ch; margin: 4px 0 0; }
+
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+  }
+  /* Flex rather than inline so the stage pill sits on the heading's baseline
+     and wraps to its own line on a narrow screen instead of stretching it. */
+  h3 {
+    font-size: 19px; font-weight: 600; letter-spacing: -.005em; margin: 0;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px;
+  }
+
+  p { margin: 0; }
+  section { display: flex; flex-direction: column; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 20px 22px; box-shadow: var(--shadow);
+  }
+
+  /* Credentials — the block people come back to, so it gets the data face. */
+  .creds { display: grid; grid-template-columns: 140px 1fr; gap: 10px 18px; align-items: baseline; }
+  .creds dt { color: var(--ink-faint); font-size: 13px; letter-spacing: .04em; text-transform: uppercase; }
+  .creds dd {
+    margin: 0; font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 15px; font-weight: 600; word-break: break-all;
+  }
+
+  /* The three stages ARE a sequence, and the console shows "step N of 3",
+     so the numbering here matches what is on screen rather than decorating. */
+  .steps { display: flex; flex-direction: column; gap: 14px; counter-reset: step; }
+  .step {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 18px 22px 20px; display: grid; grid-template-columns: 44px 1fr; gap: 0 16px;
+    box-shadow: var(--shadow);
+  }
+  /* The number sits in column one; EVERYTHING else lives in a single wrapper in
+     column two. The earlier version auto-placed each child and gave the number
+     `grid-row: span 3`, so any step with more than three children wrapped its
+     fourth back into the 44px column — which is exactly what happened to the
+     email note in step 2. One wrapper cannot do that however much it contains. */
+  .step-n {
+    font-size: 30px; font-weight: 700; line-height: 1;
+    color: var(--brand); font-variant-numeric: tabular-nums; padding-top: 2px;
+  }
+  .step-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .step p { color: var(--ink-soft); }
+  .step ol { margin: 0; padding-left: 20px; color: var(--ink-soft); }
+  .step ol li { margin-bottom: 4px; }
+
+  .pill {
+    display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .04em;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid transparent;
+    font-family: "IBM Plex Sans", sans-serif;
+  }
+  .s1 { color: var(--stage-1); background: var(--stage-1-bg); border-color: var(--stage-1); }
+  .s2 { color: var(--stage-2); background: var(--stage-2-bg); border-color: var(--stage-2); }
+  .s3 { color: var(--stage-3); background: var(--stage-3-bg); border-color: var(--stage-3); }
+
+  .mails {
+    padding: 10px 14px; border-radius: 8px;
+    background: var(--surface-sunk); border-left: 3px solid var(--brand);
+    font-size: 14px; color: var(--ink-soft);
+  }
+  .mails strong { color: var(--ink); font-weight: 600; }
+
+  .notice {
+    background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 10px;
+    padding: 16px 20px; color: var(--ink); display: flex; flex-direction: column; gap: 6px;
+  }
+  .notice .lead { font-weight: 600; color: var(--warn); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+  th {
+    font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.who { font-weight: 500; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13.5px; color: var(--ink-soft); }
+  .scroller { overflow-x: auto; }
+
+  footer {
+    color: var(--ink-faint); font-size: 13px; border-top: 1px solid var(--rule);
+    padding-top: 16px;
+  }
+
+  @media (max-width: 560px) {
+    .creds { grid-template-columns: 1fr; gap: 2px 0; }
+    .creds dt { margin-top: 10px; }
+    .step { grid-template-columns: 1fr; gap: 8px 0; }
+    .step-n { font-size: 22px; }
+  }
+
+  @media print {
+    body { background: #fff; padding: 0; font-size: 11pt; }
+    .card, .step, .notice { box-shadow: none; break-inside: avoid; }
+  }
+</style>
+
+<div class="sheet">
+
+  <header>
+    <span class="eyebrow">CHC Paint &amp; Auto Body Supplies</span>
+    <h1>Order Desk Handbook</h1>
+    <p class="standfirst">
+      How to sign in, work an order through to payment, and know exactly what the shop
+      is told at each point. Markham and Woodbridge counters, and head office.
+    </p>
+  </header>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Signing in</h2>
+    <div class="card">
+      <dl class="creds">
+        <dt>Address</dt><dd>chcsale.com/admin</dd>
+        <dt>Username</dt><dd>your @chcpaint.com email</dd>
+        <dt>First password</dt><dd>CHCsaleportal</dd>
+      </dl>
+      <div class="mails" style="border-left-color: var(--stage-1); margin-top: 14px;">
+        <strong>You will be asked to choose your own password the first time.</strong>
+        Everyone starts on the same one, so until you replace it the system cannot
+        tell you apart from anyone else at your branch — and the order history
+        would name the wrong person. Nothing else opens until you do it.
+        Eight characters or more, with a capital, a lowercase and a number.
+      </div>
+      <p style="margin-top:14px; color:var(--ink-soft);">
+        After that you land straight on the Orders screen. There is nothing else to
+        click — no dashboard, no product lists, no company settings. That is deliberate:
+        your account only reaches order management, so there is nothing here you can
+        break.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>What you see</h2>
+    <div class="card">
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr><th>Who</th><th>Sees</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="who">Markham counter<br><span class="mono">Frank G · Eric · Carlos · Lucas</span></td>
+              <td>Orders from the 17 shop locations served by Markham</td>
+            </tr>
+            <tr>
+              <td class="who">Woodbridge counter<br><span class="mono">Francesco · Sujit · Assad</span></td>
+              <td>Orders from the 26 shop locations served by Woodbridge</td>
+            </tr>
+            <tr>
+              <td class="who">Head office<br><span class="mono">Manny · Frank C · Gabe</span></td>
+              <td>Every branch, all orders — same screen, wider view</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:14px; color:var(--ink-soft);">
+        Orders can be grouped by branch, and every order shows a
+        <strong>Handled by</strong> column — whoever last uploaded an invoice, changed a
+        status or closed it. If a shop rings asking who dealt with their order, that
+        column is the answer.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Working an order</h2>
+    <div class="steps">
+
+      <div class="step">
+        <span class="step-n">1</span>
+        <div class="step-body">
+        <h3>The order arrives <span class="pill s1">Needs Invoice</span></h3>
+        <p>
+          The shop places it themselves through their store page. It appears on your
+          screen in amber with the shop, the location, the contact and the total.
+          Nothing is required from you to receive it.
+        </p>
+        <div class="mails">
+          <strong>Email sent automatically:</strong> “Order received”, to the person who
+          ordered, the shop's own contacts and managers, and your branch. This is the
+          email that tells you an order is waiting.
+        </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="step-n">2</span>
+        <div class="step-body">
+        <h3>Upload the invoice <span class="pill s2">Awaiting Payment</span></h3>
+        <p>Pick and pack as normal, raise the invoice in your usual system, then:</p>
+        <ol>
+          <li>Find the order — the amber <em>Upload Invoice</em> button is on its row.</li>
+          <li>Choose the invoice file. PDF, PNG or JPG.</li>
+          <li>The row turns blue and reads <em>Awaiting Payment</em>.</li>
+        </ol>
+        <div class="mails">
+          <strong>Email sent automatically:</strong> “Invoice ready”, to the same people.
+          The shop does not need chasing — they are told the moment you upload.
+        </div>
+        <p style="margin-top:10px;">
+          Uploaded the wrong file? Use the circular arrow on the row to replace it. The
+          shop is notified again.
+        </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="step-n">3</span>
+        <div class="step-body">
+        <h3>Mark paid and close <span class="pill s3">Paid &amp; Closed</span></h3>
+        <p>
+          When payment lands, press <em>Mark Paid &amp; Close</em>. The order turns green
+          and drops out of your working list.
+        </p>
+        <div class="mails">
+          <strong>Email sent automatically:</strong> “Payment received”, to the same people.
+        </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>One thing to watch</h2>
+    <div class="notice">
+      <p class="lead">The status dropdown does not email anyone.</p>
+      <p>
+        The small dropdown on each row — confirmed, processing, shipped, delivered — is
+        for your own notes. Setting it to <em>shipped</em> tells the shop nothing.
+      </p>
+      <p>
+        Only the three steps above send email. If you want the shop to know something,
+        it has to be one of those, or a phone call.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Who to ask</h2>
+    <div class="card">
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr><th>Situation</th><th>Who</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Locked out, forgotten password, new starter</td>
+              <td class="who">Adam B <span class="mono">adam@chcpaint.com</span><br>
+                  Daniel <span class="mono">daniel@chcpaint.com</span></td>
+            </tr>
+            <tr>
+              <td>An order is on the wrong branch, or missing</td>
+              <td class="who">Manny, Frank C or Gabe — they can see every branch</td>
+            </tr>
+            <tr>
+              <td>A price on a shop's list looks wrong</td>
+              <td class="who">Adam or Daniel. Do not adjust it at the counter.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:14px; color:var(--ink-soft);">
+        Adam and Daniel are the only two super admins — the accounts that can change
+        prices, catalogues and company settings.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    refinishAI Order Management · chcsale.com/admin · Keep this by the counter.
+  </footer>
+
+</div>
