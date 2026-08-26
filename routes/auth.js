@@ -85,7 +85,7 @@ router.post('/admin-login', async (req, res) => {
         // Look up admin
         const { data: admin, error } = await supabaseAdmin
             .from('admin_users')
-            .select('id, email, name, role, company_id, branch_id, password_hash, is_active')
+            .select('id, email, name, role, company_id, branch_id, password_hash, is_active, must_change_password')
             .eq('email', email)
             .single();
 
@@ -125,13 +125,18 @@ router.post('/admin-login', async (req, res) => {
 
         res.json({
             token,
+            // Surfaced so the console can put the change-password screen up
+            // immediately. It is a convenience, not the control: the API
+            // refuses everything else regardless of what the browser does.
+            must_change_password: admin.must_change_password === true,
             admin: {
                 id: admin.id,
                 email: admin.email,
                 name: admin.name,
                 role: admin.role,
                 company_id: admin.company_id,
-                branch_id: admin.branch_id
+                branch_id: admin.branch_id,
+                must_change_password: admin.must_change_password === true
             }
         });
 

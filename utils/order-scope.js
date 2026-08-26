@@ -10,6 +10,9 @@
  *   - company admin    : orders for their own company_id (existing behaviour).
  *   - order_desk       : orders whose delivery location belongs to the CHC
  *                        branch the desk is assigned to (branch_id).
+ *   - order_manager    : every order, every branch. Head office. Reaches the
+ *                        same order-only endpoints as a desk, never the rest of
+ *                        the console — see ORDER_DESK_ALLOW.
  */
 
 const { supabaseAdmin } = require('./supabase');
@@ -57,6 +60,12 @@ function applyOrderScope(query, req, ids, companyId) {
         return companyId ? query.eq('company_id', companyId) : query;
     }
 
+    // Head office: every branch's orders, but only through the order screens —
+    // restrictOrderDesk fences the rest of the console for this role too.
+    if (role === 'order_manager') {
+        return companyId ? query.eq('company_id', companyId) : query;
+    }
+
     if (role === 'order_desk') {
         return query.in('location_id', (ids && ids.length) ? ids : [NO_MATCH]);
     }
@@ -80,6 +89,7 @@ async function orderInScope(req, orderId) {
 
     const role = req.admin.role;
     if (role === 'super_admin') return { ok: true, order };
+    if (role === 'order_manager') return { ok: true, order };
 
     if (role === 'order_desk') {
         const ids = await branchLocationIds(req.admin.branch_id);

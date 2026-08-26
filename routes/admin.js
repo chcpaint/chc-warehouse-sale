@@ -4,7 +4,7 @@ const csv = require('csv-parser');
 const XLSX = require('xlsx');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
-const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requireOrderAccess } = require('../middleware/auth');
+const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requirePasswordCurrent, requireOrderAccess } = require('../middleware/auth');
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
@@ -20,6 +20,14 @@ router.use(requireAdminAuth);
 // before every route below, so isolation holds even if a request bypasses the
 // UI. Full admins pass straight through.
 router.use(restrictOrderDesk);
+
+// An account still on a password somebody else chose reaches nothing but
+// whoami and the password change itself, whatever its role.
+router.use(requirePasswordCurrent);
+
+// Password change / reset. Mounted before the order-desk fence's other routes
+// because it must stay reachable during a forced change.
+router.use('/', require('./admin-password'));
 
 // CHC staff accounts (super-admin only) and per-company customer users.
 router.use('/users', require('./admin-users'));
@@ -614,7 +622,10 @@ router.post('/companies/:companyId/orders/:orderId/invoice', requireOrderAccess,
             invoice_path: storagePath,
             invoice_filename: stripHtml(req.file.originalname),
             invoice_uploaded_at: new Date().toISOString(),
-            invoice_uploaded_by: req.admin.id
+            invoice_uploaded_by: req.admin.id,
+            handled_by: req.admin.id,
+            handled_by_name: req.admin.name || req.admin.email,
+            handled_at: new Date().toISOString()
         }).eq('id', orderId).select('id, order_number, invoice_filename, invoice_uploaded_at').single();
         if (updErr) throw updErr;
 
@@ -1411,7 +1422,14 @@ router.put('/orders/:orderId/status', async (req, res) => {
 
         const { data, error } = await supabaseAdmin
             .from('orders')
-            .update({ status, status_history: statusHistory })
+            .update({
+                status, status_history: statusHistory,
+                // Who dealt with this. status_history is the full trail; these
+                // columns answer the question without parsing JSON per row.
+                handled_by: req.admin.id,
+                handled_by_name: req.admin.name || req.admin.email,
+                handled_at: new Date().toISOString()
+            })
             .eq('id', req.params.orderId)
             .select()
             .single();
@@ -1464,7 +1482,10 @@ router.put('/companies/:companyId/orders/:orderId/close', requireOrderAccess, as
                 paid_at: now,
                 closed_at: now,
                 closed_by: req.admin.id,
-                status_history: statusHistory
+                status_history: statusHistory,
+                handled_by: req.admin.id,
+                handled_by_name: req.admin.name || req.admin.email,
+                handled_at: now
             })
             .eq('id', orderId)
             .select('id, order_number, status, payment_status, paid_at, closed_at')
