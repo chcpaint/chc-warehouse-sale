@@ -83,6 +83,9 @@
                 <button onclick="adminNav('products')" data-nav="products" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-box w-5"></i> Products
                 </button>
+                <button onclick="adminNav('library')" data-nav="library" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-book w-5"></i> Item Library
+                </button>
                 <button onclick="adminNav('promotions')" data-nav="promotions" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-tags w-5"></i> Promotions
                 </button>
@@ -286,6 +289,132 @@
                             </thead>
                             <tbody id="products-tbody"></tbody>
                         </table>
+                    </div>
+                </section>
+
+                <!-- ============================================================ -->
+                <!-- ITEM LIBRARY                                                 -->
+                <!--                                                              -->
+                <!-- The supplier master catalogue: every SKU we know about, held -->
+                <!-- so a person adding an item can look up the real part number  -->
+                <!-- and barcode instead of typing one from memory.               -->
+                <!--                                                              -->
+                <!-- Nothing here is on sale. An item reaches a shop's catalogue  -->
+                <!-- only when somebody adds it, at a price they set. The list    -->
+                <!-- price shown is the supplier's and is a starting point, which -->
+                <!-- is why the field is labelled "suggested".                    -->
+                <!-- ============================================================ -->
+                <section id="section-library" class="hidden fade-in">
+                    <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <p class="text-gray-500">Look up any known part and add it to a shop's catalogue.</p>
+                            <select id="library-company" onchange="libInit()" class="px-3 py-1 border rounded-lg text-sm bg-white">
+                                <option value="">Select Company</option>
+                            </select>
+                        </div>
+                        <button onclick="libOpenConflicts()" id="library-conflicts-btn"
+                                class="hidden bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-3 py-2 rounded-lg text-sm font-semibold">
+                            <i class="fas fa-triangle-exclamation mr-1"></i>
+                            <span id="library-conflicts-count">0</span> barcodes need a decision
+                        </button>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
+                        <div class="flex flex-wrap items-end gap-4">
+                            <div class="flex-1 min-w-[260px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search</label>
+                                <input type="text" id="library-search" oninput="libDebounce()"
+                                       placeholder="Part number, barcode, or words from the description"
+                                       class="w-full px-3 py-2 border rounded-lg text-sm">
+                            </div>
+                            <div class="min-w-[160px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Supplier</label>
+                                <select id="library-vendor" onchange="libLoad(0)" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="">All suppliers</option>
+                                </select>
+                            </div>
+                            <div class="pb-2">
+                                <label class="flex items-center gap-2 text-sm text-gray-700">
+                                    <input type="checkbox" id="library-only-new" onchange="libLoad(0)" checked
+                                           class="rounded border-gray-300">
+                                    Hide items this shop already sells
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="library-bulk" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+                        <div class="flex flex-wrap items-end gap-4">
+                            <p class="text-sm text-blue-900 font-semibold">
+                                <span id="library-selected-count">0</span> selected
+                            </p>
+                            <div>
+                                <label class="block text-xs font-semibold text-blue-900 uppercase mb-1">Price</label>
+                                <select id="library-price-mode" onchange="libPriceModeChanged()"
+                                        class="px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="suggested">Use the supplier list price</option>
+                                    <option value="on_request">Contact for current pricing</option>
+                                    <option value="fixed">Set one price for all selected</option>
+                                </select>
+                            </div>
+                            <div id="library-fixed-price-wrap" class="hidden">
+                                <label class="block text-xs font-semibold text-blue-900 uppercase mb-1">Amount</label>
+                                <input type="number" step="0.01" min="0" id="library-fixed-price"
+                                       class="px-3 py-2 border rounded-lg text-sm w-32">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-blue-900 uppercase mb-1">Category (optional)</label>
+                                <input type="text" id="library-category" placeholder="e.g. Abrasives"
+                                       class="px-3 py-2 border rounded-lg text-sm w-48">
+                            </div>
+                            <button onclick="libAddSelected()" id="library-add-btn"
+                                    class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-plus mr-1"></i> Add to this catalogue
+                            </button>
+                            <button onclick="libClearSelection()"
+                                    class="px-4 py-2 border border-gray-300 bg-white rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                                Clear
+                            </button>
+                        </div>
+                        <p class="text-xs text-blue-800 mt-2">
+                            Items without a supplier list price are added as
+                            <strong>Contact for current pricing</strong> unless you set an amount.
+                        </p>
+                    </div>
+
+                    <div id="library-result-note" class="hidden mb-3 text-sm rounded-lg p-3"></div>
+
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="px-3 py-3 w-10">
+                                        <input type="checkbox" id="library-select-all" onchange="libToggleAll(this.checked)"
+                                               class="rounded border-gray-300">
+                                    </th>
+                                    <th class="px-3 py-3 text-left font-semibold text-gray-600">Part number</th>
+                                    <th class="px-3 py-3 text-left font-semibold text-gray-600">Description</th>
+                                    <th class="px-3 py-3 text-left font-semibold text-gray-600">Supplier</th>
+                                    <th class="px-3 py-3 text-left font-semibold text-gray-600">Barcode</th>
+                                    <th class="px-3 py-3 text-right font-semibold text-gray-600">Suggested</th>
+                                    <th class="px-3 py-3 text-left font-semibold text-gray-600"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="library-tbody">
+                                <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">
+                                    Choose a company, then search.
+                                </td></tr>
+                            </tbody>
+                        </table>
+                        <div class="flex justify-between items-center px-4 py-3 border-t bg-gray-50">
+                            <p id="library-count" class="text-sm text-gray-500"></p>
+                            <div class="flex gap-2">
+                                <button onclick="libPage(-1)" id="library-prev"
+                                        class="px-3 py-1 border rounded-lg text-sm bg-white text-gray-600 hover:bg-gray-100">Previous</button>
+                                <button onclick="libPage(1)" id="library-next"
+                                        class="px-3 py-1 border rounded-lg text-sm bg-white text-gray-600 hover:bg-gray-100">Next</button>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -1185,11 +1314,13 @@
         document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products',
+            library: 'Item Library',
             promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
         if (section === 'reports') arInit();
         if (section === 'products') loadAdminProducts();
+        if (section === 'library') libInit();
         if (section === 'promotions') loadAdminPromotions();
         if (section === 'orders') loadAdminOrders();
         if (section === 'admins') loadAdminUsers();
@@ -1468,7 +1599,7 @@
     }
 
     function populateCompanyDropdowns() {
-        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'rep-company'];
+        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'rep-company', 'library-company'];
         selectors.forEach(id => {
             const el = document.getElementById(id);
             if (!el) return;
@@ -3317,6 +3448,314 @@
     // ============================================================
     // BRANDING
     // ============================================================
+    // ============================================================
+    // ITEM LIBRARY
+    //
+    // A lookup screen over the supplier master catalogue. The one thing that
+    // has to stay true here: the price a shop sells at is never inherited
+    // silently. The supplier's list price is shown as a suggestion and the
+    // person adding chooses what happens — use it, set their own, or mark the
+    // line "Contact for current pricing". An item with no price at all is
+    // added on request rather than at zero, because a $0 line in a live store
+    // is an order CHC cannot invoice.
+    // ============================================================
+
+    const lib = { offset: 0, limit: 50, total: 0, rows: [], selected: new Map(), timer: null, loaded: false };
+
+    async function libInit() {
+        // The supplier filter is loaded through a company-scoped route, so it
+        // waits for a company rather than guessing an id the access check would
+        // reject.
+        if (!lib.loaded && libCompany()) {
+            try {
+                const res = await adminFetch(`/companies/${libCompany()}/library/vendors`);
+                if (res.ok) {
+                    const { vendors } = await res.json();
+                    const sel = document.getElementById('library-vendor');
+                    sel.innerHTML = '<option value="">All suppliers</option>' +
+                        vendors.map(v => `<option value="${esc(v.vendor_code)}">${esc(v.brand || v.vendor_code)} (${v.count})</option>`).join('');
+                    lib.loaded = true;
+                }
+            } catch (_) { /* the filter is a convenience; search still works without it */ }
+        }
+        libLoad(0);
+    }
+
+    function libCompany() {
+        return document.getElementById('library-company')?.value || '';
+    }
+
+    function libDebounce() {
+        clearTimeout(lib.timer);
+        lib.timer = setTimeout(() => libLoad(0), 300);
+    }
+
+    function libPage(dir) {
+        const next = lib.offset + dir * lib.limit;
+        if (next < 0 || next >= lib.total) return;
+        libLoad(next);
+    }
+
+    async function libLoad(offset) {
+        const companyId = libCompany();
+        const tbody = document.getElementById('library-tbody');
+
+        if (!companyId) {
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Choose a company, then search.</td></tr>';
+            document.getElementById('library-count').textContent = '';
+            document.getElementById('library-conflicts-btn').classList.add('hidden');
+            return;
+        }
+
+        lib.offset = Math.max(0, offset || 0);
+
+        const params = new URLSearchParams({
+            q: document.getElementById('library-search').value.trim(),
+            limit: String(lib.limit),
+            offset: String(lib.offset)
+        });
+        const vendor = document.getElementById('library-vendor').value;
+        if (vendor) params.set('vendors', vendor);
+        if (document.getElementById('library-only-new').checked) params.set('only_new', '1');
+
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Searching…</td></tr>';
+
+        try {
+            const res = await adminFetch(`/companies/${companyId}/library?${params}`);
+            if (!res.ok) throw new Error('search failed');
+            const data = await res.json();
+
+            lib.rows = data.items || [];
+            lib.total = data.total || 0;
+            libRender();
+            libLoadConflicts(companyId);
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-500">Could not search the library.</td></tr>';
+        }
+    }
+
+    function libRender() {
+        const tbody = document.getElementById('library-tbody');
+
+        if (!lib.rows.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Nothing matched.</td></tr>';
+        } else {
+            tbody.innerHTML = lib.rows.map(r => {
+                const has = r.already_in_catalogue;
+                const price = r.suggested_price === null || r.suggested_price === undefined
+                    ? '<span class="text-gray-400">—</span>'
+                    : `$${Number(r.suggested_price).toFixed(2)}`;
+                return `
+                <tr class="border-b hover:bg-gray-50 ${has ? 'opacity-60' : ''}">
+                    <td class="px-3 py-2">
+                        ${has ? '' : `<input type="checkbox" class="rounded border-gray-300 lib-check"
+                                data-id="${r.id}" ${lib.selected.has(r.id) ? 'checked' : ''}
+                                onchange="libToggle('${r.id}', this.checked)">`}
+                    </td>
+                    <td class="px-3 py-2 font-mono text-xs">${esc(r.sku)}</td>
+                    <td class="px-3 py-2">${esc(r.name)}</td>
+                    <td class="px-3 py-2 text-gray-500">${esc(r.brand || r.vendor_code || '')}</td>
+                    <td class="px-3 py-2 font-mono text-xs text-gray-500">${r.barcode ? esc(r.barcode) : '<span class="text-gray-300">none</span>'}</td>
+                    <td class="px-3 py-2 text-right">${price}</td>
+                    <td class="px-3 py-2">
+                        ${has ? '<span class="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded">Already stocked</span>' : ''}
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        const from = lib.total ? lib.offset + 1 : 0;
+        const to = Math.min(lib.offset + lib.limit, lib.total);
+        document.getElementById('library-count').textContent =
+            lib.total ? `Showing ${from}–${to} of ${lib.total.toLocaleString()}` : 'No matches';
+        document.getElementById('library-prev').disabled = lib.offset === 0;
+        document.getElementById('library-next').disabled = lib.offset + lib.limit >= lib.total;
+        document.getElementById('library-select-all').checked = false;
+        libRefreshBulkBar();
+    }
+
+    function libToggle(id, on) {
+        const row = lib.rows.find(r => r.id === id);
+        if (!row) return;
+        if (on) lib.selected.set(id, row); else lib.selected.delete(id);
+        libRefreshBulkBar();
+    }
+
+    function libToggleAll(on) {
+        lib.rows.filter(r => !r.already_in_catalogue).forEach(r => {
+            if (on) lib.selected.set(r.id, r); else lib.selected.delete(r.id);
+        });
+        document.querySelectorAll('.lib-check').forEach(el => { el.checked = on; });
+        libRefreshBulkBar();
+    }
+
+    function libClearSelection() {
+        lib.selected.clear();
+        document.querySelectorAll('.lib-check').forEach(el => { el.checked = false; });
+        document.getElementById('library-select-all').checked = false;
+        libRefreshBulkBar();
+    }
+
+    function libRefreshBulkBar() {
+        const n = lib.selected.size;
+        document.getElementById('library-selected-count').textContent = String(n);
+        document.getElementById('library-bulk').classList.toggle('hidden', n === 0);
+    }
+
+    function libPriceModeChanged() {
+        const fixed = document.getElementById('library-price-mode').value === 'fixed';
+        document.getElementById('library-fixed-price-wrap').classList.toggle('hidden', !fixed);
+    }
+
+    async function libAddSelected() {
+        const companyId = libCompany();
+        if (!companyId || !lib.selected.size) return;
+
+        const mode = document.getElementById('library-price-mode').value;
+        const fixed = parseFloat(document.getElementById('library-fixed-price').value);
+        const category = document.getElementById('library-category').value.trim();
+
+        if (mode === 'fixed' && !(Number.isFinite(fixed) && fixed >= 0)) {
+            alert('Enter a price, or choose one of the other options.');
+            return;
+        }
+
+        const items = [...lib.selected.values()].map(r => {
+            const base = { library_id: r.id };
+            if (category) base.category = category;
+
+            if (mode === 'on_request') return { ...base, price_on_request: true };
+            if (mode === 'fixed') return { ...base, price: fixed };
+            // "Use the supplier list price" — but an item the supplier did not
+            // price cannot become a $0 line, so it falls back to on-request.
+            return r.suggested_price === null || r.suggested_price === undefined
+                ? { ...base, price_on_request: true }
+                : { ...base, price: r.suggested_price };
+        });
+
+        const btn = document.getElementById('library-add-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Adding…';
+
+        try {
+            const res = await adminFetch(`/companies/${companyId}/library/add`, {
+                method: 'POST',
+                body: JSON.stringify({ items })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'add failed');
+
+            libShowResult(data);
+            libClearSelection();
+            libLoad(lib.offset);
+        } catch (err) {
+            libNote('error', 'Could not add the selected items.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-plus mr-1"></i> Add to this catalogue';
+        }
+    }
+
+    function libShowResult(data) {
+        const s = data.summary || { added: 0, skipped: 0, failed: 0 };
+        const bits = [`<strong>${s.added}</strong> added`];
+        if (s.skipped) bits.push(`${s.skipped} already stocked`);
+        if (s.failed) bits.push(`${s.failed} could not be added`);
+
+        const noBarcode = (data.added || []).filter(a => a.barcode_skipped_as_duplicate).length;
+        if (noBarcode) {
+            bits.push(`${noBarcode} added without a barcode — that barcode is already on another product here`);
+        }
+
+        libNote(s.failed ? 'warn' : 'ok', bits.join(' · '));
+    }
+
+    function libNote(kind, html) {
+        const el = document.getElementById('library-result-note');
+        const styles = {
+            ok:    'bg-green-50 border border-green-200 text-green-800',
+            warn:  'bg-amber-50 border border-amber-200 text-amber-900',
+            error: 'bg-red-50 border border-red-200 text-red-800'
+        };
+        el.className = `mb-3 text-sm rounded-lg p-3 ${styles[kind] || styles.ok}`;
+        el.innerHTML = html;
+        el.classList.remove('hidden');
+    }
+
+    async function libLoadConflicts(companyId) {
+        try {
+            const res = await adminFetch(`/companies/${companyId}/library/conflicts`);
+            if (!res.ok) return;
+            const { conflicts } = await res.json();
+            const btn = document.getElementById('library-conflicts-btn');
+            document.getElementById('library-conflicts-count').textContent = String(conflicts.length);
+            btn.classList.toggle('hidden', conflicts.length === 0);
+            lib.conflicts = conflicts;
+        } catch (_) { /* not fatal */ }
+    }
+
+    function libOpenConflicts() {
+        const rows = lib.conflicts || [];
+        if (!rows.length) return;
+
+        // Deliberately plain: these are the barcodes the import refused to guess
+        // at. The commonest case is a case and a single unit sharing one
+        // manufacturer barcode, where applying it would make every scan
+        // ambiguous and quietly corrupt stock counts.
+        const list = rows.map(c => `
+            <tr class="border-b">
+                <td class="px-3 py-2 font-mono text-xs">${esc(c.sku)}</td>
+                <td class="px-3 py-2 font-mono text-xs">${esc(c.barcode)}</td>
+                <td class="px-3 py-2 text-gray-500 text-xs">${esc(libReason(c.reason))}</td>
+                <td class="px-3 py-2 text-right whitespace-nowrap">
+                    <button onclick="libResolve('${c.id}', true)" class="text-blue-600 hover:underline text-xs mr-3">Attach anyway</button>
+                    <button onclick="libResolve('${c.id}', false)" class="text-gray-500 hover:underline text-xs">Dismiss</button>
+                </td>
+            </tr>`).join('');
+
+        libNote('warn', `
+            <p class="font-semibold mb-2">Barcodes that need a person</p>
+            <p class="mb-3 text-xs">These were not applied automatically because a scan of them would be ambiguous.
+            Attach one only if you have checked which item on the shelf it belongs to.</p>
+            <table class="w-full text-sm bg-white rounded-lg">
+                <thead class="text-xs text-gray-500 uppercase"><tr>
+                    <th class="px-3 py-2 text-left">Part</th>
+                    <th class="px-3 py-2 text-left">Barcode</th>
+                    <th class="px-3 py-2 text-left">Why</th>
+                    <th></th>
+                </tr></thead>
+                <tbody>${list}</tbody>
+            </table>`);
+    }
+
+    function libReason(reason) {
+        const map = {
+            shared_by_two_skus: 'the supplier gives this barcode to two different part numbers',
+            already_used_by_another_product: 'already attached to a different product here',
+            pre_existing_duplicate: 'two products here already share this barcode'
+        };
+        return map[reason] || reason;
+    }
+
+    async function libResolve(id, apply) {
+        const companyId = libCompany();
+        if (!companyId) return;
+        try {
+            const res = await adminFetch(`/companies/${companyId}/library/conflicts/${id}/resolve`, {
+                method: 'POST',
+                body: JSON.stringify({ apply })
+            });
+            if (!res.ok) throw new Error('resolve failed');
+            await libLoadConflicts(companyId);
+            libOpenConflicts();
+            if (!(lib.conflicts || []).length) {
+                libNote('ok', 'All barcode questions are dealt with.');
+            }
+        } catch (_) {
+            libNote('error', 'Could not save that decision.');
+        }
+    }
+
     async function loadBrandingInfo() {
         try {
             const resp = await adminFetch('/branding/logo');

@@ -29,13 +29,19 @@ function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringi
  * Kept in sync by hand with migrations/.
  */
 const KNOWN_COLUMNS = {
+    // Kept in step with the live orders table. This list is what caught
+    // `needs_pricing` before it shipped, and it is what caught
+    // `placed_by_user_id` arriving without the fake being updated — so when a
+    // migration adds a column, add it here in the same change.
     orders: new Set([
         'id', 'company_id', 'order_number', 'contact_name', 'contact_email', 'contact_phone',
-        'company_name', 'po_number', 'location', 'location_id', 'items', 'subtotal', 'total',
+        'company_name', 'location', 'items', 'subtotal', 'tax', 'total',
         'notes', 'status', 'status_history', 'created_at', 'updated_at',
-        'invoice_url', 'invoice_uploaded_at', 'closed_at', 'closed_by', 'payment_status',
-        'payment_intent_id', 'paid_at', 'supplier_branch_id',
-        'po_source', 'po_normalized'
+        'po_number', 'location_id',
+        'payment_status', 'payment_provider', 'payment_intent_id', 'amount_paid', 'paid_at',
+        'invoice_path', 'invoice_filename', 'invoice_uploaded_at', 'invoice_uploaded_by',
+        'closed_at', 'closed_by',
+        'po_source', 'po_normalized', 'placed_by_user_id'
     ]),
     company_po_sequences: new Set([
         'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',
@@ -50,7 +56,24 @@ const KNOWN_COLUMNS = {
         'id', 'company_id', 'location_id', 'kit_id', 'kit_name', 'job_ref', 'multiplier',
         'line_count', 'total_cost', 'actor_label', 'actor_type', 'created_by', 'created_at'
     ]),
-    scheduler_runs: new Set(['id', 'job', 'run_key', 'detail', 'result', 'started_at', 'finished_at'])
+    scheduler_runs: new Set(['id', 'job', 'run_key', 'detail', 'result', 'started_at', 'finished_at']),
+    products: new Set([
+        'id', 'company_id', 'brand', 'name', 'sku', 'description', 'category', 'price',
+        'previous_price', 'case_qty', 'unit', 'image_url', 'metadata', 'sort_order',
+        'is_active', 'created_at', 'updated_at', 'price_on_request'
+    ]),
+    product_barcodes: new Set([
+        'id', 'product_id', 'barcode', 'symbology', 'is_primary', 'created_at',
+        'label_printed_at', 'source', 'is_internal'
+    ]),
+    item_library: new Set([
+        'id', 'sku', 'sku_key', 'name', 'brand', 'vendor_code', 'barcode', 'unit',
+        'case_qty', 'list_price', 'source', 'source_ref', 'imported_at', 'notes'
+    ]),
+    item_library_conflicts: new Set([
+        'id', 'company_id', 'product_id', 'sku', 'barcode', 'reason',
+        'resolved_at', 'resolved_by', 'created_at'
+    ])
 };
 
 function assertKnownColumns(table, payload) {
@@ -391,6 +414,53 @@ function createFakeSupabase(seed = {}) {
                         pad_width: seq.pad_width,
                         use_check_digit: seq.use_check_digit
                     }],
+                    error: null
+                };
+            }
+            if (name === 'search_item_library') {
+                // Mirrors search_item_library(): match on SKU, barcode or every
+                // typed word, and say whether the asking company already sells
+                // it. The ranking in the real function is Postgres trigram
+                // similarity and is not reproduced here — what this covers is
+                // the contract the route depends on: which rows come back, and
+                // the already_in_catalogue flag, which is the flag that stops
+                // the console offering a duplicate SKU.
+                const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const raw = String(args.p_query || '').trim();
+                const key = norm(raw);
+                const words = raw.toLowerCase().split(/\s+/).filter(Boolean);
+
+                const mine = new Map();
+                for (const p of db.products || []) {
+                    if (p.company_id !== args.p_company_id) continue;
+                    const k = norm(p.sku);
+                    if (k) mine.set(k, p.id);
+                }
+
+                let rows = (db.item_library || []).filter(l => {
+                    if (args.p_vendors && !args.p_vendors.includes(l.vendor_code)) return false;
+                    if (raw === '') return true;
+                    if (key && norm(l.sku).includes(key)) return true;
+                    if (l.barcode === raw) return true;
+                    return words.length > 0 && words.every(w =>
+                        String(l.name || '').toLowerCase().includes(w) ||
+                        String(l.sku || '').toLowerCase().includes(w));
+                });
+
+                rows = rows.map(l => ({
+                    ...l,
+                    existing_product_id: mine.get(norm(l.sku)) || null,
+                    already_in_catalogue: mine.has(norm(l.sku))
+                }));
+
+                if (args.p_only_new) rows = rows.filter(r => !r.already_in_catalogue);
+
+                const total = rows.length;
+                const offset = Number(args.p_offset) || 0;
+                const limit = Number(args.p_limit) || 50;
+                return {
+                    data: rows.slice(offset, offset + limit)
+                        .map(r => ({ ...r, rank: 1, total_count: total })),
                     error: null
                 };
             }

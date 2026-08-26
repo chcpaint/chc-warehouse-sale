@@ -45,7 +45,16 @@ const stubs = {
         },
         requireAdminAuth: (req, res, next) => next(),
         requireSuperAdmin: (req, res, next) => next(),
-        requireCompanyAccess: (req, res, next) => next()
+        requireCompanyAccess: (req, res, next) => next(),
+        // Added when per-company customer users landed. The storefront now pulls
+        // in company-users-store, which calls router.use() with these at module
+        // load — so a stub missing one of them is not a failing assertion, it is
+        // the whole file refusing to load.
+        requireCompanyUser: (req, res, next) => next(),
+        requireCompanyOwner: (req, res, next) => next(),
+        requireFullAdmin: (req, res, next) => next(),
+        restrictOrderDesk: (req, res, next) => next(),
+        requireOrderAccess: (req, res, next) => next()
     },
     [path.join(ROOT, 'utils/sanitize.js')]: {
         stripHtml: (s) => String(s === undefined || s === null ? '' : s).replace(/<[^>]*>/g, ''),
