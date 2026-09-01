@@ -53,14 +53,21 @@ alter table public.kit_items
         (ref_line_total is null or ref_line_total >= 0)
     );
 
-create temporary table _kit_ref (
+-- A permanent scratch table, not a temporary one. The Supabase SQL editor
+-- runs statements over a pooled connection with autocommit, so a TEMP table
+-- with ON COMMIT DROP is gone before the next statement can read it. This is
+-- dropped explicitly at the end instead.
+drop table if exists public._kit_ref_scratch;
+create table public._kit_ref_scratch (
     kit_name   text not null,
     sku        text not null,
     unit_price numeric not null,
     line_total numeric not null
-) on commit drop;
+);
+-- Locked down in case a failed run ever leaves it behind.
+alter table public._kit_ref_scratch enable row level security;
 
-insert into _kit_ref (kit_name, sku, unit_price, line_total) values
+insert into public._kit_ref_scratch (kit_name, sku, unit_price, line_total) values
     ('Hood Replace', 'MMM08852', 50.99, 20.4),
     ('Hood Replace', 'FUS123EZ', 133.8, 133.8),
     ('Hood Replace', 'PRF611N', 189.99, 1.9),
@@ -111,7 +118,7 @@ update public.kit_items i
    set ref_unit_price = r.unit_price,
        ref_line_total = r.line_total,
        ref_source     = 'skyline'
-  from _kit_ref r
+  from public._kit_ref_scratch r
   join public.repair_kits k
     on k.company_id is null and lower(k.name) = lower(r.kit_name)
  where i.kit_id = k.id
@@ -229,5 +236,8 @@ begin
      where k.company_id is null and k.source = 'chc' and i.ref_source is null;
     raise notice 'Reference prices on % lines | % master kit lines still without one', priced, unreconciled;
 end $$;
+
+-- Scratch table has done its job.
+drop table if exists public._kit_ref_scratch;
 
 commit;
