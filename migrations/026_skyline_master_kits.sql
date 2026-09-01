@@ -62,15 +62,22 @@ update public.repair_kits
 -- 2. The kits themselves
 -- ------------------------------------------------------------
 
-create temporary table _kit_load (
+-- A permanent scratch table, not a temporary one. The Supabase SQL editor
+-- runs statements over a pooled connection with autocommit, so a TEMP table
+-- with ON COMMIT DROP is gone before the next statement can read it. This is
+-- dropped explicitly at the end instead.
+drop table if exists public._kit_load_scratch;
+create table public._kit_load_scratch (
     kit_name  text not null,
     sku       text not null,
     quantity  numeric not null,
     sort_order integer not null,
     review    boolean not null default false
-) on commit drop;
+);
+-- Locked down in case a failed run ever leaves it behind.
+alter table public._kit_load_scratch enable row level security;
 
-insert into _kit_load (kit_name, sku, quantity, sort_order, review) values
+insert into public._kit_load_scratch (kit_name, sku, quantity, sort_order, review) values
     ('Hood Replace', 'MMM08852', 0.4, 1, false),
     ('Hood Replace', 'FUS123EZ', 1.0, 2, false),
     ('Hood Replace', 'PRF611N', 0.01, 3, false),
@@ -124,7 +131,7 @@ declare missing text;
 begin
     select string_agg(distinct l.sku, ', ')
       into missing
-      from _kit_load l
+      from public._kit_load_scratch l
      where not exists (
            select 1 from public.item_library il
             where il.sku_key = upper(regexp_replace(l.sku, '[^A-Za-z0-9]', '', 'g')));
@@ -141,25 +148,25 @@ select null,
        'chc',
        true,
        100 + row_number() over (order by l.kit_name)
-  from (select distinct kit_name from _kit_load) l
+  from (select distinct kit_name from public._kit_load_scratch) l
  where not exists (select 1 from public.repair_kits k
                     where k.company_id is null and lower(k.name) = lower(l.kit_name));
 
 update public.repair_kits k
    set is_active = true, source = 'chc', updated_at = now()
-  from (select distinct kit_name from _kit_load) l
+  from (select distinct kit_name from public._kit_load_scratch) l
  where k.company_id is null and lower(k.name) = lower(l.kit_name);
 
 -- Rebuild the lines. Dropping and reinserting keeps the migration re-runnable;
 -- kit_product_map rows hanging off old line ids cascade away with them, which
 -- is correct - a line that no longer exists has nothing left to resolve to.
 delete from public.kit_items i
- using public.repair_kits k, (select distinct kit_name from _kit_load) l
+ using public.repair_kits k, (select distinct kit_name from public._kit_load_scratch) l
  where i.kit_id = k.id and k.company_id is null and lower(k.name) = lower(l.kit_name);
 
 insert into public.kit_items (kit_id, sku, product_id, quantity, unit, sort_order, needs_review)
 select k.id, l.sku, null, l.quantity, 'each', l.sort_order, l.review
-  from _kit_load l
+  from public._kit_load_scratch l
   join public.repair_kits k
     on k.company_id is null and lower(k.name) = lower(l.kit_name);
 
@@ -181,7 +188,7 @@ select p.company_id, i.id, p.id, null, false
     on upper(regexp_replace(p.sku, '[^A-Za-z0-9]', '', 'g'))
      = upper(regexp_replace(i.sku, '[^A-Za-z0-9]', '', 'g'))
    and p.is_active = true
- where exists (select 1 from _kit_load l where lower(l.kit_name) = lower(k.name))
+ where exists (select 1 from public._kit_load_scratch l where lower(l.kit_name) = lower(k.name))
 on conflict (company_id, kit_item_id) do nothing;
 
 -- ------------------------------------------------------------
@@ -197,7 +204,7 @@ select c.id, k.id, false
   from public.companies c
  cross join public.repair_kits k
  where k.company_id is null
-   and exists (select 1 from _kit_load l where lower(l.kit_name) = lower(k.name))
+   and exists (select 1 from public._kit_load_scratch l where lower(l.kit_name) = lower(k.name))
 on conflict (company_id, kit_id) do nothing;
 
 -- ------------------------------------------------------------
@@ -222,5 +229,8 @@ begin
     raise notice 'Kits % | lines % | resolved company-lines % | still unmapped %',
         kits, lines, resolved, unresolved;
 end $$;
+
+-- Scratch table has done its job.
+drop table if exists public._kit_load_scratch;
 
 commit;
