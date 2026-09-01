@@ -89,7 +89,7 @@ async function kitForCompany(companyId, kitId) {
 async function resolveKitLines(companyId, kitId) {
     const { data: items, error } = await supabaseAdmin
         .from('kit_items')
-        .select('id, sku, product_id, quantity, unit, sort_order, needs_review')
+        .select('id, sku, product_id, quantity, unit, sort_order, needs_review, ref_unit_price, ref_line_total, ref_source')
         .eq('kit_id', kitId)
         .order('sort_order', { ascending: true });
 
@@ -178,6 +178,13 @@ async function resolveKitLines(companyId, kitId) {
             unit: item.unit || 'each',
             quantity,
             unit_price: Number(product.price ?? 0),
+            // The price the source system carries for this line, when one is
+            // known. Shown beside the live figure so a total that has drifted is
+            // visible before the job is invoiced. Never billed from.
+            ref_unit_price: item.ref_unit_price === null || item.ref_unit_price === undefined
+                ? null : Number(item.ref_unit_price),
+            ref_line_total: item.ref_line_total === null || item.ref_line_total === undefined
+                ? null : Number(item.ref_line_total),
             source: map ? 'mapped' : 'kit'
         });
     }
@@ -261,15 +268,24 @@ router.get('/:kitId/preview', async (req, res) => {
                 location.restrict_to_category && (line.category || '') !== location.restrict_to_category
             );
 
+            // A line resolved to a product with no price consumes stock and
+            // contributes nothing to the total. The kit would post and the job
+            // would be under-billed with nothing on screen to say so, which is
+            // worse than refusing — so it blocks, like a shortfall does.
+            const unpriced = !(Number(line.unit_price) > 0);
+
             return {
                 ...line,
                 quantity: qty,
                 on_hand: onHand,
                 shortfall,
                 line_cost: round4(qty * line.unit_price),
+                ref_line_cost: line.ref_unit_price === null
+                    ? null : round4(qty * line.ref_unit_price),
                 would_go_negative: shortfall > 0,
                 category_blocked: categoryBlocked,
-                blocking: categoryBlocked || (shortfall > 0 && !settings.allow_negative)
+                unpriced,
+                blocking: categoryBlocked || unpriced || (shortfall > 0 && !settings.allow_negative)
             };
         });
 
@@ -283,6 +299,12 @@ router.get('/:kitId/preview', async (req, res) => {
             unresolved,
             excluded,
             total_cost: round4(priced.reduce((s, l) => s + l.line_cost, 0)),
+            // What the source system says the same kit comes to, when every
+            // line has a reference. Null the moment one does not, because a
+            // partial sum compared against a full one is worse than no compare.
+            reference_total: priced.every(l => l.ref_line_cost !== null)
+                ? round4(priced.reduce((s, l) => s + l.ref_line_cost, 0))
+                : null,
             blocked: unresolved.length > 0 || blockingLines.length > 0 || priced.length === 0,
             blocked_reason: blockedReason({ priced, unresolved, blockingLines, allowNegative: settings.allow_negative })
         });
@@ -447,6 +469,10 @@ router.post('/:kitId/consume', async (req, res) => {
             const onHand = Number(levels[line.product_id]?.on_hand ?? 0);
             if (location.restrict_to_category && (line.category || '') !== location.restrict_to_category) {
                 problems.push(`${location.name} only stocks ${location.restrict_to_category} items — ${line.sku || line.name} is ${line.category || 'uncategorised'}.`);
+            } else if (!(Number(line.unit_price) > 0)) {
+                // Same reasoning as the preview: expensing this would draw the
+                // stock down and bill nothing for it.
+                problems.push(`${line.sku || line.name} has no price set — the job would be under-billed. Set a price before expensing this kit.`);
             } else if (!settings.allow_negative && onHand - line.quantity < 0) {
                 problems.push(`Only ${onHand} of ${line.sku || line.name} on hand, kit needs ${line.quantity}.`);
             }
@@ -595,6 +621,10 @@ function blockedReason({ priced, unresolved, blockingLines, allowNegative }) {
     }
     const category = blockingLines.find(l => l.category_blocked);
     if (category) return `This location does not stock ${category.category || 'that category'}.`;
+    const unpriced = blockingLines.find(l => l.unpriced);
+    if (unpriced) {
+        return `${unpriced.sku || unpriced.name} has no price — this kit would expense stock without billing for it.`;
+    }
     const short = blockingLines.find(l => l.would_go_negative);
     if (short && !allowNegative) {
         return `Not enough ${short.sku || short.name} on hand — ${short.on_hand} of ${short.quantity} needed.`;

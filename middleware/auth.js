@@ -79,7 +79,7 @@ async function requireAdminAuth(req, res, next) {
         // effect immediately, not only at next login.
         const { data: admin, error } = await supabaseAdmin
             .from('admin_users')
-            .select('id, email, name, role, company_id, branch_id, is_active')
+            .select('id, email, name, role, company_id, branch_id, is_active, must_change_password')
             .eq('id', decoded.admin_id)
             .single();
 
@@ -150,14 +150,50 @@ const ORDER_DESK_ALLOW = [
     ['POST', /^\/companies\/[^/]+\/orders\/[^/]+\/invoice$/],
     ['GET', /^\/companies\/[^/]+\/orders\/[^/]+\/invoice$/],
     ['PUT', /^\/companies\/[^/]+\/orders\/[^/]+\/close$/],
-    ['GET', /^\/whoami$/]
+    ['GET', /^\/whoami$/],
+    ['PUT', /^\/me\/password$/]
 ];
 
+/**
+ * Roles fenced to order management. order_manager sees every branch's orders,
+ * but reaches exactly the same endpoints as a single-branch desk — the extra
+ * privilege is breadth of ORDERS, never breadth of the CONSOLE. Keeping both
+ * roles on one allow-list is what guarantees that stays true: widening access
+ * for a manager would mean editing this list, which is a visible decision.
+ */
+const ORDER_ONLY_ROLES = ['order_desk', 'order_manager'];
+
 function restrictOrderDesk(req, res, next) {
-    if (!req.admin || req.admin.role !== 'order_desk') return next();
+    if (!req.admin || !ORDER_ONLY_ROLES.includes(req.admin.role)) return next();
     const allowed = ORDER_DESK_ALLOW.some(([m, re]) => m === req.method && re.test(req.path));
     if (!allowed) {
         return res.status(403).json({ error: 'Your account has access to order management only.' });
+    }
+    next();
+}
+
+/**
+ * An account still holding a password somebody else chose can do exactly two
+ * things: find out who it is, and replace the password.
+ *
+ * This is in the API, not the browser, on purpose. A forced change that lives
+ * only in the console is a suggestion — anyone who can open developer tools, or
+ * call the API with the token they were just issued, walks straight past it.
+ * Until the flag clears, there is nothing else to reach.
+ */
+const PASSWORD_RESET_ALLOW = [
+    ['GET', /^\/whoami$/],
+    ['PUT', /^\/me\/password$/]
+];
+
+function requirePasswordCurrent(req, res, next) {
+    if (!req.admin || !req.admin.must_change_password) return next();
+    const allowed = PASSWORD_RESET_ALLOW.some(([m, re]) => m === req.method && re.test(req.path));
+    if (!allowed) {
+        return res.status(403).json({
+            error: 'You must choose your own password before using the console.',
+            must_change_password: true
+        });
     }
     next();
 }
@@ -193,5 +229,7 @@ module.exports = {
     requireFullAdmin,
     requireCompanyAccess,
     restrictOrderDesk,
-    requireOrderAccess
+    requirePasswordCurrent,
+    requireOrderAccess,
+    ORDER_ONLY_ROLES
 };

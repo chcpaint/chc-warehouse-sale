@@ -269,6 +269,88 @@ test('preview flags a shortfall rather than silently going negative', async () =
     assert.match(res.body.blocked_reason, /not enough/i);
 });
 
+// ------------------------------------------------------------------
+// Billing. A kit that expenses stock but bills nothing for it is the
+// quietest way to lose money here: the consume succeeds, the ledger is
+// correct, and the invoice is simply short. These cover that.
+// ------------------------------------------------------------------
+
+test('a line with no price blocks the preview instead of billing zero', async () => {
+    reset();
+    mapKit();
+    fake.db.products.find(p => p.id === CLEAR).price = 0;
+
+    const res = await request(storeApp()).get(`${S}/${KIT}/preview?location_id=${LOC}`);
+    assert.equal(res.body.blocked, true);
+    const clear = res.body.lines.find(l => l.product_id === CLEAR);
+    assert.equal(clear.unpriced, true);
+    assert.equal(clear.line_cost, 0);
+    assert.match(res.body.blocked_reason, /no price/i);
+});
+
+test('a null price is treated the same as zero', async () => {
+    reset();
+    mapKit();
+    fake.db.products.find(p => p.id === CLEAR).price = null;
+
+    const res = await request(storeApp()).get(`${S}/${KIT}/preview?location_id=${LOC}`);
+    assert.equal(res.body.blocked, true);
+    assert.match(res.body.blocked_reason, /no price/i);
+});
+
+test('consuming a kit with an unpriced line is refused and writes nothing', async () => {
+    reset();
+    mapKit();
+    fake.db.products.find(p => p.id === TAPE).price = 0;
+    const before = fake.db.stock_movements.length;
+    const headers = fake.db.kit_consumptions.length;
+
+    const res = await request(storeApp())
+        .post(`${S}/${KIT}/consume`)
+        .send({ location_id: LOC, job_ref: 'RO-9001', actor_label: 'Sam' });
+
+    assert.equal(res.status, 409);
+    assert.match(res.body.error, /no price set/i);
+    assert.equal(fake.db.stock_movements.length, before, 'no stock may move');
+    assert.equal(fake.db.kit_consumptions.length, headers, 'no header may be written');
+});
+
+test('an unpriced line still blocks when the shop allows negative stock', async () => {
+    reset({ settings: { allow_negative: true } });
+    mapKit();
+    fake.db.products.find(p => p.id === CLEAR).price = 0;
+
+    const res = await request(storeApp()).get(`${S}/${KIT}/preview?location_id=${LOC}`);
+    assert.equal(res.body.blocked, true, 'allow_negative is about stock, not about price');
+    assert.match(res.body.blocked_reason, /no price/i);
+});
+
+test('the reference total is carried beside the live one', async () => {
+    reset();
+    mapKit();
+    // Skyline's numbers for these two lines: 0.02 x 189.99 and 0.3 x 50.99.
+    fake.db.kit_items.find(i => i.id === LINE_CLEAR).ref_unit_price = 189.99;
+    fake.db.kit_items.find(i => i.id === LINE_TAPE).ref_unit_price  = 50.99;
+
+    const res = await request(storeApp()).get(`${S}/${KIT}/preview?location_id=${LOC}`);
+    assert.equal(res.body.blocked, false);
+    assert.equal(res.body.total_cost, 7);
+    // 0.02 x 189.99 = 3.7998, 0.3 x 50.99 = 15.297
+    assert.equal(res.body.reference_total, 19.0968);
+});
+
+test('one line without a reference nulls the whole comparison', async () => {
+    reset();
+    mapKit();
+    fake.db.kit_items.find(i => i.id === LINE_CLEAR).ref_unit_price = 189.99;
+    // LINE_TAPE deliberately has none.
+
+    const res = await request(storeApp()).get(`${S}/${KIT}/preview?location_id=${LOC}`);
+    assert.equal(res.body.total_cost, 7);
+    assert.equal(res.body.reference_total, null,
+        'a partial reference compared against a full total is worse than none');
+});
+
 test('a category-locked location blocks a kit containing other categories', async () => {
     reset();
     mapKit();
