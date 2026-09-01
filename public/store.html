@@ -27,6 +27,82 @@
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ============================================================
+           SLIDE-OUT MENU
+
+           Sized and behaved for a body shop, not a desk: 52px targets a
+           gloved hand can hit, a backdrop so it is obvious the menu is
+           modal, Escape and click-outside to leave, and focus returned to
+           the button that opened it. Groups collapse and remember, so a
+           long list never forces scrolling past what you use daily.
+           ============================================================ */
+        .nav-tap { min-height: 52px; display: inline-flex; align-items: center; gap: .6rem; }
+
+        .drawer-backdrop {
+            position: fixed; inset: 0; background: rgba(15, 23, 42, .45);
+            z-index: 60; opacity: 0; transition: opacity .18s ease;
+        }
+        .drawer-backdrop.open { opacity: 1; }
+
+        .drawer {
+            position: fixed; top: 0; left: 0; bottom: 0; width: 310px; max-width: 86vw;
+            background: #fff; z-index: 61; display: flex; flex-direction: column;
+            box-shadow: 0 10px 40px rgba(15, 23, 42, .25);
+            transform: translateX(-100%); transition: transform .2s ease;
+        }
+        .drawer.open { transform: translateX(0); }
+
+        @media (prefers-reduced-motion: reduce) {
+            .drawer, .drawer-backdrop { transition: none; }
+        }
+
+        .drawer-head {
+            display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+            padding: .85rem 1rem; border-bottom: 1px solid #e5e7eb;
+        }
+        .drawer-search {
+            display: flex; align-items: center; gap: .5rem;
+            margin: .75rem 1rem .25rem; padding: .5rem .7rem;
+            background: #f3f4f6; border-radius: .5rem;
+        }
+        .drawer-search input {
+            border: 0; background: transparent; outline: none; width: 100%; font-size: .9rem;
+        }
+        .drawer-nav { flex: 1; overflow-y: auto; padding: .5rem .5rem 1rem; }
+        .drawer-foot { border-top: 1px solid #e5e7eb; padding: .4rem .75rem; }
+
+        .drawer-group > .grp-btn {
+            width: 100%; display: flex; align-items: center; justify-content: space-between;
+            padding: .55rem .75rem; font-size: .7rem; font-weight: 700; letter-spacing: .09em;
+            text-transform: uppercase; color: #9ca3af; background: none; border: 0; cursor: pointer;
+        }
+        .drawer-group .grp-btn .chev { transition: transform .15s ease; }
+        .drawer-group[data-open="false"] .grp-btn .chev { transform: rotate(-90deg); }
+        .drawer-group[data-open="false"] .grp-items { display: none; }
+
+        .drawer-link {
+            width: 100%; min-height: 52px; display: flex; align-items: center; gap: .75rem;
+            padding: 0 .75rem; border-radius: .5rem; border: 0; background: none; cursor: pointer;
+            font-size: .95rem; color: #374151; text-align: left;
+        }
+        .drawer-link:hover { background: #f3f4f6; }
+        .drawer-link:focus-visible { outline: 2px solid #1d4ed8; outline-offset: -2px; }
+        .drawer-link .ico { width: 1.25rem; text-align: center; color: #9ca3af; flex: none; }
+        .drawer-link[aria-current="page"] {
+            background: #eff6ff; color: #1d4ed8; font-weight: 600;
+            box-shadow: inset 3px 0 0 #1d4ed8;
+        }
+        .drawer-link[aria-current="page"] .ico { color: #1d4ed8; }
+        .drawer-link .count {
+            margin-left: auto; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem;
+            display: none; align-items: center; justify-content: center;
+            border-radius: 999px; font-size: .72rem; font-weight: 700; color: #fff;
+        }
+        .drawer-link .count.show { display: inline-flex; }
+        .count.c-blue  { background: #2563eb; }
+        .count.c-amber { background: #d97706; }
+        .drawer-empty { padding: 1rem .75rem; color: #9ca3af; font-size: .85rem; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -113,6 +189,44 @@
         </div>
     </div>
 
+
+    <!-- ============================================================ -->
+    <!-- SLIDE-OUT MENU                                               -->
+    <!--                                                              -->
+    <!-- Built from one NAV model that also drives the desktop tab     -->
+    <!-- bar, so the two can never drift apart and list different      -->
+    <!-- things. Only real destinations appear: a menu that promises   -->
+    <!-- a screen we do not have is worse than no menu.                -->
+    <!-- ============================================================ -->
+    <div id="drawer-backdrop" onclick="closeDrawer()" class="drawer-backdrop" hidden></div>
+
+    <aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-label="Menu" hidden>
+        <div class="drawer-head">
+            <div class="min-w-0">
+                <p id="drawer-company" class="font-semibold text-gray-800 truncate"></p>
+                <p id="drawer-location" class="text-xs text-gray-500 truncate"></p>
+            </div>
+            <button onclick="closeDrawer()" aria-label="Close menu"
+                    class="nav-tap text-gray-400 hover:text-gray-700 rounded-lg px-3">
+                <i class="fas fa-xmark text-lg"></i>
+            </button>
+        </div>
+
+        <div class="drawer-search">
+            <i class="fas fa-magnifying-glass text-gray-400 text-sm"></i>
+            <input id="drawer-filter" type="search" placeholder="Jump to…" autocomplete="off"
+                   oninput="filterDrawer(this.value)" aria-label="Filter menu">
+        </div>
+
+        <nav id="drawer-nav" class="drawer-nav"></nav>
+
+        <div class="drawer-foot">
+            <button onclick="closeDrawer(); logout();" class="nav-tap w-full text-left text-gray-500 hover:text-red-600 rounded-lg px-3">
+                <i class="fas fa-sign-out-alt w-5"></i> Sign out
+            </button>
+        </div>
+    </aside>
+
     <!-- ============================================================ -->
     <!-- MAIN APPLICATION -->
     <!-- ============================================================ -->
@@ -123,6 +237,11 @@
                 <div class="flex items-center justify-between">
                     <!-- Dual Logo -->
                     <div class="flex items-center gap-3">
+                        <button onclick="openDrawer()" id="drawer-btn" aria-label="Open menu"
+                                aria-expanded="false" aria-controls="drawer"
+                                class="nav-tap -ml-2 mr-1 text-gray-500 hover:text-blue-700 hover:bg-gray-100 rounded-lg px-3">
+                            <i class="fas fa-bars text-lg"></i>
+                        </button>
                         <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-10 object-contain" onerror="this.parentElement.innerHTML='<span class=\'font-bold text-blue-900 text-xl\'>CHC</span>'">
                         <div class="h-8 w-px bg-gray-300" id="header-logo-divider" style="display:none"></div>
                         <img id="header-company-logo" src="" alt="" class="h-10 object-contain" style="display:none">
@@ -146,7 +265,7 @@
                 </div>
 
                 <!-- Navigation Tabs -->
-                <nav class="flex gap-1 mt-3 -mb-px" id="nav-tabs">
+                <nav class="hidden lg:flex gap-1 mt-3 -mb-px" id="nav-tabs">
                     <button onclick="showTab('products')" data-tab="products"
                         class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all tab-active">
                         <i class="fas fa-box mr-1"></i> Products
@@ -1030,6 +1149,189 @@
         document.removeEventListener('click', closeLocationDropdown);
     }
 
+
+    // ============================================================
+    // SLIDE-OUT MENU
+    //
+    // ONE source of truth for navigation. The desktop tab bar and the
+    // drawer are both rendered from NAV, so a screen can never appear in
+    // one and be missing from the other — which is exactly how menus rot.
+    //
+    // Only destinations that actually exist are listed. Inventory appears
+    // only when that module is switched on for the company, the same
+    // condition the tab bar already uses.
+    // ============================================================
+
+    const NAV = [
+        { group: 'Ordering', items: [
+            { tab: 'products',   label: 'Products',      icon: 'fa-box' },
+            { tab: 'promotions', label: 'Promotions',    icon: 'fa-tags' },
+            { tab: 'cart',       label: 'Cart',          icon: 'fa-shopping-cart', badge: 'cart' },
+            { tab: 'orders',     label: 'Order History', icon: 'fa-receipt' }
+        ]},
+        { group: 'Inventory', requires: 'inventory', items: [
+            { tab: 'inventory',  label: 'Stock on Hand', icon: 'fa-boxes-stacked', badge: 'lowstock' }
+        ]},
+        { group: 'Account', items: [
+            { tab: 'reports',    label: 'Reports',       icon: 'fa-chart-line' },
+            { tab: 'contact',    label: 'Contact CHC',   icon: 'fa-address-book' }
+        ]}
+    ];
+
+    const GRP_KEY = 'chc_drawer_groups';
+    let drawerLastFocus = null;
+
+    function groupState() {
+        try { return JSON.parse(localStorage.getItem(GRP_KEY) || '{}'); } catch (_) { return {}; }
+    }
+    function setGroupState(name, open) {
+        try {
+            const st = groupState(); st[name] = open;
+            localStorage.setItem(GRP_KEY, JSON.stringify(st));
+        } catch (_) { /* private window — the menu still works, it just forgets */ }
+    }
+
+    /** Is a module switched on for this company? Mirrors the tab-bar rule. */
+    function navModuleOn(name) {
+        if (name === 'inventory') {
+            const btn = document.getElementById('nav-inventory');
+            return !!btn && !btn.classList.contains('hidden');
+        }
+        return true;
+    }
+
+    function buildDrawer() {
+        const host = document.getElementById('drawer-nav');
+        if (!host) return;
+        const st = groupState();
+        const current = document.querySelector('[data-tab].tab-active')?.dataset.tab || 'products';
+
+        host.innerHTML = NAV.filter(g => !g.requires || navModuleOn(g.requires)).map(g => {
+            const holdsCurrent = g.items.some(i => i.tab === current);
+            // A collapsed group hiding the screen you are on would be a lie
+            // about where you are, so the current group is always open.
+            const open = holdsCurrent ? true : (st[g.group] !== false);
+            const items = g.items.map(i => `
+                <button class="drawer-link" data-drawer-tab="${i.tab}" onclick="drawerGo('${i.tab}')"
+                        ${i.tab === current ? 'aria-current="page"' : ''}>
+                    <i class="fas ${i.icon} ico"></i>
+                    <span class="label">${i.label}</span>
+                    ${i.badge ? `<span class="count ${i.badge === 'cart' ? 'c-blue' : 'c-amber'}" data-count="${i.badge}">0</span>` : ''}
+                </button>`).join('');
+            return `
+                <div class="drawer-group" data-group="${g.group}" data-open="${open}">
+                    <button class="grp-btn" onclick="toggleGroup('${g.group}')" aria-expanded="${open}">
+                        <span>${g.group}</span><i class="fas fa-chevron-down chev text-[10px]"></i>
+                    </button>
+                    <div class="grp-items">${items}</div>
+                </div>`;
+        }).join('') + '<p class="drawer-empty hidden" id="drawer-noresult">Nothing matches that.</p>';
+
+        syncDrawerBadges();
+    }
+
+    function toggleGroup(name) {
+        const el = document.querySelector(`.drawer-group[data-group="${name}"]`);
+        if (!el) return;
+        const open = el.dataset.open !== 'true';
+        el.dataset.open = String(open);
+        el.querySelector('.grp-btn').setAttribute('aria-expanded', String(open));
+        setGroupState(name, open);
+    }
+
+    /**
+     * Mirror the counts the header already maintains.
+     *
+     * Deliberately reads the existing header badges rather than recomputing
+     * from state: updateCartBadge() and the inventory poller are already the
+     * authority, and a second calculation is a second thing that can disagree
+     * with the first. A menu that says 3 while the header says 5 is worse
+     * than a menu with no counts at all.
+     */
+    function badgeValue(id) {
+        const el = document.getElementById(id);
+        if (!el || el.classList.contains('hidden')) return 0;
+        return parseInt(el.textContent, 10) || 0;
+    }
+
+    function syncDrawerBadges() {
+        const counts = { cart: badgeValue('cart-badge'), lowstock: badgeValue('inv-low-badge') };
+        document.querySelectorAll('#drawer-nav .count').forEach(el => {
+            const v = counts[el.dataset.count] || 0;
+            el.textContent = v > 99 ? '99+' : v;
+            el.classList.toggle('show', v > 0);
+        });
+    }
+
+    function filterDrawer(q) {
+        const term = (q || '').trim().toLowerCase();
+        let shown = 0;
+        document.querySelectorAll('#drawer-nav .drawer-group').forEach(g => {
+            let any = 0;
+            g.querySelectorAll('.drawer-link').forEach(l => {
+                const hit = !term || l.querySelector('.label').textContent.toLowerCase().includes(term);
+                l.style.display = hit ? '' : 'none';
+                if (hit) { any++; shown++; }
+            });
+            g.style.display = any ? '' : 'none';
+            // While filtering, force groups open — a hit hidden inside a
+            // collapsed group looks like no result at all.
+            if (term) g.dataset.open = 'true';
+        });
+        document.getElementById('drawer-noresult')?.classList.toggle('hidden', shown > 0);
+    }
+
+    function drawerGo(tab) {
+        showTab(tab);
+        closeDrawer();
+    }
+
+    function openDrawer() {
+        const d = document.getElementById('drawer'), b = document.getElementById('drawer-backdrop');
+        if (!d) return;
+        drawerLastFocus = document.activeElement;
+
+        document.getElementById('drawer-company').textContent =
+            document.getElementById('header-company-name')?.textContent || 'Your shop';
+        const loc = (typeof selectedLocation !== 'undefined' && selectedLocation && selectedLocation.name)
+            ? selectedLocation.name : (localStorage.getItem('chc_location_name') || '');
+        document.getElementById('drawer-location').textContent = loc;
+
+        buildDrawer();
+        d.hidden = false; b.hidden = false;
+        requestAnimationFrame(() => { d.classList.add('open'); b.classList.add('open'); });
+        document.body.style.overflow = 'hidden';
+        document.getElementById('drawer-btn')?.setAttribute('aria-expanded', 'true');
+        setTimeout(() => d.querySelector('.drawer-link[aria-current="page"], .drawer-link')?.focus(), 60);
+    }
+
+    function closeDrawer() {
+        const d = document.getElementById('drawer'), b = document.getElementById('drawer-backdrop');
+        if (!d || d.hidden) return;
+        d.classList.remove('open'); b.classList.remove('open');
+        document.body.style.overflow = '';
+        document.getElementById('drawer-btn')?.setAttribute('aria-expanded', 'false');
+        const done = () => { d.hidden = true; b.hidden = true; };
+        // Match the CSS duration; if motion is reduced there is no transition.
+        setTimeout(done, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 200);
+        const filter = document.getElementById('drawer-filter');
+        if (filter) { filter.value = ''; }
+        if (drawerLastFocus && drawerLastFocus.focus) drawerLastFocus.focus();
+    }
+
+    // Escape closes; Tab is trapped inside while it is open.
+    document.addEventListener('keydown', (e) => {
+        const d = document.getElementById('drawer');
+        if (!d || d.hidden) return;
+        if (e.key === 'Escape') { e.preventDefault(); closeDrawer(); return; }
+        if (e.key !== 'Tab') return;
+        const f = [...d.querySelectorAll('button, input, [href]')].filter(el => el.offsetParent !== null);
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+
     function showTab(tab) {
         document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.add('hidden'));
         document.getElementById(`tab-${tab}`).classList.remove('hidden');
@@ -1043,6 +1345,14 @@
         if (tab === 'reports') loadReports();
         if (tab === 'inventory') { if (window.RAI) window.RAI.show(); }
         else if (window.RAI) window.RAI.teardown();
+
+        // Keep the drawer's highlight honest even when navigation came from
+        // somewhere else — an empty-cart "Browse products" link, say.
+        document.querySelectorAll('[data-drawer-tab]').forEach(el => {
+            if (el.dataset.drawerTab === tab) el.setAttribute('aria-current', 'page');
+            else el.removeAttribute('aria-current');
+        });
+        syncDrawerBadges();
     }
 
     // ============================================================
