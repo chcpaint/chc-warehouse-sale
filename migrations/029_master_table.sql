@@ -345,6 +345,12 @@ end $$;
 -- the screen that previews a push and the code that performs it cannot
 -- disagree about who gets what.
 -- ------------------------------------------------------------
+-- Dropped first, not replaced. CREATE OR REPLACE VIEW can only APPEND
+-- columns; migration 030 inserts push_mode ahead of entitled, and a
+-- replace would be refused. Dropping keeps the two migrations runnable in
+-- any order and any number of times.
+drop view if exists public.v_company_catalogue_entitlement;
+
 create or replace view public.v_company_catalogue_entitlement
 with (security_invoker = true) as
 select

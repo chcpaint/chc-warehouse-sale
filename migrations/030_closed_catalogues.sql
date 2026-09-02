@@ -78,6 +78,10 @@ end $$;
 -- here as "entitled only where the customer already has that part", which is
 -- what makes it closed to parts nobody has thought of yet.
 -- ------------------------------------------------------------
+-- See 029: this view gains a column in the middle, so it is dropped and
+-- rebuilt rather than replaced.
+drop view if exists public.v_company_catalogue_entitlement;
+
 create or replace view public.v_company_catalogue_entitlement
 with (security_invoker = true) as
 select
