@@ -1340,5 +1340,234 @@ router.post('/sync', async (req, res) => {
     }
 });
 
+/**
+ * POST /api/admin/master/prices
+ *   { brand: 'PPG' | null, company_ids | all_companies, apply }
+ *
+ * Push the master's list price out to customer catalogues.
+ *
+ * Most pricing is per customer and nothing automated touches it. Some lines
+ * are not: PPG carries one list price everywhere. That used to happen as a
+ * side effect of one customer's file upload — a price change across every
+ * catalogue, with no preview and no record of who caused it. This is the same
+ * outcome as a deliberate act: previewed per customer, logged old-and-new,
+ * and scoped to the brand you name.
+ *
+ * A frozen customer is not repriced. A closed one is — closed means "no new
+ * items", not "wrong prices forever".
+ */
+router.post('/prices', async (req, res) => {
+    try {
+        const apply = req.body.apply === true;
+        const brand = clean(req.body.brand);
+        if (!brand) {
+            return res.status(400).json({
+                error: 'Name the brand whose prices are set centrally. There is no "all prices" — most pricing is per customer.'
+            });
+        }
+
+        const allCompanies = await readAll(() => supabaseAdmin.from('companies')
+            .select('id, name, is_active').eq('is_active', true));
+        let companies = allCompanies;
+        if (Array.isArray(req.body.company_ids) && req.body.company_ids.length) {
+            const want = new Set(req.body.company_ids.filter(isValidUUID));
+            companies = allCompanies.filter(c => want.has(c.id));
+        } else if (req.body.all_companies !== true) {
+            return res.status(400).json({ error: 'Choose which customers, or say all of them.' });
+        }
+
+        const policies = await readAll(() => supabaseAdmin.from('company_catalogue_policy')
+            .select('company_id, push_mode, reason'));
+        const policyFor = new Map(policies.map(p => [p.company_id, p]));
+        const frozen = companies.filter(c => (policyFor.get(c.id) || {}).push_mode === 'frozen');
+        const candidates = companies.filter(c => (policyFor.get(c.id) || {}).push_mode !== 'frozen');
+
+        const master = await readAll(() => supabaseAdmin.from('item_library')
+            .select('sku_key, sku, name, list_price, is_active').ilike('brand', brand));
+        const priceOf = new Map(master
+            .filter(m => m.is_active !== false && Number(m.list_price) > 0)
+            .map(m => [m.sku_key, m]));
+        if (!priceOf.size) {
+            return res.status(400).json({ error: `No priced ${brand} items in the master table.` });
+        }
+
+        const perCompany = [];
+        const changes = [];
+        for (const co of candidates) {
+            const products = await readAll(() => supabaseAdmin.from('products')
+                .select('id, sku, name, price, is_active').eq('company_id', co.id));
+            let changing = 0, matched = 0, rise = 0, drop = 0;
+            for (const p of products.filter(x => x.is_active !== false)) {
+                const m = priceOf.get(skuKey(p.sku));
+                if (!m) continue;
+                matched += 1;
+                const now = Number(p.price);
+                const want = Number(m.list_price);
+                if (Math.round(now * 100) === Math.round(want * 100)) continue;
+                changing += 1;
+                if (want > now) rise += 1; else drop += 1;
+                changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                               field: 'price', old_value: String(now), new_value: String(want) });
+            }
+            perCompany.push({ company_id: co.id, company_name: co.name,
+                              matched, changing, going_up: rise, going_down: drop });
+        }
+
+        const summary = {
+            brand,
+            customers: candidates.length,
+            customers_left_alone: frozen.length,
+            products_matched: perCompany.reduce((s, c) => s + c.matched, 0),
+            prices_changing: perCompany.reduce((s, c) => s + c.changing, 0),
+            going_up: perCompany.reduce((s, c) => s + c.going_up, 0),
+            going_down: perCompany.reduce((s, c) => s + c.going_down, 0)
+        };
+
+        const { data: run } = await supabaseAdmin.from('catalogue_sync_runs').insert({
+            scope: `prices:${brand}`, fields: ['price'],
+            companies_touched: apply ? candidates.length : 0,
+            products_examined: summary.products_matched,
+            products_changed: apply ? summary.prices_changing : 0,
+            field_changes: apply ? summary.prices_changing : 0,
+            skipped_frozen: frozen.length, applied: apply, run_by: req.admin.id,
+            notes: apply ? null : 'Preview only — nothing was written.'
+        }).select().single();
+
+        if (!apply) {
+            return res.json({ applied: false, run_id: run ? run.id : null, summary,
+                              by_company: perCompany,
+                              left_alone: frozen.map(f => ({ company_id: f.id, company_name: f.name })),
+                              sample: changes.slice(0, 60) });
+        }
+
+        let done = 0;
+        for (const c of changes) {
+            const { error } = await supabaseAdmin.from('products')
+                .update({ price: Number(c.new_value), updated_at: new Date().toISOString() })
+                .eq('id', c.product_id);
+            if (!error) done += 1;
+        }
+        const logRows = changes.map(c => ({ run_id: run ? run.id : null, ...c }));
+        for (let i = 0; run && i < logRows.length; i += 500) {
+            const { error } = await supabaseAdmin.from('catalogue_sync_changes').insert(logRows.slice(i, i + 500));
+            if (error) console.error('Price log write failed (prices already applied):', error.message);
+        }
+        await supabaseAdmin.from('audit_log').insert({
+            admin_id: req.admin.id, action: 'master_prices_applied', entity_type: 'products',
+            entity_id: run ? run.id : null, details: summary, ip_address: req.ip
+        }).then(() => {}, () => {});
+
+        res.json({ applied: true, run_id: run ? run.id : null,
+                   summary: { ...summary, prices_written: done }, by_company: perCompany });
+
+    } catch (err) {
+        console.error('Master price apply error:', err);
+        res.status(500).json({ error: 'Applying master prices failed.' });
+    }
+});
+
+/**
+ * GET /api/admin/master/gaps
+ *
+ * Where the master is blank and a customer is not — the worklist for filling
+ * the master in.
+ *
+ * This exists because the sync only ever writes a value the master HAS. A
+ * blank master field is treated as "we do not know", never as "set it to
+ * nothing", which is right — but it means a gap in the master is silent, and
+ * silently does nothing forever. This is the report that makes it loud.
+ *
+ * Where several customers disagree about the same field, all their answers
+ * are shown. Picking one is a decision for a person.
+ */
+router.get('/gaps', async (req, res) => {
+    try {
+        const master = await readAll(() => supabaseAdmin.from('item_library')
+            .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active'));
+        const byKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
+
+        const products = await readAll(() => supabaseAdmin.from('products')
+            .select('id, company_id, sku, name, brand, category, price, is_active').eq('is_active', true));
+        const companies = await readAll(() => supabaseAdmin.from('companies').select('id, name'));
+        const nameOf = new Map(companies.map(c => [c.id, c.name]));
+
+        const ids = products.map(p => p.id);
+        const codes = [];
+        for (let i = 0; i < ids.length; i += 500) {
+            const slice = ids.slice(i, i + 500);
+            const { data } = await supabaseAdmin.from('product_barcodes')
+                .select('product_id, barcode, is_primary').in('product_id', slice);
+            codes.push(...(data || []));
+        }
+        const codeFor = new Map();
+        for (const c of codes) if (c.is_primary && c.barcode) codeFor.set(c.product_id, c.barcode);
+
+        // field -> sku_key -> { master item, suggestions: Map(value -> [customers]) }
+        const gaps = new Map();
+        const note = (field, item, value, companyId) => {
+            if (!value && value !== 0) return;
+            if (!gaps.has(field)) gaps.set(field, new Map());
+            const forField = gaps.get(field);
+            if (!forField.has(item.sku_key)) {
+                forField.set(item.sku_key, { sku: item.sku, name: item.name, brand: item.brand, values: new Map() });
+            }
+            const row = forField.get(item.sku_key);
+            const key = String(value);
+            if (!row.values.has(key)) row.values.set(key, []);
+            const who = nameOf.get(companyId) || 'Unknown';
+            if (!row.values.get(key).includes(who)) row.values.get(key).push(who);
+        };
+
+        const blank = v => v === null || v === undefined || String(v).trim() === '';
+        for (const p of products) {
+            const m = byKey.get(skuKey(p.sku));
+            if (!m) continue;
+            if (blank(m.barcode))                          note('barcode',   m, codeFor.get(p.id), p.company_id);
+            if (blank(m.brand))                            note('brand',     m, p.brand,           p.company_id);
+            if (blank(m.category))                         note('category',  m, p.category,        p.company_id);
+            if (!(Number(m.list_price) > 0) && Number(p.price) > 0)
+                                                           note('list_price', m, p.price,          p.company_id);
+        }
+
+        const shape = field => {
+            const forField = gaps.get(field);
+            if (!forField) return [];
+            return [...forField.entries()].map(([sku_key, row]) => ({
+                sku_key, sku: row.sku, name: row.name, brand: row.brand,
+                // Sorted so the most widely agreed answer is first — it is
+                // usually the right one, and always the one to check first.
+                suggestions: [...row.values.entries()]
+                    .map(([value, customers]) => ({ value, customers, agreement: customers.length }))
+                    .sort((a, b) => b.agreement - a.agreement)
+            })).sort((a, b) => b.suggestions[0].agreement - a.suggestions[0].agreement
+                            || String(a.sku).localeCompare(String(b.sku)));
+        };
+
+        const barcode = shape('barcode'), brand = shape('brand'),
+              category = shape('category'), price = shape('list_price');
+
+        res.json({
+            summary: {
+                master_items: byKey.size,
+                missing_a_barcode: master.filter(m => m.is_active !== false && blank(m.barcode)).length,
+                barcode_fillable_from_a_customer: barcode.length,
+                missing_a_brand: master.filter(m => m.is_active !== false && blank(m.brand)).length,
+                brand_fillable_from_a_customer: brand.length,
+                missing_a_category: master.filter(m => m.is_active !== false && blank(m.category)).length,
+                category_fillable_from_a_customer: category.length,
+                missing_a_price: master.filter(m => m.is_active !== false && !(Number(m.list_price) > 0)).length,
+                price_fillable_from_a_customer: price.length
+            },
+            barcode: barcode.slice(0, 500),
+            brand: brand.slice(0, 500),
+            category: category.slice(0, 500),
+            list_price: price.slice(0, 500)
+        });
+    } catch (err) {
+        console.error('Master gaps error:', err);
+        res.status(500).json({ error: 'Failed to work out what the master is missing.' });
+    }
+});
+
 module.exports = router;
 module.exports._internals = { skuKey, barcodeLevel, mapHeaders, parseWorkbook, planImport, clean };

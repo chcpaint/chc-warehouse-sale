@@ -1014,15 +1014,36 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         // Preview mode (dry run): analyze and report, write nothing.
         const dryRun = ['1', 'true', 'yes'].includes(String(req.body.dry_run || req.query.preview || '').toLowerCase());
         const mode = String(req.body.mode || 'merge').toLowerCase() === 'replace' ? 'replace' : 'merge';
-        // PPG list-price rule: PPG-brand prices are the Assured list price everywhere; only an admin unlock can change them.
-        const ASSURED_ID = '905175c1-f844-4dc3-85d0-8b40de23d538';
+        // PPG LIST-PRICE RULE
+        //
+        // PPG prices are not per customer: one list price applies everywhere.
+        // That rule used to be sourced from ONE customer's catalogue by
+        // hard-coded id — so a price was only correct for as long as that
+        // customer's own list was, and nobody else could see where the number
+        // came from. The master table is the source now: it is the thing
+        // everyone already agrees is authoritative, it is editable on its own
+        // screen, and every change to it is logged.
+        //
+        // Matched on sku_key, not on the raw SKU, so MMM-06652 and MMM06652
+        // are the same part here as they are everywhere else.
+        //
+        // unlock_ppg still lets an admin upload a deliberate exception.
         const unlockPPG = ['1','true','yes'].includes(String(req.body.unlock_ppg || '').toLowerCase());
-        const assuredPPG = {};
+        const masterPPG = {};
         {
-            const { data: ap } = await supabaseAdmin.from('products').select('sku, price').eq('company_id', ASSURED_ID).eq('brand', 'PPG');
-            (ap || []).forEach(r => { if (r.sku) assuredPPG[String(r.sku).toUpperCase()] = Number(r.price); });
+            for (let from = 0; ; from += 1000) {
+                const { data: mp } = await supabaseAdmin.from('item_library')
+                    .select('sku_key, list_price')
+                    .ilike('brand', 'ppg')
+                    .range(from, from + 999);
+                const batch = mp || [];
+                batch.forEach(r => {
+                    if (r.sku_key && Number(r.list_price) > 0) masterPPG[r.sku_key] = Number(r.list_price);
+                });
+                if (batch.length < 1000) break;
+            }
         }
-        const ppgUpdates = {};
+        const skuKeyOf = v => String(v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
 
         let rows = [];
         const errors = [];
@@ -1069,15 +1090,13 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         for (const row of normalizedRows) {
             row.company_id = companyId;
 
-            // PPG list-price rule: non-Assured companies always get the Assured list price for a PPG SKU (unless an admin unlocked this upload).
-            const skuU = row.sku ? String(row.sku).toUpperCase() : '';
-            if (companyId !== ASSURED_ID && !unlockPPG && skuU && assuredPPG[skuU] !== undefined) {
-                row.price = assuredPPG[skuU];
+            // Every company gets the master's PPG list price — including the
+            // one that used to be the source of it. One rule, one place, no
+            // customer who is quietly special.
+            const skuK = skuKeyOf(row.sku);
+            if (!unlockPPG && skuK && masterPPG[skuK] !== undefined) {
+                row.price = masterPPG[skuK];
                 if (!row.brand || row.brand === 'Uncategorized') row.brand = 'PPG';
-            }
-            // Assured upload of PPG prices propagates to every other company's price list.
-            if (companyId === ASSURED_ID && skuU && String(row.brand || '').toUpperCase() === 'PPG' && Number(row.price) > 0) {
-                ppgUpdates[skuU] = Number(row.price);
             }
 
             // Skip rows with no positive price (e.g. blank/0 in source) — keep existing price untouched
@@ -1110,16 +1129,15 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             }
         }
 
-        // Propagate any PPG list-price changes from an Assured upload to all other companies.
+        // Propagation used to happen here as a side effect of one customer's
+        // upload — a price change across every catalogue, triggered by a file
+        // somebody dropped on one screen, with no preview and no record.
+        //
+        // It is now its own action: edit the price in the master, then run
+        // "Apply master prices" from the Master Table screen, where it is
+        // previewed per customer and every change is logged. Same outcome,
+        // visible before it happens.
         let ppgPropagated = 0;
-        if (!dryRun && companyId === ASSURED_ID && Object.keys(ppgUpdates).length) {
-            for (const [sku, price] of Object.entries(ppgUpdates)) {
-                const { count } = await supabaseAdmin.from('products')
-                    .update({ price }, { count: 'exact' })
-                    .eq('sku', sku).eq('brand', 'PPG').neq('company_id', ASSURED_ID);
-                ppgPropagated += count || 0;
-            }
-        }
 
         // Only record the upload + audit entry when actually importing
         if (!dryRun) {
