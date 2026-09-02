@@ -50,6 +50,8 @@ const { stripHtml, isValidUUID } = require('../utils/sanitize');
 
 const router = express.Router();
 
+const blankish = v => v === null || v === undefined || String(v).trim() === '';
+
 // The screen is fenced in the API, not only in the console. Hiding a nav item
 // is presentation; this is the boundary.
 router.use(requireSuperAdmin);
@@ -1126,7 +1128,14 @@ router.post('/sync', async (req, res) => {
         // brand is here because a wrong one is not cosmetic: the catalogue's
         // brand filter is how anyone finds a line, so a PPG part filed under
         // "Uncategorized" is invisible to the person looking for it.
-        const ALLOWED = ['name', 'sku', 'barcode', 'brand'];
+        const ALLOWED = ['name', 'sku', 'barcode', 'brand', 'category'];
+
+        // category is FILL-ONLY, never an overwrite. A category a shop assigned
+        // is information they earned and it is the thing their location
+        // restrictions read; replacing it from a master that was blank until
+        // yesterday would be destroying data to achieve tidiness. It only ever
+        // reaches a product that has none.
+        const FILL_ONLY = new Set(['category']);
         let fields = Array.isArray(req.body.fields) && req.body.fields.length
             ? req.body.fields.filter(f => ALLOWED.includes(f))
             : ALLOWED.slice();
@@ -1187,7 +1196,7 @@ router.post('/sync', async (req, res) => {
                 if (c.barcode) barcodeOwner.set(String(c.barcode), c.product_id);
             }
 
-            let examined = 0, changed = 0, nameN = 0, skuN = 0, barcodeN = 0, brandN = 0, blocked = 0;
+            let examined = 0, changed = 0, nameN = 0, skuN = 0, barcodeN = 0, brandN = 0, categoryN = 0, blocked = 0;
 
             for (const p of active) {
                 const m = bySkuKey.get(skuKey(p.sku));
@@ -1200,6 +1209,13 @@ router.post('/sync', async (req, res) => {
                                    field: 'name', old_value: p.name, new_value: m.name });
                     if (apply) writes.push({ type: 'product', id: p.id, patch: { name: m.name } });
                     nameN += 1; touched = true;
+                }
+
+                if (fields.includes('category') && m.category && blankish(p.category)) {
+                    changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                                   field: 'category', old_value: null, new_value: m.category });
+                    if (apply) writes.push({ type: 'product', id: p.id, patch: { category: m.category } });
+                    categoryN += 1; touched = true;
                 }
 
                 if (fields.includes('brand') && m.brand && p.brand !== m.brand) {
@@ -1255,7 +1271,7 @@ router.post('/sync', async (req, res) => {
                 company_id: co.id, company_name: co.name,
                 products: active.length, matched_to_master: examined,
                 products_changing: changed,
-                names: nameN, part_numbers: skuN, barcodes: barcodeN, brands: brandN,
+                names: nameN, part_numbers: skuN, barcodes: barcodeN, brands: brandN, categories: categoryN,
                 needs_a_decision: blocked
             });
         }
@@ -1269,6 +1285,7 @@ router.post('/sync', async (req, res) => {
             part_numbers: perCompany.reduce((s, c) => s + c.part_numbers, 0),
             barcodes: perCompany.reduce((s, c) => s + c.barcodes, 0),
             brands: perCompany.reduce((s, c) => s + c.brands, 0),
+            categories: perCompany.reduce((s, c) => s + c.categories, 0),
             needs_a_decision: perCompany.reduce((s, c) => s + c.needs_a_decision, 0)
         };
 
@@ -1278,7 +1295,8 @@ router.post('/sync', async (req, res) => {
             companies_touched: apply ? candidates.length : 0,
             products_examined: summary.products_examined,
             products_changed: apply ? summary.products_changing : 0,
-            field_changes: apply ? (summary.names + summary.part_numbers + summary.barcodes + summary.brands) : 0,
+            field_changes: apply ? (summary.names + summary.part_numbers + summary.barcodes
+                                    + summary.brands + summary.categories) : 0,
             skipped_frozen: frozen.length,
             applied: apply,
             run_by: req.admin.id,
@@ -1566,6 +1584,163 @@ router.get('/gaps', async (req, res) => {
     } catch (err) {
         console.error('Master gaps error:', err);
         res.status(500).json({ error: 'Failed to work out what the master is missing.' });
+    }
+});
+
+/**
+ * POST /api/admin/master/backfill
+ *   { fields: ['category','brand','barcode','list_price'], apply: false }
+ *
+ * The gaps report the other way round: take what customers already know and
+ * write it INTO the master.
+ *
+ * Category is the case that prompted this. It is blank on every master row and
+ * present on a thousand customer products — real, earned information that the
+ * outward sync must never overwrite and would otherwise leave stranded in one
+ * shop's catalogue. Filling the master is how it reaches everybody.
+ *
+ * TWO RULES, BOTH ABSOLUTE
+ *
+ *   1. Only where the master is BLANK. This never overwrites the master with
+ *      a customer's value — the master is the authority, and a customer
+ *      disagreeing with it is not evidence that the master is wrong.
+ *
+ *   2. Only where every customer who has an opinion gives the SAME answer.
+ *      Where two shops disagree, both answers are reported and neither is
+ *      applied. Picking the more popular one would be a guess wearing the
+ *      costume of a decision.
+ */
+router.post('/backfill', async (req, res) => {
+    try {
+        const apply = req.body.apply === true;
+        const ALLOWED = ['category', 'brand', 'barcode', 'list_price'];
+        const fields = Array.isArray(req.body.fields) && req.body.fields.length
+            ? req.body.fields.filter(f => ALLOWED.includes(f))
+            : ALLOWED.slice();
+        if (!fields.length) return res.status(400).json({ error: 'Choose at least one field to fill in.' });
+
+        const master = await readAll(() => supabaseAdmin.from('item_library')
+            .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active'));
+        const byKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
+
+        const products = await readAll(() => supabaseAdmin.from('products')
+            .select('id, company_id, sku, brand, category, price, is_active').eq('is_active', true));
+        const companies = await readAll(() => supabaseAdmin.from('companies').select('id, name'));
+        const nameOf = new Map(companies.map(c => [c.id, c.name]));
+
+        const ids = products.map(p => p.id);
+        const codeFor = new Map();
+        for (let i = 0; i < ids.length; i += 500) {
+            const { data } = await supabaseAdmin.from('product_barcodes')
+                .select('product_id, barcode, is_primary').in('product_id', ids.slice(i, i + 500));
+            for (const c of data || []) if (c.is_primary && c.barcode) codeFor.set(c.product_id, String(c.barcode));
+        }
+
+        const blank = v => v === null || v === undefined || String(v).trim() === '';
+        const isBlankFor = (m, f) => f === 'list_price' ? !(Number(m.list_price) > 0) : blank(m[f]);
+        const valueFrom = (p, f) => f === 'barcode' ? codeFor.get(p.id)
+                                  : f === 'list_price' ? (Number(p.price) > 0 ? String(p.price) : null)
+                                  : p[f];
+
+        // sku_key -> field -> Map(value -> [customer names])
+        const opinions = new Map();
+        for (const p of products) {
+            const m = byKey.get(skuKey(p.sku));
+            if (!m) continue;
+            for (const f of fields) {
+                if (!isBlankFor(m, f)) continue;
+                const v = valueFrom(p, f);
+                if (blank(v)) continue;
+                if (!opinions.has(m.sku_key)) opinions.set(m.sku_key, new Map());
+                const forItem = opinions.get(m.sku_key);
+                if (!forItem.has(f)) forItem.set(f, new Map());
+                const vals = forItem.get(f);
+                const key = String(v);
+                if (!vals.has(key)) vals.set(key, []);
+                const who = nameOf.get(p.company_id) || 'Unknown';
+                if (!vals.get(key).includes(who)) vals.get(key).push(who);
+            }
+        }
+
+        const willFill = [];
+        const disputed = [];
+        for (const [sku_key, forItem] of opinions) {
+            const m = byKey.get(sku_key);
+            for (const [field, vals] of forItem) {
+                const answers = [...vals.entries()];
+                if (answers.length === 1) {
+                    willFill.push({ item_id: m.id, sku_key, sku: m.sku, name: m.name, field,
+                                    value: answers[0][0], customers: answers[0][1] });
+                } else {
+                    disputed.push({ sku_key, sku: m.sku, name: m.name, field,
+                                    answers: answers.map(([value, customers]) => ({ value, customers }))
+                                                    .sort((a, b) => b.customers.length - a.customers.length) });
+                }
+            }
+        }
+
+        const countBy = list => fields.reduce((acc, f) => {
+            acc[f] = list.filter(x => x.field === f).length; return acc;
+        }, {});
+        const summary = {
+            fields,
+            would_fill: willFill.length,
+            by_field: countBy(willFill),
+            left_for_a_person: disputed.length,
+            disputed_by_field: countBy(disputed)
+        };
+
+        if (!apply) {
+            return res.json({ applied: false, summary,
+                              sample: willFill.slice(0, 100),
+                              needs_a_decision: disputed.slice(0, 100) });
+        }
+
+        const { data: run } = await supabaseAdmin.from('item_library_imports').insert({
+            filename: null, sheet_name: null, source_label: 'backfill_from_customers',
+            rows_in_file: willFill.length, created_count: 0,
+            updated_count: new Set(willFill.map(w => w.item_id)).size,
+            unchanged_count: 0, skipped_count: disputed.length,
+            field_changes: willFill.length, applied: true,
+            imported_by: req.admin.id,
+            notes: `Filled blank master fields from customer catalogues where every customer agreed. ${disputed.length} left for a person.`
+        }).select().single();
+
+        // One update per item, carrying every field it gains.
+        const patches = new Map();
+        for (const w of willFill) {
+            if (!patches.has(w.item_id)) patches.set(w.item_id, {});
+            patches.get(w.item_id)[w.field] = w.field === 'list_price' ? Number(w.value) : w.value;
+        }
+        let filled = 0;
+        for (const [itemId, patch] of patches) {
+            const { error } = await supabaseAdmin.from('item_library')
+                .update({ ...patch, updated_at: new Date().toISOString() }).eq('id', itemId);
+            if (!error) filled += Object.keys(patch).length;
+        }
+
+        const logRows = willFill.map(w => ({
+            import_id: run ? run.id : null, item_id: w.item_id, sku_key: w.sku_key, sku: w.sku,
+            action: 'updated', field: w.field, old_value: null, new_value: String(w.value),
+            reason: `Filled from ${w.customers.join(', ')} — the master was blank and every customer agreed.`
+        }));
+        for (let i = 0; run && i < logRows.length; i += 500) {
+            const { error } = await supabaseAdmin.from('item_library_changes').insert(logRows.slice(i, i + 500));
+            if (error) console.error('Backfill log write failed (backfill already applied):', error.message);
+        }
+
+        await supabaseAdmin.from('audit_log').insert({
+            admin_id: req.admin.id, action: 'master_backfilled', entity_type: 'item_library',
+            entity_id: run ? run.id : null, details: summary, ip_address: req.ip
+        }).then(() => {}, () => {});
+
+        res.json({ applied: true, import_id: run ? run.id : null,
+                   summary: { ...summary, fields_written: filled },
+                   needs_a_decision: disputed.slice(0, 100) });
+
+    } catch (err) {
+        console.error('Master backfill error:', err);
+        res.status(500).json({ error: 'Filling the master failed.' });
     }
 });
 

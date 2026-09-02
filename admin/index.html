@@ -417,6 +417,9 @@
                                 <label class="flex items-center gap-1.5 text-sm text-gray-600">
                                     <input type="checkbox" id="mt-sync-brand" checked class="w-4 h-4 rounded border-gray-300"> brand
                                 </label>
+                                <label class="flex items-center gap-1.5 text-sm text-gray-600" title="Only ever fills a blank one. A category a shop assigned is never replaced.">
+                                    <input type="checkbox" id="mt-sync-category" checked class="w-4 h-4 rounded border-gray-300"> category <span class="text-xs text-gray-400">(fill blanks only)</span>
+                                </label>
                             </div>
                             <button onclick="mtSyncPreview()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
                                 <i class="fas fa-eye mr-1"></i> Preview
@@ -460,9 +463,14 @@
                                     so a gap silently does nothing forever. This is where a customer already knows the answer.
                                 </p>
                             </div>
-                            <button onclick="mtGaps()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
-                                <i class="fas fa-magnifying-glass mr-1"></i> Check
-                            </button>
+                            <div class="flex gap-2">
+                                <button onclick="mtGaps()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
+                                    <i class="fas fa-magnifying-glass mr-1"></i> Check
+                                </button>
+                                <button onclick="mtBackfill(false)" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                                    <i class="fas fa-arrow-up mr-1"></i> Fill the master
+                                </button>
+                            </div>
                         </div>
                         <div id="mt-gaps-result" class="mt-4"></div>
                     </div>
@@ -2539,7 +2547,7 @@
     // ---------- bringing catalogues into line ----------
 
     function mtSyncBody(apply) {
-        const fields = ['name', 'sku', 'barcode', 'brand']
+        const fields = ['name', 'sku', 'barcode', 'brand', 'category']
             .filter(f => document.getElementById('mt-sync-' + f).checked);
         if (!fields.length) { alert('Choose at least one of name, part number or barcode.'); return null; }
         const co = document.getElementById('mt-sync-company').value;
@@ -2565,7 +2573,7 @@
                   <span class="text-sm text-gray-600">
                     <b>${s.products_changing.toLocaleString()}</b> item(s) would change across
                     ${s.customers_synced} customer(s) —
-                    ${s.names} name(s), ${s.part_numbers} part number(s), ${s.barcodes} barcode(s), ${s.brands} brand(s).
+                    ${s.names} name(s), ${s.part_numbers} part number(s), ${s.barcodes} barcode(s), ${s.brands} brand(s), ${s.categories} category(ies).
                     ${s.needs_a_decision ? `<span class="text-amber-700">${s.needs_a_decision} need a decision.</span>` : ''}
                   </span>
                   ${s.products_changing ? `<button onclick="mtSyncApply()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Apply</button>` : ''}
@@ -2642,6 +2650,68 @@
         } catch (err) {
             console.error('Sync failed:', err);
             box.innerHTML = '<p class="text-sm text-red-600">The sync failed.</p>';
+        }
+    }
+
+    // ---------- fill the master from what customers know ----------
+
+    async function mtBackfill(apply) {
+        const box = document.getElementById('mt-gaps-result');
+        if (apply && !confirm('Fill the blank master fields from customer catalogues? Only where the master is empty and every customer agrees. Nothing already in the master is changed.')) return;
+        box.innerHTML = `<p class="text-sm text-gray-400">${apply ? 'Filling' : 'Working out what can be filled'}…</p>`;
+        try {
+            const resp = await adminFetch('/master/backfill', { method: 'POST', body: JSON.stringify({ apply }) });
+            const d = await resp.json();
+            if (!resp.ok) { box.innerHTML = `<p class="text-sm text-red-600">${esc(d.error)}</p>`; return; }
+            const s = d.summary;
+            const perField = Object.entries(s.by_field).filter(([, n]) => n)
+                .map(([f, n]) => `${n} ${esc(f.replace('_', ' '))}`).join(', ') || 'nothing';
+
+            if (apply) {
+                box.innerHTML = `<div class="border border-green-200 bg-green-50 rounded-lg px-4 py-3">
+                    <p class="text-sm text-green-800 font-semibold">${s.fields_written} master field(s) filled — ${perField}.</p>
+                    ${s.left_for_a_person ? `<p class="text-sm text-green-900 mt-1">${s.left_for_a_person} left alone because customers disagree. Press Check to see them.</p>` : ''}
+                </div>`;
+                return;
+            }
+
+            box.innerHTML = `
+              <div class="border rounded-lg overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3">
+                  <span class="text-sm text-gray-600">
+                    <b>${s.would_fill}</b> blank master field(s) can be filled — ${perField}.
+                    ${s.left_for_a_person ? `<span class="text-amber-700">${s.left_for_a_person} left for you: customers disagree.</span>` : ''}
+                  </span>
+                  ${s.would_fill ? `<button onclick="mtBackfill(true)" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Fill them in</button>` : ''}
+                </div>
+                ${d.sample.length ? `<div class="max-h-64 overflow-y-auto divide-y">
+                  ${d.sample.slice(0, 40).map(w => `
+                    <div class="px-4 py-2 text-sm flex flex-wrap items-baseline gap-x-3">
+                      <span class="font-mono text-xs text-gray-500">${esc(w.sku)}</span>
+                      <span class="text-gray-700 flex-1 min-w-[10rem] truncate">${esc(w.name)}</span>
+                      <span class="text-xs text-gray-400">${esc(w.field.replace('_', ' '))}</span>
+                      <span class="text-gray-800 font-semibold">${esc(w.value)}</span>
+                      <span class="text-xs text-gray-400" title="${esc(w.customers.join(', '))}">from ${w.customers.length} customer(s)</span>
+                    </div>`).join('')}
+                </div>` : ''}
+                ${d.needs_a_decision.length ? `
+                  <div class="border-t">
+                    <div class="px-4 py-2 bg-amber-50 text-xs font-semibold text-amber-800 uppercase">
+                      Customers disagree — nothing was filled for these
+                    </div>
+                    <div class="max-h-48 overflow-y-auto divide-y">
+                      ${d.needs_a_decision.slice(0, 30).map(x => `
+                        <div class="px-4 py-2 text-sm flex flex-wrap items-baseline gap-x-3">
+                          <span class="font-mono text-xs text-gray-500">${esc(x.sku)}</span>
+                          <span class="text-xs text-gray-400">${esc(x.field.replace('_', ' '))}</span>
+                          ${x.answers.map(a => `<span class="text-xs text-gray-700" title="${esc(a.customers.join(', '))}">${esc(a.value)} <span class="text-gray-400">(${a.customers.length})</span></span>`).join('<span class="text-gray-300 text-xs">vs</span>')}
+                        </div>`).join('')}
+                    </div>
+                  </div>` : ''}
+              </div>`;
+        } catch (err) {
+            console.error('Backfill failed:', err);
+            box.innerHTML = '<p class="text-sm text-red-600">Could not do that.</p>';
         }
     }
 

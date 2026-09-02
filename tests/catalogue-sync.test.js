@@ -473,3 +473,117 @@ test('a field the master already has is not reported as a gap', async () => {
     assert.deepEqual(res.body.category, []);
     assert.deepEqual(res.body.list_price, []);
 });
+
+// ==================================================================
+// Filling the master from what customers already know
+//
+// Category is blank on every master row and set on a thousand customer
+// products. That is real information sitting in one shop's catalogue where
+// nobody else can use it. Two rules, both absolute: never overwrite the
+// master, and never pick a winner when customers disagree.
+// ==================================================================
+
+const backfill = body => request(app()).post('/master/backfill').send(body);
+const lib = key => fake.db.item_library.find(l => l.sku_key === key);
+
+test('a blank master field is filled from customers who agree', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'EHP Crystal Silver hL',
+                         brand: 'PPG', category: null, barcode: null, list_price: null, is_active: true }],
+        products: [
+            { id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', brand: 'PPG',
+              category: 'Colour', price: 1056.14, is_active: true },
+            { id: P_ASSURED, company_id: ASSURED, sku: 'T4000', name: 'x', brand: 'PPG',
+              category: 'Colour', price: 1056.14, is_active: true }
+        ]
+    });
+    const res = await backfill({ apply: true });
+    assert.equal(lib('T4000').category, 'Colour');
+    assert.equal(Number(lib('T4000').list_price), 1056.14);
+    assert.equal(res.body.summary.by_field.category, 1);
+});
+
+test('it never overwrites something the master already has', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'EHP Crystal Silver hL',
+                         brand: 'PPG', category: 'Colour', barcode: null, list_price: 5, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', brand: 'PPG',
+                     category: 'Something else', price: 999, is_active: true }]
+    });
+    await backfill({ apply: true });
+    assert.equal(lib('T4000').category, 'Colour', 'a customer disagreeing is not evidence the master is wrong');
+    assert.equal(Number(lib('T4000').list_price), 5);
+});
+
+test('where customers disagree nothing is written, and both answers are reported', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'J71', sku_key: 'J71', name: 'Coarse Aluminum',
+                         brand: 'PPG', category: null, barcode: null, list_price: 1, is_active: true }],
+        products: [
+            { id: P_BAY, company_id: BAYVIEW, sku: 'J71', name: 'x', category: 'Colour', price: 1, is_active: true },
+            { id: P_ASSURED, company_id: ASSURED, sku: 'J71', name: 'x', category: 'Primer/Sealer', price: 1, is_active: true }
+        ]
+    });
+    const res = await backfill({ apply: true });
+    assert.equal(lib('J71').category, null, 'picking the more popular answer would be a guess in a costume');
+    assert.equal(res.body.summary.left_for_a_person, 1);
+    const d = res.body.needs_a_decision[0];
+    assert.equal(d.answers.length, 2);
+    assert.deepEqual(d.answers.map(a => a.value).sort(), ['Colour', 'Primer/Sealer']);
+});
+
+test('a preview fills nothing', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'x', brand: 'PPG',
+                         category: null, barcode: null, list_price: 1, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', category: 'Colour', price: 1, is_active: true }]
+    });
+    const res = await backfill({});
+    assert.equal(res.body.applied, false);
+    assert.equal(res.body.summary.would_fill, 1);
+    assert.equal(lib('T4000').category, null);
+});
+
+test('every fill records which customers it came from', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'x', brand: 'PPG',
+                         category: null, barcode: null, list_price: 1, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', category: 'Colour', price: 1, is_active: true }]
+    });
+    await backfill({ apply: true });
+    const logged = fake.db.item_library_changes.find(c => c.field === 'category');
+    assert.equal(logged.new_value, 'Colour');
+    assert.match(logged.reason, /Bayview Auto Body/);
+    assert.match(logged.reason, /master was blank/);
+});
+
+// ------------------------------------------------------------------
+// Category going back out: fill only, never overwrite
+// ------------------------------------------------------------------
+
+test('the sync gives a category to a product that has none', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'x', brand: 'PPG',
+                         category: 'Colour', barcode: null, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', brand: 'PPG',
+                     category: null, price: 1, is_active: true }]
+    });
+    const res = await sync({ all_companies: true, apply: true });
+    assert.equal(prod(P_BAY).category, 'Colour');
+    assert.equal(res.body.summary.categories, 1);
+});
+
+test('the sync NEVER overwrites a category a shop already assigned', async () => {
+    // Their category is what their location restrictions read. Replacing it
+    // from a master that was blank until yesterday would be destroying data
+    // to achieve tidiness.
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'x', brand: 'PPG',
+                         category: 'Colour', barcode: null, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', brand: 'PPG',
+                     category: 'Equip/Filter/Booth', price: 1, is_active: true }]
+    });
+    const res = await sync({ all_companies: true, apply: true });
+    assert.equal(prod(P_BAY).category, 'Equip/Filter/Booth');
+    assert.equal(res.body.summary.categories, 0);
+});
