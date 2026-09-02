@@ -58,6 +58,12 @@ router.use('/companies/:companyId/library', require('./item-library'));
 // DASHBOARD STATS
 // ============================================================
 
+// The full dashboard — sales, stock and repair work in one payload. Kept in
+// its own file because it is read-only aggregation and shares nothing with the
+// CRUD below. Order-desk accounts never reach it: restrictOrderDesk above is
+// an allow-list and /dashboard is not on it.
+router.use('/dashboard', require('./admin-dashboard'));
+
 /**
  * GET /api/admin/stats
  */

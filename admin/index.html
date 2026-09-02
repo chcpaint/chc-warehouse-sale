@@ -126,51 +126,173 @@
             <main class="p-6">
                 <!-- Dashboard -->
                 <section id="section-dashboard" class="fade-in">
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+
+                    <!-- Controls -->
+                    <div class="flex flex-wrap items-center gap-3 mb-5">
+                        <select id="db-period" onchange="dbLoad()" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                            <option value="this_month">This month</option>
+                            <option value="last_month">Last month</option>
+                            <option value="last_30">Last 30 days</option>
+                            <option value="this_quarter">This quarter</option>
+                            <option value="this_year">This year</option>
+                            <option value="last_year">Last year</option>
+                            <option value="all">All time</option>
+                        </select>
+                        <select id="db-company" onchange="dbLoad()" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                            <option value="">All customers</option>
+                        </select>
+                        <span id="db-period-label" class="text-sm text-gray-500"></span>
+                        <div class="flex-1"></div>
+                        <button onclick="dbLoad()" class="text-sm text-gray-500 hover:text-blue-700 px-3 py-2">
+                            <i class="fas fa-rotate mr-1"></i> Refresh
+                        </button>
+                    </div>
+
+                    <div id="db-warning" class="hidden mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"></div>
+
+                    <!-- Headline numbers -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                         <div class="bg-white rounded-xl shadow-sm border p-5">
                             <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-sm text-gray-500">Companies</p>
-                                    <p id="stat-companies" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                <div class="min-w-0">
+                                    <p class="text-sm text-gray-500">Sales</p>
+                                    <p id="db-sales" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                    <p id="db-sales-sub" class="text-sm text-gray-500 mt-1"></p>
                                 </div>
-                                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                                    <i class="fas fa-building text-blue-600"></i>
+                                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center shrink-0">
+                                    <i class="fas fa-dollar-sign text-green-600"></i>
                                 </div>
                             </div>
                         </div>
                         <div class="bg-white rounded-xl shadow-sm border p-5">
                             <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-sm text-gray-500">Products</p>
-                                    <p id="stat-products" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                <div class="min-w-0">
+                                    <p class="text-sm text-gray-500">Orders</p>
+                                    <p id="db-orders" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                    <p id="db-orders-sub" class="text-sm text-gray-500 mt-1"></p>
                                 </div>
-                                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                                    <i class="fas fa-box text-green-600"></i>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-sm text-gray-500">Active Promos</p>
-                                    <p id="stat-promos" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                </div>
-                                <div class="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                                    <i class="fas fa-tags text-red-600"></i>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-sm text-gray-500">Orders (Month)</p>
-                                    <p id="stat-orders" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="stat-revenue" class="text-sm text-green-600 font-semibold mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center shrink-0">
                                     <i class="fas fa-receipt text-purple-600"></i>
                                 </div>
                             </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div class="min-w-0">
+                                    <p class="text-sm text-gray-500">Stock on hand</p>
+                                    <p id="db-stock" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                    <p id="db-stock-sub" class="text-sm text-gray-500 mt-1"></p>
+                                </div>
+                                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                                    <i class="fas fa-warehouse text-blue-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex justify-between items-start">
+                                <div class="min-w-0">
+                                    <p class="text-sm text-gray-500">Repairs billed</p>
+                                    <p id="db-repairs" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                                    <p id="db-repairs-sub" class="text-sm text-gray-500 mt-1"></p>
+                                </div>
+                                <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center shrink-0">
+                                    <i class="fas fa-screwdriver-wrench text-orange-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sales trend -->
+                    <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+                        <div class="flex items-baseline justify-between mb-4">
+                            <h3 class="font-semibold text-gray-800">Sales by month</h3>
+                            <span class="text-xs text-gray-400">orders placed through the platform</span>
+                        </div>
+                        <div id="db-trend"></div>
+                    </div>
+
+                    <!-- Sales by customer -->
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-6">
+                        <div class="flex items-baseline justify-between px-5 py-4 border-b">
+                            <h3 class="font-semibold text-gray-800">By customer</h3>
+                            <span class="text-xs text-gray-400">stock is valued at that customer's own price</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-50 border-b">
+                                    <tr>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Customer</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Sales</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Orders</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Avg order</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock $</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock units</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Repairs</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Repairs $</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="db-company-tbody"></tbody>
+                                <tfoot id="db-company-tfoot" class="bg-gray-50 border-t font-semibold"></tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Repairs: what work is being billed -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                        <div class="bg-white rounded-xl shadow-sm border p-5 lg:col-span-2">
+                            <div class="flex items-baseline justify-between mb-4">
+                                <h3 class="font-semibold text-gray-800">Repairs completed</h3>
+                                <span class="text-xs text-gray-400">by kit, across all customers</span>
+                            </div>
+                            <div id="db-kits"></div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <div class="flex items-baseline justify-between mb-4">
+                                <h3 class="font-semibold text-gray-800">Share by customer</h3>
+                            </div>
+                            <div id="db-kit-donut"></div>
+                        </div>
+                    </div>
+
+                    <!-- Top products -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                            <div class="px-5 py-4 border-b"><h3 class="font-semibold text-gray-800">Top products by dollars</h3></div>
+                            <table class="w-full text-sm"><tbody id="db-top-dollars"></tbody></table>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                            <div class="px-5 py-4 border-b"><h3 class="font-semibold text-gray-800">Top products by units</h3></div>
+                            <table class="w-full text-sm"><tbody id="db-top-units"></tbody></table>
+                        </div>
+                    </div>
+
+                    <!-- Reconciliation: stock out vs billed -->
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <div class="flex flex-wrap items-baseline justify-between gap-2 px-5 py-4 border-b">
+                            <div>
+                                <h3 class="font-semibold text-gray-800">Materials by repair order</h3>
+                                <p class="text-xs text-gray-400 mt-0.5">Everything drawn against each repair order, whether it came off a kit or was scanned by hand — so this total is higher than the Repairs&nbsp;$ column above, which counts kits only.</p>
+                            </div>
+                            <button onclick="dbExportJobs()" class="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg font-medium text-gray-700">
+                                <i class="fas fa-file-csv mr-1"></i> Export CSV
+                            </button>
+                        </div>
+                        <div id="db-jobs-summary" class="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 border-b"></div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-50 border-b">
+                                    <tr>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Repair order</th>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Customer</th>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Last used</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Items</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Units</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Billed</th>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Source</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="db-jobs-tbody"></tbody>
+                            </table>
                         </div>
                     </div>
                 </section>
@@ -1368,6 +1490,7 @@
             promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
+        if (section === 'dashboard') dbLoad();
         if (section === 'reports') arInit();
         if (section === 'products') loadAdminProducts();
         if (section === 'library') libInit();
@@ -1588,17 +1711,331 @@
 
     // ============================================================
     // DASHBOARD
+    //
+    // Everything on this screen comes from one call, so no two numbers on it
+    // can disagree. Charts are drawn with plain divs and inline SVG rather
+    // than a charting library: nothing to load, nothing to fail, and it
+    // prints and screenshots exactly as it appears.
     // ============================================================
-    async function loadDashboard() {
+    let dbState = { data: null, jobs: null, companiesFilled: false };
+
+    const dbMoney = n => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const dbMoney0 = n => '$' + Math.round(Number(n || 0)).toLocaleString('en-CA');
+    const dbNum = n => Number(n || 0).toLocaleString('en-CA', { maximumFractionDigits: 1 });
+    const dbEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    // A fixed palette so a customer keeps the same colour between the donut
+    // and anything else that needs one. Index by position in by_company.
+    const DB_COLOURS = ['#1D4ED8', '#D4501E', '#0E5C69', '#2C6A4E', '#7C3AED', '#B45309', '#BE123C', '#0891B2', '#4D7C0F', '#9333EA'];
+
+    function dbQuery() {
+        const period = document.getElementById('db-period').value;
+        const company = document.getElementById('db-company').value;
+        let q = `?period=${encodeURIComponent(period)}`;
+        if (company) q += `&company_id=${encodeURIComponent(company)}`;
+        return q;
+    }
+
+    async function loadDashboard() { return dbLoad(); }
+
+    async function dbLoad() {
         try {
-            const resp = await adminFetch('/stats');
+            dbFillCompanyFilter();
+            const q = dbQuery();
+            // Both reads together — the jobs panel is part of the same picture,
+            // and serialising them just makes the screen appear in two stages.
+            const [resp, jobsResp] = await Promise.all([
+                adminFetch(`/dashboard${q}`),
+                adminFetch(`/dashboard/jobs${q}`)
+            ]);
+            if (!resp.ok) throw new Error('dashboard ' + resp.status);
             const data = await resp.json();
-            document.getElementById('stat-companies').textContent = data.total_companies;
-            document.getElementById('stat-products').textContent = data.total_products;
-            document.getElementById('stat-promos').textContent = data.active_promotions;
-            document.getElementById('stat-orders').textContent = data.orders_this_month;
-            document.getElementById('stat-revenue').textContent = `$${parseFloat(data.revenue_this_month).toLocaleString()}`;
-        } catch (err) { console.error('Dashboard load failed:', err); }
+            dbState.data = data;
+            dbState.jobs = jobsResp.ok ? await jobsResp.json() : null;
+
+            document.getElementById('db-period-label').textContent = data.period.label;
+            dbRenderCards(data);
+            dbRenderTrend(data);
+            dbRenderCompanies(data);
+            dbRenderKits(data);
+            dbRenderTopProducts(data);
+            dbRenderJobs(dbState.jobs);
+            dbRenderWarning(data, dbState.jobs);
+        } catch (err) {
+            console.error('Dashboard load failed:', err);
+            const w = document.getElementById('db-warning');
+            w.textContent = 'The dashboard could not be loaded. Try Refresh; if it keeps failing the server log will say why.';
+            w.classList.remove('hidden');
+        }
+    }
+
+    function dbFillCompanyFilter() {
+        if (dbState.companiesFilled) return;
+        const sel = document.getElementById('db-company');
+        if (!sel || !admin.companies || !admin.companies.length) return;
+        for (const c of admin.companies) {
+            const o = document.createElement('option');
+            o.value = c.id; o.textContent = c.name;
+            sel.appendChild(o);
+        }
+        dbState.companiesFilled = true;
+    }
+
+    function dbRenderCards(d) {
+        const t = d.totals;
+        document.getElementById('db-sales').textContent = dbMoney0(t.sales_total);
+        document.getElementById('db-sales-sub').textContent =
+            t.customers_ordering
+                ? `${t.customers_ordering} of ${t.companies_total} customers ordered`
+                : 'no orders in this period';
+
+        document.getElementById('db-orders').textContent = dbNum(t.order_count);
+        document.getElementById('db-orders-sub').textContent =
+            t.order_count ? `${dbMoney(t.average_order)} average · ${dbNum(t.units_ordered)} units` : '';
+
+        document.getElementById('db-stock').textContent = dbMoney0(t.inventory_value);
+        document.getElementById('db-stock-sub').textContent =
+            `${dbNum(t.inventory_units)} units on hand today`;
+
+        document.getElementById('db-repairs').textContent = dbNum(t.kits_consumed);
+        document.getElementById('db-repairs-sub').textContent =
+            t.kits_consumed ? `${dbMoney(t.kits_value)} of materials` : 'no repairs billed yet';
+    }
+
+    function dbRenderWarning(d, jobs) {
+        const msgs = [];
+        if (d.totals.unpriced_lines) {
+            msgs.push(`${d.totals.unpriced_lines} order line(s) are priced on request, so the sales figure above does not include them.`);
+        }
+        if (d.totals.inventory_unvalued_skus) {
+            msgs.push(`${d.totals.inventory_unvalued_skus} stocked item(s) have no price, so stock value is a floor, not a total.`);
+        }
+        if (jobs && jobs.totals.jobs_hand_scanned_only) {
+            msgs.push(`${jobs.totals.jobs_hand_scanned_only} repair order(s) drew materials by hand with no kit — those are the ones most often under-billed.`);
+        }
+        if (d.partial && (d.partial.orders || d.partial.inventory)) {
+            msgs.push('This read hit its row limit, so these figures are partial. Narrow the period.');
+        }
+        const w = document.getElementById('db-warning');
+        if (!msgs.length) { w.classList.add('hidden'); return; }
+        w.innerHTML = msgs.map(m => `<div><i class="fas fa-circle-info mr-2"></i>${dbEsc(m)}</div>`).join('');
+        w.classList.remove('hidden');
+    }
+
+    function dbRenderTrend(d) {
+        const el = document.getElementById('db-trend');
+        const rows = d.monthly || [];
+        if (!rows.length) { el.innerHTML = dbEmpty('No orders in this period.'); return; }
+        const max = Math.max(...rows.map(r => r.sales), 1);
+        const label = m => {
+            const [y, mm] = m.split('-');
+            return new Date(Number(y), Number(mm) - 1, 1).toLocaleString('en-CA', { month: 'short' }) + (rows.length > 12 ? " '" + y.slice(2) : '');
+        };
+        el.innerHTML = `
+          <div class="flex items-end gap-2 h-40">
+            ${rows.map(r => `
+              <div class="flex-1 flex flex-col items-center justify-end h-full group" title="${dbEsc(r.month)} — ${dbEsc(dbMoney(r.sales))} over ${r.orders} order(s)">
+                <span class="text-[10px] text-gray-500 mb-1 whitespace-nowrap">${dbEsc(dbMoney0(r.sales))}</span>
+                <div class="w-full bg-blue-600 group-hover:bg-blue-700 rounded-t" style="height:${Math.max((r.sales / max) * 100, 2)}%"></div>
+              </div>`).join('')}
+          </div>
+          <div class="flex gap-2 mt-2 border-t pt-2">
+            ${rows.map(r => `<div class="flex-1 text-center text-[11px] text-gray-500">${dbEsc(label(r.month))}</div>`).join('')}
+          </div>`;
+    }
+
+    function dbEmpty(msg) {
+        return `<p class="text-sm text-gray-400 py-6 text-center">${dbEsc(msg)}</p>`;
+    }
+
+    function dbRenderCompanies(d) {
+        const body = document.getElementById('db-company-tbody');
+        const foot = document.getElementById('db-company-tfoot');
+        const rows = d.by_company || [];
+        if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${dbEmpty('No customers in scope.')}</td></tr>`; foot.innerHTML = ''; return; }
+
+        body.innerHTML = rows.map((c, i) => `
+          <tr class="border-b hover:bg-gray-50">
+            <td class="px-4 py-3">
+              <span class="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle" style="background:${DB_COLOURS[i % DB_COLOURS.length]}"></span>
+              <span class="font-medium text-gray-800">${dbEsc(c.company_name)}</span>
+              ${c.is_active === false ? '<span class="ml-2 text-xs text-gray-400">(inactive)</span>' : ''}
+            </td>
+            <td class="px-4 py-3 text-right font-semibold text-gray-800">${dbEsc(dbMoney(c.sales_total))}</td>
+            <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.order_count)}</td>
+            <td class="px-4 py-3 text-right text-gray-600">${c.order_count ? dbEsc(dbMoney(c.average_order)) : '—'}</td>
+            <td class="px-4 py-3 text-right text-gray-600">${dbEsc(dbMoney(c.inventory_value))}</td>
+            <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.inventory_units)}</td>
+            <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.kits_consumed)}</td>
+            <td class="px-4 py-3 text-right text-gray-600">${dbEsc(dbMoney(c.kits_value))}</td>
+          </tr>`).join('');
+
+        const sum = k => rows.reduce((s, c) => s + Number(c[k] || 0), 0);
+        foot.innerHTML = `
+          <tr>
+            <td class="px-4 py-3 text-gray-700">All customers</td>
+            <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('sales_total')))}</td>
+            <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('order_count'))}</td>
+            <td class="px-4 py-3 text-right text-gray-400">—</td>
+            <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('inventory_value')))}</td>
+            <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('inventory_units'))}</td>
+            <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('kits_consumed'))}</td>
+            <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('kits_value')))}</td>
+          </tr>`;
+    }
+
+    function dbRenderKits(d) {
+        const el = document.getElementById('db-kits');
+        const kits = d.kits || [];
+        if (!kits.length) {
+            el.innerHTML = dbEmpty('No repair kits have been consumed in this period.');
+            document.getElementById('db-kit-donut').innerHTML = dbEmpty('Nothing to show yet.');
+            return;
+        }
+        const max = Math.max(...kits.map(k => k.count), 1);
+        el.innerHTML = kits.slice(0, 12).map(k => `
+          <div class="mb-3">
+            <div class="flex justify-between items-baseline text-sm mb-1">
+              <span class="text-gray-700 truncate pr-3">${dbEsc(k.kit_name)}</span>
+              <span class="text-gray-500 whitespace-nowrap">${dbNum(k.count)} &middot; <span class="font-semibold text-gray-700">${dbEsc(dbMoney(k.value))}</span></span>
+            </div>
+            <div class="h-3 bg-gray-100 rounded">
+              <div class="h-3 bg-orange-500 rounded" style="width:${Math.max((k.count / max) * 100, 3)}%"></div>
+            </div>
+          </div>`).join('');
+
+        dbRenderDonut(d);
+    }
+
+    /**
+     * Share of repair work by customer. Drawn as SVG arc segments rather than
+     * with a library — a donut is four lines of trigonometry and this way the
+     * page has no runtime dependency that can fail to load.
+     */
+    function dbRenderDonut(d) {
+        const el = document.getElementById('db-kit-donut');
+        const rows = (d.by_company || []).filter(c => c.kits_consumed > 0);
+        const total = rows.reduce((s, c) => s + c.kits_consumed, 0);
+        if (!total) { el.innerHTML = dbEmpty('Nothing to show yet.'); return; }
+
+        const cx = 90, cy = 90, r = 70, w = 26;
+        let angle = -Math.PI / 2;
+        const arcs = rows.map((c, i) => {
+            const frac = c.kits_consumed / total;
+            const a0 = angle, a1 = angle + frac * Math.PI * 2;
+            angle = a1;
+            const colour = DB_COLOURS[(d.by_company || []).indexOf(c) % DB_COLOURS.length];
+            // A single segment covering the whole circle cannot be drawn as an
+            // arc — start and end land on the same point. Draw a ring instead.
+            if (frac >= 0.9999) {
+                return `<circle cx="${cx}" cy="${cy}" r="${r - w / 2}" fill="none" stroke="${colour}" stroke-width="${w}"></circle>`;
+            }
+            const p = (a, rad) => `${(cx + rad * Math.cos(a)).toFixed(2)} ${(cy + rad * Math.sin(a)).toFixed(2)}`;
+            const large = (a1 - a0) > Math.PI ? 1 : 0;
+            return `<path d="M ${p(a0, r)} A ${r} ${r} 0 ${large} 1 ${p(a1, r)} L ${p(a1, r - w)} A ${r - w} ${r - w} 0 ${large} 0 ${p(a0, r - w)} Z" fill="${colour}"><title>${dbEsc(c.company_name)} — ${c.kits_consumed} repair(s)</title></path>`;
+        }).join('');
+
+        el.innerHTML = `
+          <div class="flex flex-col items-center">
+            <svg viewBox="0 0 180 180" class="w-44 h-44">
+              ${arcs}
+              <text x="90" y="86" text-anchor="middle" class="fill-gray-800" style="font-size:26px;font-weight:700">${total}</text>
+              <text x="90" y="104" text-anchor="middle" class="fill-gray-400" style="font-size:11px">repairs</text>
+            </svg>
+            <div class="w-full mt-4 space-y-1.5">
+              ${rows.map(c => `
+                <div class="flex items-center justify-between text-xs">
+                  <span class="flex items-center min-w-0">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full mr-2 shrink-0" style="background:${DB_COLOURS[(d.by_company || []).indexOf(c) % DB_COLOURS.length]}"></span>
+                    <span class="text-gray-600 truncate">${dbEsc(c.company_name)}</span>
+                  </span>
+                  <span class="text-gray-500 whitespace-nowrap ml-2">${Math.round(c.kits_consumed / total * 100)}%</span>
+                </div>`).join('')}
+            </div>
+          </div>`;
+    }
+
+    function dbRenderTopProducts(d) {
+        const row = (p, right) => `
+          <tr class="border-b last:border-0 hover:bg-gray-50">
+            <td class="px-5 py-2.5">
+              <div class="font-medium text-gray-800 truncate max-w-xs">${dbEsc(p.name)}</div>
+              <div class="text-xs text-gray-400">${dbEsc(p.sku)}${p.company_count > 1 ? ` · ${p.company_count} customers` : ''}</div>
+            </td>
+            <td class="px-5 py-2.5 text-right font-semibold text-gray-700 whitespace-nowrap">${right(p)}</td>
+          </tr>`;
+
+        const byD = d.top_products_by_dollars || [];
+        const byU = d.top_products_by_units || [];
+        document.getElementById('db-top-dollars').innerHTML =
+            byD.length ? byD.slice(0, 10).map(p => row(p, x => dbEsc(dbMoney(x.dollars)))).join('')
+                       : `<tr><td>${dbEmpty('No product sales in this period.')}</td></tr>`;
+        document.getElementById('db-top-units').innerHTML =
+            byU.length ? byU.slice(0, 10).map(p => row(p, x => dbNum(x.units) + ' units')).join('')
+                       : `<tr><td>${dbEmpty('No product sales in this period.')}</td></tr>`;
+    }
+
+    function dbRenderJobs(j) {
+        const sum = document.getElementById('db-jobs-summary');
+        const body = document.getElementById('db-jobs-tbody');
+        if (!j) {
+            sum.innerHTML = '';
+            body.innerHTML = `<tr><td colspan="7">${dbEmpty('Job materials could not be loaded.')}</td></tr>`;
+            return;
+        }
+        const cell = (label, value, tone) => `
+          <div class="px-5 py-4">
+            <p class="text-xs text-gray-500 uppercase tracking-wide">${dbEsc(label)}</p>
+            <p class="text-xl font-bold ${tone || 'text-gray-800'} mt-1">${value}</p>
+          </div>`;
+        sum.innerHTML =
+            cell('Repair orders', dbNum(j.totals.job_count)) +
+            cell('Materials billed', dbEsc(dbMoney(j.totals.value_billed))) +
+            cell('Units drawn', dbNum(j.totals.units_used)) +
+            cell('Missing a price', dbNum(j.totals.jobs_with_unpriced),
+                 j.totals.jobs_with_unpriced ? 'text-amber-600' : 'text-gray-800');
+
+        const jobs = j.jobs || [];
+        if (!jobs.length) {
+            body.innerHTML = `<tr><td colspan="7">${dbEmpty('No materials have been drawn against a repair order in this period.')}</td></tr>`;
+            return;
+        }
+        body.innerHTML = jobs.slice(0, 25).map(x => `
+          <tr class="border-b hover:bg-gray-50">
+            <td class="px-4 py-3 font-medium text-gray-800">${dbEsc(x.job_ref)}</td>
+            <td class="px-4 py-3 text-gray-600">${dbEsc(x.company_name)}</td>
+            <td class="px-4 py-3 text-gray-500">${dbEsc(String(x.last_used_at || '').slice(0, 10))}</td>
+            <td class="px-4 py-3 text-right text-gray-600">${dbNum(x.distinct_items)}${x.items_unpriced ? ` <span class="text-amber-600" title="${x.items_unpriced} item(s) have no price">*</span>` : ''}</td>
+            <td class="px-4 py-3 text-right text-gray-600">${dbNum(x.units_used)}</td>
+            <td class="px-4 py-3 text-right font-semibold text-gray-800">${dbEsc(dbMoney(x.value_billed))}</td>
+            <td class="px-4 py-3">
+              ${x.hand_scanned_only
+                  ? '<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">scanned by hand</span>'
+                  : `<span class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded">${dbNum(x.kits_used)} kit(s)</span>`}
+            </td>
+          </tr>`).join('');
+    }
+
+    /**
+     * The CSV needs the bearer token, so it cannot be a plain link. Fetch it,
+     * then hand the browser a blob — which also means a failed export shows a
+     * message instead of navigating to a JSON error page.
+     */
+    async function dbExportJobs() {
+        try {
+            const resp = await adminFetchRaw(`/dashboard/jobs${dbQuery()}&format=csv`);
+            if (!resp.ok) throw new Error('export ' + resp.status);
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `job-materials-${document.getElementById('db-period').value}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+        } catch (err) {
+            console.error('CSV export failed:', err);
+            alert('The export could not be produced. Try Refresh and export again.');
+        }
     }
 
     // ============================================================
@@ -1611,6 +2048,10 @@
             admin.companies = data.companies || [];
             renderCompaniesTable();
             populateCompanyDropdowns();
+            // The dashboard boots before this resolves, so its customer filter
+            // is empty at that point. Fill it here rather than making the
+            // dashboard wait on a list it does not otherwise need.
+            dbFillCompanyFilter();
         } catch (err) { console.error('Companies load failed:', err); }
     }
 
