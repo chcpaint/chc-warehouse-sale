@@ -468,3 +468,32 @@ test('the period label is carried back so the screen can say what it is showing'
     assert.equal(res.body.period.label, `Year ${thisYear - 1}`);
     assert.equal(res.body.period.key, 'last_year');
 });
+
+// ==================================================================
+// The .not() filter the dashboard leans on
+// ==================================================================
+
+test('the cancelled-order filter is a real filter, not a no-op', async () => {
+    // The route filters cancelled orders twice: once in the query with .not(),
+    // once in JS. Until the fake understood .not(), only the JS half was ever
+    // exercised — so this asserts the query half independently.
+    reset();
+    const { createFakeSupabase } = require('./helpers/fake-supabase');
+    const db = createFakeSupabase({
+        orders: [
+            { id: 'a', company_id: CO_A, status: 'closed', total: 10, created_at: RECENT, items: [] },
+            { id: 'b', company_id: CO_A, status: 'cancelled', total: 999, created_at: RECENT, items: [] }
+        ]
+    });
+    const { data } = await db.from('orders').select('id, status').not('status', 'in', '(cancelled)');
+    assert.equal(data.length, 1, '.not() must actually exclude the row');
+    assert.equal(data[0].id, 'a');
+
+    const { data: withBarcode } = await createFakeSupabase({
+        product_barcodes: [
+            { id: '1', product_id: 'p1', barcode: '123' },
+            { id: '2', product_id: 'p2', barcode: null }
+        ]
+    }).from('product_barcodes').select('id').not('barcode', 'is', null);
+    assert.equal(withBarcode.length, 1, '.not(col, is, null) must exclude the null');
+});

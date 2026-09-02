@@ -64,6 +64,11 @@ router.use('/companies/:companyId/library', require('./item-library'));
 // an allow-list and /dashboard is not on it.
 router.use('/dashboard', require('./admin-dashboard'));
 
+// The master table — maintaining item_library rather than only reading it.
+// Super-admin only, enforced inside that router. Mounted before the
+// company-scoped routes so /master is never read as a company id.
+router.use('/master', require('./master-table'));
+
 /**
  * GET /api/admin/stats
  */
@@ -705,11 +710,121 @@ router.get('/companies/:companyId/products', requireCompanyAccess, async (req, r
         const { data, error, count } = await query;
         if (error) throw error;
 
-        res.json({ products: data || [], total: count, page: parseInt(page), limit: parseInt(limit) });
+        // Barcodes live in their own table because one product can carry
+        // several (a manufacturer code and an inner-pack code, or one we
+        // generated). They were never joined here, so the catalogue screen
+        // could not show a barcode and nobody could tell which items were
+        // ready to scan. Fetched separately rather than embedded so a failure
+        // to read them degrades to "no barcode shown" instead of failing the
+        // whole catalogue.
+        const products = data || [];
+        if (products.length) {
+            const { data: codes } = await supabaseAdmin
+                .from('product_barcodes')
+                .select('product_id, barcode, symbology, is_primary, is_internal')
+                .in('product_id', products.map(p => p.id));
+            const byProduct = new Map();
+            for (const c of codes || []) {
+                if (!byProduct.has(c.product_id)) byProduct.set(c.product_id, []);
+                byProduct.get(c.product_id).push(c);
+            }
+            for (const p of products) {
+                const list = byProduct.get(p.id) || [];
+                p.barcodes = list;
+                const primary = list.find(c => c.is_primary) || list[0] || null;
+                p.barcode = primary ? primary.barcode : null;
+                p.barcode_is_internal = primary ? !!primary.is_internal : false;
+            }
+        }
+
+        res.json({ products, total: count, page: parseInt(page), limit: parseInt(limit) });
 
     } catch (err) {
         console.error('Admin products error:', err);
         res.status(500).json({ error: 'Failed to load products.' });
+    }
+});
+
+/**
+ * PUT /api/admin/companies/:companyId/products/:productId/barcode
+ *
+ * Set or replace the barcode a scanner will find for this product.
+ *
+ * Scoped to the company on purpose: two customers may legitimately hold the
+ * same manufacturer barcode on their own copy of the same part, but within one
+ * customer a code must identify exactly one product or scanning is a coin
+ * toss. That is the only uniqueness this enforces.
+ */
+router.put('/companies/:companyId/products/:productId/barcode', requireCompanyAccess, async (req, res) => {
+    try {
+        const { companyId, productId } = req.params;
+        if (!isValidUUID(productId)) return res.status(400).json({ error: 'Invalid product id.' });
+
+        const { data: product } = await supabaseAdmin.from('products')
+            .select('id, company_id, sku, name').eq('id', productId).maybeSingle();
+        if (!product || product.company_id !== companyId) {
+            return res.status(404).json({ error: 'That product is not in this company\'s catalogue.' });
+        }
+
+        const raw = stripHtml(String(req.body.barcode || '')).trim();
+
+        // An empty value removes the barcode. Deliberate and explicit — the
+        // caller has to send an empty string, so it cannot happen by omission.
+        if (!raw) {
+            await supabaseAdmin.from('product_barcodes').delete().eq('product_id', productId);
+            await logAction(req.admin.id, 'product_barcode_cleared', 'product', productId,
+                            { sku: product.sku }, req.ip);
+            return res.json({ message: `Barcode removed from ${product.sku}.`, barcode: null });
+        }
+
+        if (!/^[0-9A-Za-z\-]{4,48}$/.test(raw)) {
+            return res.status(400).json({ error: 'A barcode should be 4–48 characters, digits and letters only.' });
+        }
+
+        // Refuse a code already on a different product in this catalogue.
+        //
+        // Deliberately two plain queries rather than one embedded select. An
+        // embed here silently returns nothing when the relation cannot be
+        // resolved, and a uniqueness check that silently finds nothing is a
+        // uniqueness check that always passes — which is exactly how the first
+        // version of this shipped and let a duplicate through.
+        const { data: holders } = await supabaseAdmin.from('product_barcodes')
+            .select('product_id').eq('barcode', raw);
+        const otherIds = [...new Set((holders || [])
+            .map(h => h.product_id).filter(id => id && id !== productId))];
+        if (otherIds.length) {
+            const { data: owners } = await supabaseAdmin.from('products')
+                .select('id, sku, name, company_id').in('id', otherIds);
+            const inThisCompany = (owners || []).find(o => o.company_id === companyId);
+            if (inThisCompany) {
+                return res.status(409).json({
+                    error: `${raw} is already on ${inThisCompany.sku} — ${inThisCompany.name}. ` +
+                           'One code cannot mean two products, or a scan cannot tell them apart.'
+                });
+            }
+        }
+
+        await supabaseAdmin.from('product_barcodes').delete().eq('product_id', productId).eq('is_primary', true);
+        const { data, error } = await supabaseAdmin.from('product_barcodes')
+            .insert({
+                product_id: productId, barcode: raw,
+                // Length is the only honest signal we have about the symbology.
+                symbology: raw.length === 13 ? 'EAN_13' : raw.length === 12 ? 'UPC_A' : 'OTHER',
+                is_primary: true, source: 'manual',
+                // An internal code is one we invented for an item with no
+                // manufacturer barcode. A typed one is assumed real.
+                is_internal: false
+            })
+            .select().single();
+        if (error) throw error;
+
+        await logAction(req.admin.id, 'product_barcode_set', 'product', productId,
+                        { sku: product.sku, barcode: raw }, req.ip);
+        res.json({ message: `${raw} set on ${product.sku}.`, barcode: data });
+
+    } catch (err) {
+        console.error('Set barcode error:', err);
+        res.status(500).json({ error: 'Failed to set that barcode.' });
     }
 });
 

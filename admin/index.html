@@ -86,6 +86,9 @@
                 <button onclick="adminNav('library')" data-nav="library" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-book w-5"></i> Item Library
                 </button>
+                <button onclick="adminNav('master')" data-nav="master" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-master">
+                    <i class="fas fa-database w-5"></i> Master Table
+                </button>
                 <button onclick="adminNav('promotions')" data-nav="promotions" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-tags w-5"></i> Promotions
                 </button>
@@ -297,6 +300,149 @@
                     </div>
                 </section>
 
+                <!-- ============================================================ -->
+                <!-- MASTER TABLE (super admin only)                              -->
+                <!--                                                              -->
+                <!-- The one place a part is defined. Items are added here, then  -->
+                <!-- pushed to one customer or all of them, so the part number,   -->
+                <!-- name and barcode are identical everywhere and cross-shop     -->
+                <!-- reporting can group on them.                                 -->
+                <!-- ============================================================ -->
+                <section id="section-master" class="hidden fade-in">
+
+                    <!-- Coverage -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <p class="text-sm text-gray-500">Items in the master</p>
+                            <p id="mt-count" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                            <p id="mt-retired" class="text-xs text-gray-400 mt-1"></p>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <p class="text-sm text-gray-500">Can be scanned</p>
+                            <p id="mt-barcodes" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                            <p id="mt-coverage" class="text-xs text-gray-400 mt-1"></p>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <p class="text-sm text-gray-500">Missing a barcode</p>
+                            <p id="mt-nobarcode" class="text-3xl font-bold text-amber-600 mt-1">-</p>
+                            <p class="text-xs text-gray-400 mt-1">these cannot be scanned yet</p>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                            <p class="text-sm text-gray-500">Case-level barcodes</p>
+                            <p id="mt-caselevel" class="text-3xl font-bold text-gray-800 mt-1">-</p>
+                            <p class="text-xs text-gray-400 mt-1">a scan counts a carton, not one item</p>
+                        </div>
+                    </div>
+
+                    <!-- Load a file -->
+                    <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+                        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                            <div>
+                                <h3 class="font-semibold text-gray-800">Load the master file</h3>
+                                <p class="text-xs text-gray-500 mt-0.5">Preview first. Nothing is written until you say so, and every change is recorded.</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="file" id="mt-file" accept=".xlsx,.xls,.csv" class="text-sm">
+                                <button onclick="mtPreview()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
+                                    <i class="fas fa-eye mr-1"></i> Preview
+                                </button>
+                            </div>
+                        </div>
+                        <div id="mt-import-result"></div>
+                    </div>
+
+                    <!-- Push to customers -->
+                    <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+                        <h3 class="font-semibold text-gray-800">Send items to customers</h3>
+                        <p class="text-xs text-gray-500 mt-0.5 mb-3">
+                            Adds parts that a customer does not already have, at the master's list price.
+                            It never changes a price they already set, and it skips anything a rule below says they must not receive.
+                        </p>
+                        <div class="flex flex-wrap items-end gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Which items</label>
+                                <select id="mt-push-scope" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                                    <option value="all">Everything in the master</option>
+                                    <option value="brand">One brand</option>
+                                </select>
+                            </div>
+                            <div id="mt-push-brand-wrap" class="hidden">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Brand</label>
+                                <input id="mt-push-brand" placeholder="PPG" class="border rounded-lg px-3 py-2 text-sm w-40">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">To</label>
+                                <select id="mt-push-company" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                                    <option value="">All customers</option>
+                                </select>
+                            </div>
+                            <button onclick="mtPushPreview()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-eye mr-1"></i> Preview
+                            </button>
+                        </div>
+                        <div id="mt-push-result" class="mt-4"></div>
+                    </div>
+
+                    <!-- Who does not get what -->
+                    <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+                        <h3 class="font-semibold text-gray-800">Who does not get what</h3>
+                        <p class="text-xs text-gray-500 mt-0.5 mb-3">
+                            Commercial rules. A customer we have no contract to supply a brand to never receives it, however the push is run.
+                        </p>
+                        <div id="mt-exclusions" class="mb-4"></div>
+                        <div class="flex flex-wrap items-end gap-3 pt-3 border-t">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Customer</label>
+                                <select id="mt-ex-company" class="border rounded-lg px-3 py-2 text-sm bg-white"></select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Does not get brand</label>
+                                <input id="mt-ex-brand" placeholder="PPG" class="border rounded-lg px-3 py-2 text-sm w-36">
+                            </div>
+                            <div class="flex-1 min-w-[220px]">
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Why</label>
+                                <input id="mt-ex-reason" placeholder="No contract covering this customer" class="border rounded-lg px-3 py-2 text-sm w-full">
+                            </div>
+                            <button onclick="mtAddExclusion()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">Add rule</button>
+                        </div>
+                    </div>
+
+                    <!-- Search / add -->
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b">
+                            <h3 class="font-semibold text-gray-800">The master table</h3>
+                            <div class="flex items-center gap-2">
+                                <input id="mt-search" oninput="mtSearchDebounce()" placeholder="Part number, name, or scan a barcode"
+                                       class="border rounded-lg px-3 py-2 text-sm w-72">
+                                <label class="flex items-center gap-1.5 text-sm text-gray-600">
+                                    <input type="checkbox" id="mt-only-nobarcode" onchange="mtSearch()" class="w-4 h-4 rounded border-gray-300">
+                                    no barcode
+                                </label>
+                                <button onclick="mtNewItem()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                                    <i class="fas fa-plus mr-1"></i> Add item
+                                </button>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-50 border-b">
+                                    <tr>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Part #</th>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Item</th>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Brand</th>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Category</th>
+                                        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Barcode</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">List</th>
+                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Case</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="mt-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div id="mt-paging" class="px-5 py-3 border-t text-sm text-gray-500"></div>
+                    </div>
+                </section>
+
                 <!-- Companies Management -->
                 <section id="section-companies" class="hidden fade-in">
                     <div class="flex justify-between items-center mb-4">
@@ -403,6 +549,7 @@
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Product</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Brand</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">SKU</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Barcode</th>
                                     <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Price</th>
                                     <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Case Qty</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stage &amp; Status</th>
@@ -1458,6 +1605,10 @@
         // Hide super-admin-only nav items
         if (admin.user.role !== 'super_admin') {
             document.getElementById('nav-admins').classList.add('hidden');
+            // The master table defines parts for every customer, so it is
+            // super-admin only. The API refuses anyone else regardless; this
+            // just stops a dead menu item being offered.
+            document.getElementById('nav-master').classList.add('hidden');
             document.getElementById('nav-audit').classList.add('hidden');
             document.getElementById('nav-branding').classList.add('hidden');
         }
@@ -1486,7 +1637,7 @@
         document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products',
-            library: 'Item Library',
+            library: 'Item Library', master: 'Master Table',
             promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
@@ -1494,6 +1645,7 @@
         if (section === 'reports') arInit();
         if (section === 'products') loadAdminProducts();
         if (section === 'library') libInit();
+        if (section === 'master') mtInit();
         if (section === 'promotions') loadAdminPromotions();
         if (section === 'orders') loadAdminOrders();
         if (section === 'admins') loadAdminUsers();
@@ -2036,6 +2188,354 @@
             console.error('CSV export failed:', err);
             alert('The export could not be produced. Try Refresh and export again.');
         }
+    }
+
+    // ============================================================
+    // MASTER TABLE  (super admin only)
+    //
+    // The workflow this screen exists to enforce: a part is defined ONCE
+    // here, then sent to customers. Typing the same part into three
+    // catalogues is how you end up with three spellings, two barcodes and a
+    // name nothing can group on.
+    // ============================================================
+    let mtState = { offset: 0, limit: 50, total: 0, lastPreview: null, companiesFilled: false };
+    let mtTimer;
+
+    function mtInit() {
+        mtFillCompanies();
+        mtStats();
+        mtSearch();
+        mtLoadExclusions();
+        const scope = document.getElementById('mt-push-scope');
+        if (scope && !scope.dataset.wired) {
+            scope.dataset.wired = '1';
+            scope.addEventListener('change', () => {
+                document.getElementById('mt-push-brand-wrap')
+                    .classList.toggle('hidden', scope.value !== 'brand');
+            });
+        }
+    }
+
+    function mtFillCompanies() {
+        if (mtState.companiesFilled || !admin.companies || !admin.companies.length) return;
+        for (const [id, blank] of [['mt-push-company', true], ['mt-ex-company', false]]) {
+            const sel = document.getElementById(id);
+            if (!sel) continue;
+            if (!blank) sel.innerHTML = '';
+            for (const c of admin.companies) {
+                const o = document.createElement('option');
+                o.value = c.id; o.textContent = c.name;
+                sel.appendChild(o);
+            }
+        }
+        mtState.companiesFilled = true;
+    }
+
+    async function mtStats() {
+        try {
+            const resp = await adminFetch('/master/stats');
+            if (!resp.ok) return;
+            const d = await resp.json();
+            const L = d.library;
+            document.getElementById('mt-count').textContent = L.items.toLocaleString();
+            document.getElementById('mt-retired').textContent = L.retired ? `${L.retired} retired` : '';
+            document.getElementById('mt-barcodes').textContent = L.with_barcode.toLocaleString();
+            document.getElementById('mt-coverage').textContent = `${L.barcode_coverage_pct}% of the master`;
+            document.getElementById('mt-nobarcode').textContent = L.without_barcode.toLocaleString();
+            document.getElementById('mt-caselevel').textContent = (L.case_level_barcodes || 0).toLocaleString();
+        } catch (err) { console.error('Master stats failed:', err); }
+    }
+
+    function mtSearchDebounce() { clearTimeout(mtTimer); mtTimer = setTimeout(() => { mtState.offset = 0; mtSearch(); }, 300); }
+
+    async function mtSearch() {
+        const tbody = document.getElementById('mt-tbody');
+        try {
+            const q = encodeURIComponent(document.getElementById('mt-search').value.trim());
+            const nb = document.getElementById('mt-only-nobarcode').checked ? '&missing_barcode=true' : '';
+            const resp = await adminFetch(`/master?q=${q}${nb}&limit=${mtState.limit}&offset=${mtState.offset}`);
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error);
+            mtState.total = d.total;
+
+            tbody.innerHTML = (d.items || []).length ? d.items.map(i => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-2.5 font-mono text-gray-700">${esc(i.sku)}</td>
+                    <td class="px-4 py-2.5">
+                        <button onclick="mtEditItem('${i.id}')" class="text-gray-800 hover:text-blue-700 text-left">${esc(i.name)}</button>
+                        ${i.is_active === false ? '<span class="ml-2 text-xs text-gray-400">retired</span>' : ''}
+                    </td>
+                    <td class="px-4 py-2.5 text-gray-500">${esc(i.brand || '—')}</td>
+                    <td class="px-4 py-2.5 text-gray-500">${esc(i.category || '—')}</td>
+                    <td class="px-4 py-2.5 font-mono text-xs ${i.barcode ? 'text-gray-600' : 'text-amber-600'}">
+                        ${i.barcode ? esc(i.barcode) : 'none'}
+                        ${i.barcode_level === 'case' ? '<span class="ml-1 text-[10px] bg-amber-100 text-amber-700 px-1 rounded" title="A 14-digit code identifies a carton. Scanning it counts a case, not one item.">case</span>' : ''}
+                        ${i.barcode_level === 'unknown' ? '<span class="ml-1 text-[10px] bg-gray-100 text-gray-500 px-1 rounded" title="Not a standard UPC or EAN length — worth checking.">?</span>' : ''}
+                    </td>
+                    <td class="px-4 py-2.5 text-right text-gray-600">${i.list_price ? '$' + Number(i.list_price).toFixed(2) : '—'}</td>
+                    <td class="px-4 py-2.5 text-right text-gray-500">${i.case_qty || '—'}</td>
+                </tr>`).join('')
+                : '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Nothing matches.</td></tr>';
+
+            const from = d.total ? mtState.offset + 1 : 0;
+            const to = Math.min(mtState.offset + mtState.limit, d.total);
+            document.getElementById('mt-paging').innerHTML = `
+                Showing ${from}–${to} of ${d.total.toLocaleString()}
+                <span class="ml-3">
+                    <button onclick="mtPage(-1)" class="text-blue-600 hover:underline ${mtState.offset === 0 ? 'opacity-30 pointer-events-none' : ''}">previous</button>
+                    <button onclick="mtPage(1)" class="ml-3 text-blue-600 hover:underline ${to >= d.total ? 'opacity-30 pointer-events-none' : ''}">next</button>
+                </span>`;
+        } catch (err) {
+            console.error('Master search failed:', err);
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-500">Could not load the master table.</td></tr>';
+        }
+    }
+
+    function mtPage(dir) {
+        mtState.offset = Math.max(0, mtState.offset + dir * mtState.limit);
+        mtSearch();
+    }
+
+    // ---------- loading the file ----------
+
+    async function mtSend(apply) {
+        const input = document.getElementById('mt-file');
+        if (!input.files || !input.files[0]) { alert('Choose the master file first.'); return null; }
+        const body = new FormData();
+        body.append('file', input.files[0]);
+        const resp = await adminFetchRaw(`/master/import?apply=${apply ? 'true' : 'false'}`, { method: 'POST', body });
+        const data = await resp.json();
+        if (!resp.ok) { alert(data.error || 'The file could not be read.'); return null; }
+        return data;
+    }
+
+    async function mtPreview() {
+        const box = document.getElementById('mt-import-result');
+        box.innerHTML = '<p class="text-sm text-gray-400">Reading the file…</p>';
+        const d = await mtSend(false);
+        if (!d) { box.innerHTML = ''; return; }
+        mtState.lastPreview = d;
+        const s = d.summary;
+
+        box.innerHTML = `
+          <div class="border rounded-lg overflow-hidden">
+            <div class="bg-gray-50 px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3">
+              <span class="text-sm text-gray-600">
+                <b>${esc(d.sheet)}</b> — ${s.rows_in_file.toLocaleString()} rows read
+              </span>
+              <button onclick="mtApply()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                Apply this import
+              </button>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-5 divide-x border-b">
+              ${[['New items', s.to_create, ''], ['Updated', s.to_update, ''],
+                 ['Unchanged', s.unchanged, 'text-gray-400'],
+                 ['Skipped', s.skipped, s.skipped ? 'text-amber-600' : ''],
+                 ['Barcode clashes', s.barcode_conflicts, s.barcode_conflicts ? 'text-amber-600' : '']]
+                .map(([l, v, cls]) => `<div class="px-4 py-3">
+                    <p class="text-xs text-gray-500 uppercase">${l}</p>
+                    <p class="text-xl font-bold ${cls || 'text-gray-800'} mt-0.5">${Number(v).toLocaleString()}</p>
+                  </div>`).join('')}
+            </div>
+            ${d.problems && d.problems.length ? `
+              <div class="px-4 py-3 max-h-72 overflow-y-auto">
+                <p class="text-xs font-semibold text-gray-500 uppercase mb-2">Rows that need a decision</p>
+                ${d.problems.map(p => `<p class="text-sm text-gray-600 mb-1.5">
+                    <span class="font-mono text-xs text-gray-400 mr-1">${esc(p.sku || '')}</span>${esc(p.reason)}
+                  </p>`).join('')}
+              </div>` : '<div class="px-4 py-3 text-sm text-gray-400">Nothing needs a decision — every row loads cleanly.</div>'}
+          </div>`;
+    }
+
+    async function mtApply() {
+        if (!confirm('Apply this import? Every change is recorded and can be reversed.')) return;
+        const box = document.getElementById('mt-import-result');
+        box.innerHTML = '<p class="text-sm text-gray-400">Loading…</p>';
+        const d = await mtSend(true);
+        if (!d) { box.innerHTML = ''; return; }
+        const s = d.summary;
+        box.innerHTML = `
+          <div class="border border-green-200 bg-green-50 rounded-lg px-4 py-3">
+            <p class="text-sm text-green-800 font-semibold">Loaded.</p>
+            <p class="text-sm text-green-700 mt-1">
+              ${s.created} added, ${s.updated} updated, ${s.unchanged} unchanged,
+              ${s.skipped} skipped, ${s.barcode_conflicts} barcode clashes left for you.
+            </p>
+          </div>`;
+        mtStats(); mtSearch();
+    }
+
+    // ---------- sending items to customers ----------
+
+    function mtPushBody(apply) {
+        const scope = document.getElementById('mt-push-scope').value;
+        const co = document.getElementById('mt-push-company').value;
+        const body = { apply };
+        if (scope === 'brand') {
+            const b = document.getElementById('mt-push-brand').value.trim();
+            if (!b) { alert('Type the brand to send.'); return null; }
+            body.brand = b;
+        } else body.all = true;
+        if (co) body.company_ids = [co]; else body.all_companies = true;
+        return body;
+    }
+
+    async function mtPushPreview() {
+        const body = mtPushBody(false);
+        if (!body) return;
+        const box = document.getElementById('mt-push-result');
+        box.innerHTML = '<p class="text-sm text-gray-400">Working it out…</p>';
+        try {
+            const resp = await adminFetch('/master/push', { method: 'POST', body: JSON.stringify(body) });
+            const d = await resp.json();
+            if (!resp.ok) { box.innerHTML = `<p class="text-sm text-red-600">${esc(d.error)}</p>`; return; }
+
+            box.innerHTML = `
+              <div class="border rounded-lg overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3">
+                  <span class="text-sm text-gray-600">
+                    <b>${d.summary.to_add.toLocaleString()}</b> item(s) would be added across
+                    ${d.summary.customers} customer(s).
+                    ${d.summary.already_present ? `${d.summary.already_present.toLocaleString()} already there.` : ''}
+                    ${d.summary.blocked_by_rules ? `<span class="text-amber-700">${d.summary.blocked_by_rules} blocked by a rule.</span>` : ''}
+                  </span>
+                  ${d.summary.to_add ? `<button onclick="mtPushApply()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Send them</button>` : ''}
+                </div>
+                <table class="w-full text-sm">
+                  <thead class="bg-white border-b"><tr>
+                    <th class="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Customer</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Would add</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Already had</th>
+                    <th class="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Withheld</th>
+                  </tr></thead>
+                  <tbody>${d.by_company.map(c => `
+                    <tr class="border-b last:border-0">
+                      <td class="px-4 py-2 text-gray-800">${esc(c.company_name)}</td>
+                      <td class="px-4 py-2 text-right font-semibold">${c.would_add}</td>
+                      <td class="px-4 py-2 text-right text-gray-400">${c.already_had}</td>
+                      <td class="px-4 py-2 text-xs ${c.excluded_count ? 'text-amber-700' : 'text-gray-300'}">
+                        ${c.excluded_count ? `${c.excluded_count} — ${esc(c.excluded_reason || '')}` : '—'}
+                      </td>
+                    </tr>`).join('')}</tbody>
+                </table>
+              </div>`;
+        } catch (err) {
+            console.error('Push preview failed:', err);
+            box.innerHTML = '<p class="text-sm text-red-600">Could not work that out. Try again.</p>';
+        }
+    }
+
+    async function mtPushApply() {
+        const body = mtPushBody(true);
+        if (!body) return;
+        if (!confirm('Send these items? Prices customers already set are left alone.')) return;
+        const box = document.getElementById('mt-push-result');
+        box.innerHTML = '<p class="text-sm text-gray-400">Sending…</p>';
+        try {
+            const resp = await adminFetch('/master/push', { method: 'POST', body: JSON.stringify(body) });
+            const d = await resp.json();
+            if (!resp.ok) { box.innerHTML = `<p class="text-sm text-red-600">${esc(d.error)}</p>`; return; }
+            box.innerHTML = `
+              <div class="border border-green-200 bg-green-50 rounded-lg px-4 py-3">
+                <p class="text-sm text-green-800 font-semibold">Sent.</p>
+                <p class="text-sm text-green-700 mt-1">
+                  ${d.summary.created} item(s) added, ${d.summary.barcodes_set} with a barcode.
+                  ${d.summary.blocked_by_rules ? `${d.summary.blocked_by_rules} withheld by a rule.` : ''}
+                </p>
+              </div>`;
+        } catch (err) {
+            console.error('Push failed:', err);
+            box.innerHTML = '<p class="text-sm text-red-600">The send failed. Nothing partial was left behind.</p>';
+        }
+    }
+
+    // ---------- exclusions ----------
+
+    async function mtLoadExclusions() {
+        const box = document.getElementById('mt-exclusions');
+        try {
+            const resp = await adminFetch('/master/exclusions');
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error);
+            box.innerHTML = (d.exclusions || []).length ? d.exclusions.map(x => `
+                <div class="flex items-start justify-between gap-3 py-2 border-b last:border-0">
+                  <div class="text-sm">
+                    <b class="text-gray-800">${esc(x.company_name)}</b>
+                    <span class="text-gray-500"> does not get </span>
+                    <b class="text-gray-800">${esc(x.brand || x.category || x.sku_key)}</b>
+                    <p class="text-xs text-gray-500 mt-0.5">${esc(x.reason)}</p>
+                  </div>
+                  <button onclick="mtRemoveExclusion('${x.id}')" class="text-gray-300 hover:text-red-600 text-sm shrink-0" title="Remove this rule">
+                    <i class="fas fa-times"></i>
+                  </button>
+                </div>`).join('')
+                : '<p class="text-sm text-gray-400">No rules — every customer can receive everything in the master table.</p>';
+        } catch (err) {
+            console.error('Exclusions failed:', err);
+            box.innerHTML = '<p class="text-sm text-red-600">Could not load the rules.</p>';
+        }
+    }
+
+    async function mtAddExclusion() {
+        const company_id = document.getElementById('mt-ex-company').value;
+        const brand = document.getElementById('mt-ex-brand').value.trim();
+        const reason = document.getElementById('mt-ex-reason').value.trim();
+        if (!company_id || !brand || !reason) { alert('Choose a customer, a brand, and say why.'); return; }
+        try {
+            const resp = await adminFetch('/master/exclusions', { method: 'POST', body: JSON.stringify({ company_id, brand, reason }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error); return; }
+            document.getElementById('mt-ex-brand').value = '';
+            document.getElementById('mt-ex-reason').value = '';
+            mtLoadExclusions();
+        } catch (err) { console.error(err); alert('Could not add that rule.'); }
+    }
+
+    async function mtRemoveExclusion(id) {
+        if (!confirm('Remove this rule? That customer will be able to receive those items on the next send.')) return;
+        try {
+            const resp = await adminFetch(`/master/exclusions/${id}`, { method: 'DELETE' });
+            if (!resp.ok) { const d = await resp.json(); alert(d.error); return; }
+            mtLoadExclusions();
+        } catch (err) { console.error(err); }
+    }
+
+    // ---------- add / edit one item ----------
+
+    async function mtNewItem() {
+        const sku = prompt('Part number (this becomes the part number for every customer):');
+        if (!sku) return;
+        const name = prompt('Item name (this is the name reporting groups on):');
+        if (!name) return;
+        const brand = prompt('Brand (optional):') || '';
+        const list_price = prompt('List price (optional — leave blank for price on request):') || '';
+        const barcode = prompt('Barcode (optional — scan it here):') || '';
+        try {
+            const resp = await adminFetch('/master/items', {
+                method: 'POST', body: JSON.stringify({ sku, name, brand, list_price, barcode })
+            });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error); return; }
+            alert(d.message);
+            mtStats(); mtSearch();
+        } catch (err) { console.error(err); alert('Could not add that item.'); }
+    }
+
+    async function mtEditItem(id) {
+        try {
+            const resp = await adminFetch(`/master?limit=1&offset=0&q=${encodeURIComponent(id)}`);
+            // The list is already on screen; read the row from it rather than
+            // refetching, so an edit opens instantly.
+            const row = [...document.querySelectorAll('#mt-tbody tr')]
+                .map(tr => tr.querySelector('button[onclick*="' + id + '"]')).find(Boolean);
+            const currentName = row ? row.textContent.trim() : '';
+            const name = prompt('Item name — changing it here changes it for every customer on the next send:', currentName);
+            if (name === null) return;
+            const put = await adminFetch(`/master/items/${id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+            const d = await put.json();
+            if (!put.ok) { alert(d.error); return; }
+            mtSearch();
+        } catch (err) { console.error(err); alert('Could not save that.'); }
     }
 
     // ============================================================
@@ -2987,7 +3487,7 @@
         const filterBar = document.getElementById('products-filter-bar');
 
         if (!companyId) {
-            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Select a company to view products.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">Select a company to view products.</td></tr>';
             filterBar.classList.add('hidden');
             document.getElementById('bulk-actions-bar').classList.add('hidden');
             return;
@@ -3065,7 +3565,7 @@
         const products = productState.filtered;
 
         if (products.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No products match your filters.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">No products match your filters.</td></tr>';
             return;
         }
 
@@ -3075,6 +3575,11 @@
                 <td class="px-4 py-3 font-medium text-gray-800">${esc(p.name)}</td>
                 <td class="px-4 py-3 text-sm text-gray-500">${esc(p.brand)}</td>
                 <td class="px-4 py-3 text-sm text-gray-400 font-mono">${esc(p.sku || '-')}</td>
+                <td class="px-4 py-3 text-sm">
+                    <button onclick="editBarcode('${p.id}')" class="font-mono ${p.barcode ? 'text-gray-600 hover:text-blue-700' : 'text-amber-600 hover:text-amber-700'}" title="${p.barcode ? 'Change this barcode' : 'No barcode — this item cannot be scanned'}">
+                        ${p.barcode ? esc(p.barcode) + (p.barcode_is_internal ? ' <span class="text-[10px] text-gray-400">(ours)</span>' : '') : '<i class="fas fa-barcode mr-1"></i>add'}
+                    </button>
+                </td>
                 <td class="px-4 py-3 text-right font-semibold">${p.previous_price ? '<span class="text-xs text-gray-400 line-through mr-1">$' + parseFloat(p.previous_price).toFixed(2) + '</span>' : ''}$${parseFloat(p.price).toFixed(2)}</td>
                 <td class="px-4 py-3 text-center text-sm">${p.case_qty || 1}</td>
                 <td class="px-4 py-3 text-center"><span class="px-2 py-1 rounded text-xs font-semibold ${p.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${p.is_active ? 'Active' : 'Hidden'}</span></td>
@@ -3088,6 +3593,45 @@
                 </td>
             </tr>
         `).join('');
+    }
+
+    /**
+     * Set or clear the barcode a scanner will find for this product.
+     *
+     * Barcodes live in their own table, so until now the catalogue screen had
+     * no way to show one and no way to fix a missing one — which is why items
+     * looked barcode-less even when the master table had a code for them.
+     *
+     * A code already used by another product in the SAME company is refused by
+     * the API. Two different customers holding the same manufacturer code on
+     * their own copy of a part is fine and is not blocked.
+     */
+    async function editBarcode(productId) {
+        const p = (productState.all || productState.filtered || []).find(x => x.id === productId);
+        if (!p) return;
+        const current = p.barcode || '';
+        const entered = prompt(
+            `Barcode for ${p.sku || p.name}\n\n` +
+            'Scan it with the cursor here, or type it.\n' +
+            'Leave empty to remove the barcode.',
+            current);
+        if (entered === null) return;                     // cancelled
+        const value = entered.trim();
+        if (value === current) return;                    // unchanged
+
+        try {
+            const resp = await adminFetch(
+                `/companies/${document.getElementById('admin-product-company').value}/products/${productId}/barcode`,
+                { method: 'PUT', body: JSON.stringify({ barcode: value }) });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'That barcode could not be saved.'); return; }
+            p.barcode = value || null;
+            p.barcode_is_internal = false;
+            renderProductsTable();
+        } catch (err) {
+            console.error('Barcode save failed:', err);
+            alert('That barcode could not be saved. Check the connection and try again.');
+        }
     }
 
     // ============================================================

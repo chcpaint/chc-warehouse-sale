@@ -73,7 +73,39 @@ const KNOWN_COLUMNS = {
     ]),
     item_library: new Set([
         'id', 'sku', 'sku_key', 'name', 'brand', 'vendor_code', 'barcode', 'unit',
-        'case_qty', 'list_price', 'source', 'source_ref', 'imported_at', 'notes'
+        'case_qty', 'list_price', 'source', 'source_ref', 'imported_at', 'notes',
+        // Added by migration 029 so the master file can actually be loaded:
+        // the category columns it carries, and barcode_level, which records
+        // whether a code identifies one item or a case.
+        'category', 'sub_category', 'barcode_level', 'is_active', 'updated_at'
+    ]),
+    item_library_imports: new Set([
+        'id', 'filename', 'sheet_name', 'source_label', 'rows_in_file', 'created_count',
+        'updated_count', 'unchanged_count', 'skipped_count', 'field_changes', 'applied',
+        'imported_by', 'created_at', 'notes'
+    ]),
+    item_library_changes: new Set([
+        'id', 'import_id', 'item_id', 'sku_key', 'sku', 'action', 'field',
+        'old_value', 'new_value', 'reason', 'created_at'
+    ]),
+    catalogue_sync_runs: new Set([
+        'id', 'scope', 'fields', 'companies_touched', 'products_examined', 'products_changed',
+        'field_changes', 'skipped_frozen', 'applied', 'run_by', 'created_at', 'notes'
+    ]),
+    catalogue_sync_changes: new Set([
+        'id', 'run_id', 'company_id', 'product_id', 'sku_key', 'field',
+        'old_value', 'new_value', 'reason', 'created_at'
+    ]),
+    company_catalogue_policy: new Set([
+        'company_id', 'push_mode', 'reason', 'updated_at', 'updated_by'
+    ]),
+    company_catalogue_exclusions: new Set([
+        'id', 'company_id', 'brand', 'category', 'sku_key', 'reason', 'created_at', 'created_by'
+    ]),
+    company_item_aliases: new Set([
+        'id', 'company_id', 'alias_sku', 'alias_sku_key', 'alias_name', 'library_sku_key',
+        'product_id', 'approved', 'approved_at', 'approved_by', 'source', 'confidence',
+        'created_at', 'created_by', 'notes'
     ]),
     item_library_conflicts: new Set([
         'id', 'company_id', 'product_id', 'sku', 'barcode', 'reason',
@@ -120,6 +152,12 @@ function matches(row, filters) {
                 return rx.test(String(val ?? ''));
             }
             case 'or': return true;   // the routes only use .or() for search narrowing
+            // .not(col, op, val) — the negation of the same comparison.
+            // Was a no-op until a stats endpoint counted "rows with a barcode"
+            // through .not('barcode','is',null) and the fake happily returned
+            // every row, so the number could not be verified at all. A filter
+            // the fake ignores is a filter no test can check.
+            case 'not': return !matches({ [f.col]: val }, [{ col: f.col, op: f.inner, val: f.val }]);
             default: return true;
         }
     });
@@ -148,7 +186,22 @@ class Query {
     lte(col, val)  { this.filters.push({ col, op: 'lte', val }); return this; }
     ilike(col, val){ this.filters.push({ col, op: 'ilike', val }); return this; }
     or()           { return this; }
-    not()          { return this; }
+    /**
+     * .not('col', 'is', null) / .not('status', 'in', '(cancelled)')
+     *
+     * PostgREST takes the `in` value as a parenthesised string; supabase-js
+     * passes it straight through. Parse it the same way so a test exercises
+     * what production actually sends.
+     */
+    not(col, op, val) {
+        if (col === undefined) return this;
+        let parsed = val;
+        if (op === 'in' && typeof val === 'string') {
+            parsed = val.replace(/^\(|\)$/g, '').split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+        }
+        this.filters.push({ col, op: 'not', inner: op, val: parsed });
+        return this;
+    }
     order()        { return this; }
     limit(n)       { this._limit = n; return this; }
     range(a, b)    { this._range = [a, b]; return this; }
@@ -329,6 +382,18 @@ function createFakeSupabase(seed = {}) {
         if (table === 'scheduler_runs') {
             const clash = (db.scheduler_runs || []).find(r =>
                 r.job === row.job && r.run_key === row.run_key);
+            if (clash) { const e = new Error('duplicate key value violates unique constraint'); e.code = '23505'; throw e; }
+        }
+
+        // Reproduce company_item_aliases_unique (company_id, alias_sku_key,
+        // library_sku_key). Load-bearing rather than defensive: without it a
+        // customer's part number could be mapped twice and reporting would
+        // double-count the same product under one master item.
+        if (table === 'company_item_aliases') {
+            const clash = (db.company_item_aliases || []).find(a =>
+                a.company_id === row.company_id
+                && String(a.alias_sku_key) === String(row.alias_sku_key)
+                && a.library_sku_key === row.library_sku_key);
             if (clash) { const e = new Error('duplicate key value violates unique constraint'); e.code = '23505'; throw e; }
         }
 
