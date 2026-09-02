@@ -149,15 +149,9 @@
         "                                    <i class=\"fas fa-clipboard-check mr-1\"></i> Count",
         "                                </button>",
         "                            </div>",
-        "                            <div class=\"flex items-center gap-2\">",
-        "                                <label class=\"text-sm text-gray-600\">Qty</label>",
-        "                                <button onclick=\"RAI.bumpQty(-1)\" type=\"button\"",
-        "                                    class=\"w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700\">&minus;</button>",
-        "                                <input id=\"inv-qty\" type=\"number\" step=\"0.5\" min=\"0\" value=\"1\"",
-        "                                    class=\"w-20 border rounded-lg px-2 py-1.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
-        "                                <button onclick=\"RAI.bumpQty(1)\" type=\"button\"",
-        "                                    class=\"w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700\">+</button>",
-        "                            </div>",
+        "                            <span id=\"inv-scan-hint\" class=\"text-sm text-gray-500\">",
+        "                                Each scan adds one. Scan it again to add another, or type the quantity on the line.",
+        "                            </span>",
         "                            <input id=\"inv-job-ref\" type=\"text\" maxlength=\"60\" placeholder=\"Job / RO number (optional)\"",
         "                                class=\"border rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[12rem] focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
         "                        </div>",
@@ -194,14 +188,35 @@
         "                    <!-- Scan result / disambiguation -->",
         "                    <div id=\"inv-scan-result\" class=\"mb-4\"></div>",
         "",
-        "                    <!-- This session's scans -->",
+        "                    <!-- Staged. Scanned but not yet in the ledger, so a mis-scan is",
+        "                         corrected here instead of needing a correcting entry. -->",
+        "                    <div class=\"bg-white rounded-xl shadow-sm overflow-hidden mb-4\">",
+        "                        <div class=\"px-5 py-3 border-b flex flex-wrap items-center justify-between gap-2\">",
+        "                            <div>",
+        "                                <h3 class=\"font-semibold text-gray-700\">Ready to post <span id=\"inv-basket-count\" class=\"text-gray-400 font-normal\"></span></h3>",
+        "                                <p class=\"text-xs text-gray-400\">Nothing is written until you post it.</p>",
+        "                            </div>",
+        "                            <div class=\"flex items-center gap-2\">",
+        "                                <button onclick=\"RAI.clearBasket()\" class=\"text-sm text-gray-400 hover:text-gray-600 px-3 py-2\">Clear</button>",
+        "                                <button onclick=\"RAI.commitBasket()\" id=\"inv-basket-post\" disabled",
+        "                                    class=\"bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40\">",
+        "                                    <i class=\"fas fa-check mr-1\"></i> Post",
+        "                                </button>",
+        "                            </div>",
+        "                        </div>",
+        "                        <div id=\"inv-basket-list\" class=\"divide-y max-h-96 overflow-y-auto\">",
+        "                            <div class=\"px-5 py-8 text-center text-gray-400 text-sm\">Nothing scanned yet.</div>",
+        "                        </div>",
+        "                    </div>",
+        "",
+        "                    <!-- Already in the ledger. -->",
         "                    <div class=\"bg-white rounded-xl shadow-sm overflow-hidden\">",
         "                        <div class=\"px-5 py-3 border-b flex items-center justify-between\">",
-        "                            <h3 class=\"font-semibold text-gray-700\">This session</h3>",
+        "                            <h3 class=\"font-semibold text-gray-700\">Posted</h3>",
         "                            <button onclick=\"RAI.clearScanSession()\" class=\"text-sm text-gray-400 hover:text-gray-600\">Clear</button>",
         "                        </div>",
-        "                        <div id=\"inv-session-list\" class=\"divide-y max-h-80 overflow-y-auto\">",
-        "                            <div class=\"px-5 py-8 text-center text-gray-400 text-sm\">Nothing scanned yet.</div>",
+        "                        <div id=\"inv-session-list\" class=\"divide-y max-h-64 overflow-y-auto\">",
+        "                            <div class=\"px-5 py-8 text-center text-gray-400 text-sm\">Nothing posted yet.</div>",
         "                        </div>",
         "                    </div>",
         "                </div>",
@@ -634,6 +649,7 @@
         view: 'scan',
         mode: 'consume',
         session: [],
+        basket: [],
         stock: [],
         replenishment: [],
         camera: { on: false, target: 'scan', stream: null, detector: null, raf: null, html5: null, lastCode: '', lastAt: 0 },
@@ -741,6 +757,16 @@
     }
 
     RAI.setScanMode = function (mode) {
+        // Switching mode with lines staged would silently change what they
+        // mean — five scanned to use becoming five received is a stock error
+        // nobody would spot. Post or clear first.
+        if (inv.basket.length && mode !== inv.mode) {
+            RAI.renderScanResult(`<div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
+                Post or clear the ${inv.basket.length} item(s) on the list before switching.
+                They were scanned to <b>${RAI.esc({ consume: 'use', receive: 'receive', count: 'count' }[inv.mode] || inv.mode)}</b>,
+                and changing that now would record the wrong movement.</div>`);
+            return;
+        }
         inv.mode = mode;
         document.querySelectorAll('.scan-mode-btn').forEach(b => {
             const on = b.dataset.scanmode === mode;
@@ -749,17 +775,13 @@
             b.classList.toggle('text-blue-700', on);
             b.classList.toggle('text-gray-500', !on);
         });
-        const qty = document.getElementById('inv-qty');
-        if (qty) qty.placeholder = mode === 'count' ? 'Counted' : 'Qty';
+        const hint = document.getElementById('inv-scan-hint');
+        if (hint) hint.textContent = mode === 'count'
+            ? 'Each scan counts one. Scan again to count another, or type the number you counted on the line.'
+            : 'Each scan adds one. Scan it again to add another, or type the quantity on the line.';
+        RAI.renderBasket();
         const jobRef = document.getElementById('inv-job-ref');
         if (jobRef) jobRef.classList.toggle('hidden', mode !== 'consume');
-    }
-
-    RAI.bumpQty = function (delta) {
-        const el = document.getElementById('inv-qty');
-        if (!el) return;
-        const next = Math.max(0, (parseFloat(el.value) || 0) + delta);
-        el.value = Number.isInteger(next) ? next : next.toFixed(1);
     }
 
     // ------------------------------------------------------------
@@ -1027,7 +1049,7 @@
                 </div>`);
                 return;
             }
-            await RAI.postMovement(data.product, code);
+            RAI.addToBasket(data.product, code);
         } catch (err) {
             console.error('[Inventory] scan failed:', err);
             RAI.renderScanResult(`<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4">
@@ -1063,73 +1085,213 @@
         const data = await resp.json();
         const list = data.candidates || (data.product ? [data.product] : []);
         const product = list.find(p => p.id === productId);
-        if (product) await RAI.postMovement(product, code);
+        if (product) RAI.addToBasket(product, code);
     }
 
-    RAI.postMovement = async function (product, code) {
-        const qtyEl = document.getElementById('inv-qty');
-        const quantity = parseFloat(qtyEl ? qtyEl.value : '1');
-        if (!Number.isFinite(quantity) || quantity < 0) {
-            RAI.renderScanResult(`<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4">Enter a valid quantity.</div>`);
+    // ------------------------------------------------------------
+    // THE BASKET
+    //
+    // A scan stages a line; it does not write to the ledger. One scan is one
+    // unit, scanning the same thing again makes it two, and the quantity can
+    // be typed straight onto the line for the times somebody is putting away
+    // fifty of something.
+    //
+    // Staging rather than posting per scan is what makes a mis-scan a
+    // correction on screen instead of a correcting entry in an append-only
+    // ledger that everybody can see forever.
+    // ------------------------------------------------------------
+
+    RAI.addToBasket = function (product, code) {
+        const existing = inv.basket.find(l => l.product_id === product.id);
+        if (existing) {
+            existing.quantity = round4(existing.quantity + 1);
+            existing.error = null;
+        } else {
+            inv.basket.unshift({
+                product_id: product.id,
+                name: product.name,
+                sku: product.sku,
+                code: code,
+                on_hand: product.level ? Number(product.level.on_hand) : null,
+                quantity: 1,
+                error: null
+            });
+        }
+        // The line just scanned goes to the top and is highlighted, so on a
+        // long list the thing in your hand is the thing you are looking at.
+        inv.basket.sort((a, b) => (a.product_id === product.id ? -1 : b.product_id === product.id ? 1 : 0));
+        inv.activeProductId = product.id;
+        RAI.beep();
+        RAI.renderScanResult('');
+        RAI.renderBasket();
+    }
+
+    function round4(n) { return Math.round(Number(n) * 10000) / 10000; }
+
+    RAI.setLineQty = function (productId, value) {
+        const line = inv.basket.find(l => l.product_id === productId);
+        if (!line) return;
+        const n = parseFloat(value);
+        // Zero is a legitimate count ("this shelf is empty"), so it is only
+        // rejected outside count mode, where it would mean nothing at all.
+        if (!Number.isFinite(n) || n < 0) return;
+        if (n === 0 && inv.mode !== 'count') { RAI.removeLine(productId); return; }
+        line.quantity = round4(n);
+        line.error = null;
+        RAI.renderBasket();
+    }
+
+    RAI.bumpLine = function (productId, delta) {
+        const line = inv.basket.find(l => l.product_id === productId);
+        if (!line) return;
+        const next = round4(line.quantity + delta);
+        if (next <= 0 && inv.mode !== 'count') { RAI.removeLine(productId); return; }
+        line.quantity = Math.max(0, next);
+        line.error = null;
+        RAI.renderBasket();
+    }
+
+    RAI.removeLine = function (productId) {
+        inv.basket = inv.basket.filter(l => l.product_id !== productId);
+        if (inv.activeProductId === productId) inv.activeProductId = null;
+        RAI.renderBasket();
+    }
+
+    RAI.clearBasket = function () {
+        if (inv.basket.length > 1 && !confirm('Clear everything scanned but not yet posted?')) return;
+        inv.basket = [];
+        inv.activeProductId = null;
+        RAI.renderBasket();
+        RAI.focusScanInput();
+    }
+
+    RAI.renderBasket = function () {
+        const el = document.getElementById('inv-basket-list');
+        const count = document.getElementById('inv-basket-count');
+        const post = document.getElementById('inv-basket-post');
+        if (!el) return;
+
+        const units = inv.basket.reduce((s, l) => s + Number(l.quantity || 0), 0);
+        if (count) count.textContent = inv.basket.length
+            ? `— ${inv.basket.length} item(s), ${RAI.formatQty(units)} unit(s)` : '';
+        if (post) post.disabled = inv.basket.length === 0;
+
+        if (!inv.basket.length) {
+            el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 text-sm">Nothing scanned yet.</div>';
             return;
         }
+
+        const verb = { consume: 'Use', receive: 'Receive', count: 'Count' }[inv.mode] || inv.mode;
+        el.innerHTML = inv.basket.map(l => `
+            <div class="px-4 py-3 flex items-center gap-3 ${l.product_id === inv.activeProductId ? 'bg-blue-50' : ''}">
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium text-gray-800 truncate">${RAI.esc(l.name)}</div>
+                    <div class="text-xs text-gray-500">
+                        ${RAI.esc(l.sku || '')}
+                        ${l.on_hand !== null && l.on_hand !== undefined ? ` · on hand ${RAI.formatQty(l.on_hand)}` : ''}
+                    </div>
+                    ${l.error ? `<div class="text-xs text-red-600 mt-1">${RAI.esc(l.error)}</div>` : ''}
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                    <button onclick="RAI.bumpLine('${l.product_id}', -1)" type="button"
+                        class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">&minus;</button>
+                    <input type="number" step="0.5" min="0" value="${l.quantity}"
+                        onchange="RAI.setLineQty('${l.product_id}', this.value)"
+                        onfocus="this.select()"
+                        aria-label="${RAI.esc(verb)} how many of ${RAI.esc(l.name)}"
+                        class="w-20 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <button onclick="RAI.bumpLine('${l.product_id}', 1)" type="button"
+                        class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">+</button>
+                    <button onclick="RAI.removeLine('${l.product_id}')" type="button" title="Take this off the list"
+                        class="w-9 h-9 rounded-lg text-gray-300 hover:text-red-600">&times;</button>
+                </div>
+            </div>`).join('');
+    }
+
+    /**
+     * Write the whole basket to the ledger in one call.
+     *
+     * Lines that fail STAY in the basket carrying their reason. Clearing them
+     * would lose work somebody physically did, and the usual failure — not
+     * enough on hand — is one they can fix and post again.
+     */
+    RAI.commitBasket = async function () {
+        if (!inv.basket.length || inv.busy) return;
+        if (!RAI.invActor()) {
+            RAI.renderScanResult(`<div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
+                Enter your name at the top before posting — it is what records who moved the stock.</div>`);
+            return;
+        }
+        inv.busy = true;
+        const post = document.getElementById('inv-basket-post');
+        if (post) { post.disabled = true; post.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Posting'; }
 
         const jobRefEl = document.getElementById('inv-job-ref');
-        const body = {
-            location_id: RAI.invLocationId(),
-            product_id: product.id,
-            movement_type: inv.mode,
-            quantity,
-            scanned_barcode: code,
-            actor_label: RAI.invActor(),
-            job_ref: inv.mode === 'consume' && jobRefEl ? jobRefEl.value.trim() : ''
-        };
+        const jobRef = inv.mode === 'consume' && jobRefEl ? jobRefEl.value.trim() : '';
+        const sending = inv.basket.slice();
 
-        const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/movements`, {
-            method: 'POST',
-            body: JSON.stringify(body)
-        });
-        const data = await resp.json();
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/movements/bulk`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    location_id: RAI.invLocationId(),
+                    actor_label: RAI.invActor(),
+                    movements: sending.map(l => ({
+                        product_id: l.product_id,
+                        movement_type: inv.mode,
+                        quantity: l.quantity,
+                        scanned_barcode: l.code,
+                        job_ref: jobRef
+                    }))
+                })
+            });
+            const data = await resp.json();
+            const results = data.results || [];
 
-        if (!resp.ok) {
-            RAI.beep(true);
+            const failed = [];
+            results.forEach((r, i) => {
+                const line = sending[i];
+                if (!line) return;
+                if (r.ok) {
+                    inv.session.unshift({ name: line.name, sku: line.sku, mode: inv.mode,
+                                          quantity: line.quantity, on_hand: r.on_hand, at: new Date() });
+                } else {
+                    line.error = r.error || 'Could not be posted.';
+                    failed.push(line);
+                }
+            });
+            // A response that carried no per-line results at all is a failure of
+            // the whole batch, not a silent success.
+            if (!results.length && !resp.ok) {
+                sending.forEach(l => { l.error = data.error || 'Could not be posted.'; });
+                inv.basket = sending;
+            } else {
+                inv.basket = failed;
+            }
+
+            const posted = results.filter(r => r.ok).length;
+            RAI.beep(failed.length > 0);
+            RAI.renderScanResult(failed.length
+                ? `<div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
+                     <div class="font-semibold">${posted} posted, ${failed.length} still to sort out.</div>
+                     <div class="text-sm mt-1">The ones that failed are still on the list with the reason. Fix the quantity and post again.</div>
+                   </div>`
+                : `<div class="bg-green-50 border border-green-200 rounded-xl p-4">
+                     <div class="font-semibold text-green-900">${posted} item(s) posted.</div>
+                   </div>`);
+
+            RAI.renderBasket();
+            RAI.renderScanSession();
+            RAI.loadInvSummary();
+        } catch (err) {
+            console.error('[Inventory] post failed:', err);
             RAI.renderScanResult(`<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4">
-                <div class="font-semibold">${RAI.esc(product.name)}</div>
-                <div class="text-sm mt-1">${RAI.esc(data.error || 'Could not record that movement.')}</div>
-            </div>`);
-            return;
+                Could not reach the server. Nothing was posted — everything is still on the list.</div>`);
+        } finally {
+            inv.busy = false;
+            if (post) { post.disabled = inv.basket.length === 0; post.innerHTML = '<i class="fas fa-check mr-1"></i> Post'; }
+            RAI.focusScanInput();
         }
-
-        RAI.beep();
-        const replen = data.replenishment;
-        RAI.renderScanResult(`
-            <div class="bg-green-50 border border-green-200 rounded-xl p-4">
-                <div class="flex items-start justify-between gap-4">
-                    <div>
-                        <div class="font-semibold text-green-900">${RAI.esc(product.name)}</div>
-                        <div class="text-sm text-green-800">${RAI.esc(product.sku || '')} · ${RAI.esc(data.message)}</div>
-                    </div>
-                    <div class="text-right">
-                        <div class="text-xs uppercase tracking-wide text-green-700">On hand</div>
-                        <div class="text-2xl font-bold text-green-900">${RAI.formatQty(data.on_hand)}</div>
-                    </div>
-                </div>
-                ${replen ? `<div class="mt-3 pt-3 border-t border-green-200 text-sm text-amber-800">
-                    <i class="fas fa-cart-arrow-down mr-1"></i>
-                    Added ${RAI.formatQty(replen.quantity)} to the reorder queue — ${RAI.esc(replen.reason)}.
-                </div>` : ''}
-            </div>`);
-
-        inv.session.unshift({
-            name: product.name,
-            sku: product.sku,
-            mode: inv.mode,
-            quantity,
-            on_hand: data.on_hand,
-            at: new Date()
-        });
-        RAI.renderScanSession();
-        RAI.loadInvSummary();
     }
 
     RAI.renderScanResult = function (html) {
@@ -1141,7 +1303,7 @@
         const el = document.getElementById('inv-session-list');
         if (!el) return;
         if (!inv.session.length) {
-            el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 text-sm">Nothing scanned yet.</div>';
+            el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 text-sm">Nothing posted yet.</div>';
             return;
         }
         const labels = { consume: 'Used', receive: 'Received', count: 'Counted', adjust: 'Adjusted' };

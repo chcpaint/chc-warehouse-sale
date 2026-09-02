@@ -376,11 +376,53 @@
                                     <option value="">All customers</option>
                                 </select>
                             </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Priced at</label>
+                                <select id="mt-push-pricing" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                                    <option value="list">The master list price</option>
+                                    <option value="on_request">Leave unpriced</option>
+                                </select>
+                            </div>
                             <button onclick="mtPushPreview()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
                                 <i class="fas fa-eye mr-1"></i> Preview
                             </button>
                         </div>
                         <div id="mt-push-result" class="mt-4"></div>
+                    </div>
+
+                    <!-- Bring every catalogue into line with the master -->
+                    <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+                        <h3 class="font-semibold text-gray-800">Bring catalogues into line</h3>
+                        <p class="text-xs text-gray-500 mt-0.5 mb-3">
+                            Makes the same part carry the same name, part number and barcode in every customer's list, so
+                            reporting can group on it. It adds nothing, removes nothing, and never touches a price.
+                        </p>
+                        <div class="flex flex-wrap items-end gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Customer</label>
+                                <select id="mt-sync-company" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                                    <option value="">All customers</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center gap-4 pb-2">
+                                <label class="flex items-center gap-1.5 text-sm text-gray-600">
+                                    <input type="checkbox" id="mt-sync-name" checked class="w-4 h-4 rounded border-gray-300"> name
+                                </label>
+                                <label class="flex items-center gap-1.5 text-sm text-gray-600">
+                                    <input type="checkbox" id="mt-sync-sku" checked class="w-4 h-4 rounded border-gray-300"> part number
+                                </label>
+                                <label class="flex items-center gap-1.5 text-sm text-gray-600">
+                                    <input type="checkbox" id="mt-sync-barcode" checked class="w-4 h-4 rounded border-gray-300"> barcode
+                                </label>
+                                <label class="flex items-center gap-1.5 text-sm text-gray-600">
+                                    <input type="checkbox" id="mt-sync-brand" checked class="w-4 h-4 rounded border-gray-300"> brand
+                                </label>
+                            </div>
+                            <button onclick="mtSyncPreview()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-eye mr-1"></i> Preview
+                            </button>
+                        </div>
+                        <div id="mt-sync-result" class="mt-4"></div>
                     </div>
 
                     <!-- Who does not get what -->
@@ -2218,7 +2260,7 @@
 
     function mtFillCompanies() {
         if (mtState.companiesFilled || !admin.companies || !admin.companies.length) return;
-        for (const [id, blank] of [['mt-push-company', true], ['mt-ex-company', false]]) {
+        for (const [id, blank] of [['mt-push-company', true], ['mt-sync-company', true], ['mt-ex-company', false]]) {
             const sel = document.getElementById(id);
             if (!sel) continue;
             if (!blank) sel.innerHTML = '';
@@ -2370,7 +2412,7 @@
     function mtPushBody(apply) {
         const scope = document.getElementById('mt-push-scope').value;
         const co = document.getElementById('mt-push-company').value;
-        const body = { apply };
+        const body = { apply, pricing: document.getElementById('mt-push-pricing').value };
         if (scope === 'brand') {
             const b = document.getElementById('mt-push-brand').value.trim();
             if (!b) { alert('Type the brand to send.'); return null; }
@@ -2398,6 +2440,9 @@
                     ${d.summary.customers} customer(s).
                     ${d.summary.already_present ? `${d.summary.already_present.toLocaleString()} already there.` : ''}
                     ${d.summary.blocked_by_rules ? `<span class="text-amber-700">${d.summary.blocked_by_rules} blocked by a rule.</span>` : ''}
+                  </span>
+                  <span class="text-xs text-gray-500">
+                    arriving ${d.summary.pricing === 'on_request' ? '<b>unpriced</b>' : 'at the <b>master list price</b>'}
                   </span>
                   ${d.summary.to_add ? `<button onclick="mtPushApply()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Send them</button>` : ''}
                 </div>
@@ -2446,6 +2491,115 @@
         } catch (err) {
             console.error('Push failed:', err);
             box.innerHTML = '<p class="text-sm text-red-600">The send failed. Nothing partial was left behind.</p>';
+        }
+    }
+
+    // ---------- bringing catalogues into line ----------
+
+    function mtSyncBody(apply) {
+        const fields = ['name', 'sku', 'barcode', 'brand']
+            .filter(f => document.getElementById('mt-sync-' + f).checked);
+        if (!fields.length) { alert('Choose at least one of name, part number or barcode.'); return null; }
+        const co = document.getElementById('mt-sync-company').value;
+        const body = { apply, fields };
+        if (co) body.company_ids = [co]; else body.all_companies = true;
+        return body;
+    }
+
+    async function mtSyncPreview() {
+        const body = mtSyncBody(false);
+        if (!body) return;
+        const box = document.getElementById('mt-sync-result');
+        box.innerHTML = '<p class="text-sm text-gray-400">Comparing…</p>';
+        try {
+            const resp = await adminFetch('/master/sync', { method: 'POST', body: JSON.stringify(body) });
+            const d = await resp.json();
+            if (!resp.ok) { box.innerHTML = `<p class="text-sm text-red-600">${esc(d.error)}</p>`; return; }
+            const s = d.summary;
+
+            box.innerHTML = `
+              <div class="border rounded-lg overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3">
+                  <span class="text-sm text-gray-600">
+                    <b>${s.products_changing.toLocaleString()}</b> item(s) would change across
+                    ${s.customers_synced} customer(s) —
+                    ${s.names} name(s), ${s.part_numbers} part number(s), ${s.barcodes} barcode(s), ${s.brands} brand(s).
+                    ${s.needs_a_decision ? `<span class="text-amber-700">${s.needs_a_decision} need a decision.</span>` : ''}
+                  </span>
+                  ${s.products_changing ? `<button onclick="mtSyncApply()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Apply</button>` : ''}
+                </div>
+                ${d.left_alone && d.left_alone.length ? `
+                  <div class="px-4 py-2 bg-blue-50 text-xs text-blue-800 border-b">
+                    Left alone: ${d.left_alone.map(l => esc(l.company_name)).join(', ')}
+                  </div>` : ''}
+                <table class="w-full text-sm">
+                  <thead class="bg-white border-b"><tr>
+                    <th class="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Customer</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">In the master</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Changing</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Names</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Part #</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Barcodes</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Brands</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Needs a look</th>
+                  </tr></thead>
+                  <tbody>${d.by_company.map(c => `
+                    <tr class="border-b last:border-0">
+                      <td class="px-4 py-2 text-gray-800">${esc(c.company_name)}</td>
+                      <td class="px-4 py-2 text-right text-gray-400">${c.matched_to_master}</td>
+                      <td class="px-4 py-2 text-right font-semibold">${c.products_changing}</td>
+                      <td class="px-4 py-2 text-right text-gray-500">${c.names}</td>
+                      <td class="px-4 py-2 text-right text-gray-500">${c.part_numbers}</td>
+                      <td class="px-4 py-2 text-right text-gray-500">${c.barcodes}</td>
+                      <td class="px-4 py-2 text-right text-gray-500">${c.brands}</td>
+                      <td class="px-4 py-2 text-right ${c.needs_a_decision ? 'text-amber-700 font-semibold' : 'text-gray-300'}">${c.needs_a_decision || '—'}</td>
+                    </tr>`).join('')}</tbody>
+                </table>
+                ${d.needs_a_decision && d.needs_a_decision.length ? `
+                  <div class="px-4 py-3 border-t max-h-56 overflow-y-auto">
+                    <p class="text-xs font-semibold text-gray-500 uppercase mb-2">These are not changed — they need you</p>
+                    ${d.needs_a_decision.map(c => `<p class="text-sm text-gray-600 mb-1.5">${esc(c.reason)}</p>`).join('')}
+                  </div>` : ''}
+                ${d.sample && d.sample.length ? `
+                  <div class="px-4 py-3 border-t max-h-56 overflow-y-auto">
+                    <p class="text-xs font-semibold text-gray-500 uppercase mb-2">A sample of what changes</p>
+                    ${d.sample.slice(0, 25).map(c => `
+                      <p class="text-sm text-gray-600 mb-1">
+                        <span class="text-xs text-gray-400 uppercase mr-1">${esc(c.field)}</span>
+                        <span class="line-through text-gray-400">${esc(c.old_value || '(none)')}</span>
+                        <span class="mx-1">&rarr;</span>${esc(c.new_value)}
+                      </p>`).join('')}
+                  </div>` : ''}
+              </div>`;
+        } catch (err) {
+            console.error('Sync preview failed:', err);
+            box.innerHTML = '<p class="text-sm text-red-600">Could not compare. Try again.</p>';
+        }
+    }
+
+    async function mtSyncApply() {
+        const body = mtSyncBody(true);
+        if (!body) return;
+        if (!confirm('Apply these changes? Every old value is recorded, so this can be reversed. Prices are not touched.')) return;
+        const box = document.getElementById('mt-sync-result');
+        box.innerHTML = '<p class="text-sm text-gray-400">Applying…</p>';
+        try {
+            const resp = await adminFetch('/master/sync', { method: 'POST', body: JSON.stringify(body) });
+            const d = await resp.json();
+            if (!resp.ok) { box.innerHTML = `<p class="text-sm text-red-600">${esc(d.error)}</p>`; return; }
+            box.innerHTML = `
+              <div class="border border-green-200 bg-green-50 rounded-lg px-4 py-3">
+                <p class="text-sm text-green-800 font-semibold">Done.</p>
+                <p class="text-sm text-green-700 mt-1">
+                  ${d.summary.names} name(s), ${d.summary.part_numbers} part number(s) and
+                  ${d.summary.barcodes} barcode(s) and ${d.summary.brands} brand(s) brought into line.
+                  ${d.summary.needs_a_decision ? `${d.summary.needs_a_decision} left for you to look at.` : ''}
+                </p>
+              </div>`;
+            mtStats();
+        } catch (err) {
+            console.error('Sync failed:', err);
+            box.innerHTML = '<p class="text-sm text-red-600">The sync failed.</p>';
         }
     }
 

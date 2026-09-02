@@ -1123,7 +1123,10 @@ router.post('/push', async (req, res) => {
 router.post('/sync', async (req, res) => {
     try {
         const apply = req.body.apply === true;
-        const ALLOWED = ['name', 'sku', 'barcode'];
+        // brand is here because a wrong one is not cosmetic: the catalogue's
+        // brand filter is how anyone finds a line, so a PPG part filed under
+        // "Uncategorized" is invisible to the person looking for it.
+        const ALLOWED = ['name', 'sku', 'barcode', 'brand'];
         let fields = Array.isArray(req.body.fields) && req.body.fields.length
             ? req.body.fields.filter(f => ALLOWED.includes(f))
             : ALLOWED.slice();
@@ -1152,7 +1155,7 @@ router.post('/sync', async (req, res) => {
         const candidates = companies.filter(c => (policyFor.get(c.id) || {}).push_mode !== 'frozen');
 
         const master = await readAll(() => supabaseAdmin.from('item_library')
-            .select('id, sku, sku_key, name, barcode, is_active'));
+            .select('id, sku, sku_key, name, brand, barcode, is_active'));
         const bySkuKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
 
         const perCompany = [];
@@ -1161,7 +1164,7 @@ router.post('/sync', async (req, res) => {
 
         for (const co of candidates) {
             const products = await readAll(() => supabaseAdmin.from('products')
-                .select('id, company_id, sku, name, is_active').eq('company_id', co.id));
+                .select('id, company_id, sku, name, brand, is_active').eq('company_id', co.id));
             const active = products.filter(p => p.is_active !== false);
 
             // Every part number this company already uses, so a rename cannot
@@ -1184,7 +1187,7 @@ router.post('/sync', async (req, res) => {
                 if (c.barcode) barcodeOwner.set(String(c.barcode), c.product_id);
             }
 
-            let examined = 0, changed = 0, nameN = 0, skuN = 0, barcodeN = 0, blocked = 0;
+            let examined = 0, changed = 0, nameN = 0, skuN = 0, barcodeN = 0, brandN = 0, blocked = 0;
 
             for (const p of active) {
                 const m = bySkuKey.get(skuKey(p.sku));
@@ -1197,6 +1200,13 @@ router.post('/sync', async (req, res) => {
                                    field: 'name', old_value: p.name, new_value: m.name });
                     if (apply) writes.push({ type: 'product', id: p.id, patch: { name: m.name } });
                     nameN += 1; touched = true;
+                }
+
+                if (fields.includes('brand') && m.brand && p.brand !== m.brand) {
+                    changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                                   field: 'brand', old_value: p.brand, new_value: m.brand });
+                    if (apply) writes.push({ type: 'product', id: p.id, patch: { brand: m.brand } });
+                    brandN += 1; touched = true;
                 }
 
                 if (fields.includes('sku') && m.sku && p.sku !== m.sku) {
@@ -1245,7 +1255,7 @@ router.post('/sync', async (req, res) => {
                 company_id: co.id, company_name: co.name,
                 products: active.length, matched_to_master: examined,
                 products_changing: changed,
-                names: nameN, part_numbers: skuN, barcodes: barcodeN,
+                names: nameN, part_numbers: skuN, barcodes: barcodeN, brands: brandN,
                 needs_a_decision: blocked
             });
         }
@@ -1258,6 +1268,7 @@ router.post('/sync', async (req, res) => {
             names: perCompany.reduce((s, c) => s + c.names, 0),
             part_numbers: perCompany.reduce((s, c) => s + c.part_numbers, 0),
             barcodes: perCompany.reduce((s, c) => s + c.barcodes, 0),
+            brands: perCompany.reduce((s, c) => s + c.brands, 0),
             needs_a_decision: perCompany.reduce((s, c) => s + c.needs_a_decision, 0)
         };
 
@@ -1267,7 +1278,7 @@ router.post('/sync', async (req, res) => {
             companies_touched: apply ? candidates.length : 0,
             products_examined: summary.products_examined,
             products_changed: apply ? summary.products_changing : 0,
-            field_changes: apply ? (summary.names + summary.part_numbers + summary.barcodes) : 0,
+            field_changes: apply ? (summary.names + summary.part_numbers + summary.barcodes + summary.brands) : 0,
             skipped_frozen: frozen.length,
             applied: apply,
             run_by: req.admin.id,
