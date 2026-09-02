@@ -915,6 +915,9 @@ router.post('/push', async (req, res) => {
     try {
         const apply = req.body.apply === true;
 
+        const pricing = ['list', 'on_request'].includes(String(req.body.pricing))
+            ? String(req.body.pricing) : 'list';
+
         // ---- which items ----
         let items;
         if (Array.isArray(req.body.item_ids) && req.body.item_ids.length) {
@@ -999,14 +1002,22 @@ router.post('/push', async (req, res) => {
                 if (have.has(item.sku_key)) { already += 1; continue; }
                 added += 1;
                 if (apply) {
+                    // Pricing is per customer. Two ways to arrive:
+                    //
+                    //   list        at the master's list price, which the
+                    //               customer pays until somebody sets theirs
+                    //   on_request  unpriced, so it cannot be ordered at a
+                    //               number nobody agreed to
+                    //
+                    // Either way a part with NO list price arrives on request
+                    // rather than at zero — an item that reads as free is the
+                    // one mistake neither option should be able to make.
+                    const onRequest = pricing === 'on_request' || !(Number(item.list_price) > 0);
                     toInsert.push({
                         company_id: co.id, sku: item.sku, name: item.name,
                         brand: item.brand, category: item.category,
-                        // The master's list price is a starting point. A part
-                        // with no price arrives as price-on-request rather than
-                        // as free, which is the only honest default.
-                        price: item.list_price === null || item.list_price === undefined ? 0 : item.list_price,
-                        price_on_request: !(Number(item.list_price) > 0),
+                        price: onRequest ? 0 : item.list_price,
+                        price_on_request: onRequest,
                         case_qty: item.case_qty || 1,
                         unit: item.unit || 'each',
                         is_active: true,
@@ -1025,6 +1036,7 @@ router.post('/push', async (req, res) => {
         }
 
         const summary = {
+            pricing,
             items_selected: items.length,
             customers: companies.length,
             to_add: perCompany.reduce((s, c) => s + c.would_add, 0),
@@ -1079,6 +1091,241 @@ router.post('/push', async (req, res) => {
     } catch (err) {
         console.error('Master push error:', err);
         res.status(500).json({ error: 'The push failed.' });
+    }
+});
+
+/**
+ * POST /api/admin/master/sync
+ *   { company_ids: [...] | all_companies: true,
+ *     fields: ['name','sku','barcode'],     // default: all three
+ *     apply: false }
+ *
+ * Bring every customer's catalogue into line with the master: the same part
+ * carries the same name, the same part number and the same barcode in every
+ * shop, so reporting can group on it.
+ *
+ * WHAT IT WILL NOT DO
+ *   - Add anything. Not one row.
+ *   - Remove anything. Not one row.
+ *   - Touch a price. Prices are per-customer and are nobody's business but
+ *     theirs; a sync that quietly moved them would be indefensible.
+ *   - Touch a frozen customer, at all. Assured is frozen: their list is an
+ *     agreed set and nothing automated writes to it. They reach cross-shop
+ *     reporting through crossover mappings instead, which change nothing in
+ *     their catalogue.
+ *   - Touch a product that does not already resolve to a master item. A shop
+ *     that calls something by a genuinely different code is an alias case;
+ *     guessing would risk merging two different parts.
+ *
+ * Every rewritten value is recorded old-and-new, because a mass rename is
+ * only defensible if it can be undone.
+ */
+router.post('/sync', async (req, res) => {
+    try {
+        const apply = req.body.apply === true;
+        const ALLOWED = ['name', 'sku', 'barcode'];
+        let fields = Array.isArray(req.body.fields) && req.body.fields.length
+            ? req.body.fields.filter(f => ALLOWED.includes(f))
+            : ALLOWED.slice();
+        if (!fields.length) return res.status(400).json({ error: 'Choose at least one of name, sku or barcode.' });
+
+        // ---- who ----
+        const allCompanies = await readAll(() => supabaseAdmin.from('companies')
+            .select('id, name, is_active').eq('is_active', true));
+        let companies = allCompanies;
+        if (Array.isArray(req.body.company_ids) && req.body.company_ids.length) {
+            const want = new Set(req.body.company_ids.filter(isValidUUID));
+            companies = allCompanies.filter(c => want.has(c.id));
+        } else if (req.body.all_companies !== true) {
+            return res.status(400).json({ error: 'Choose which customers to sync, or say all of them.' });
+        }
+        if (!companies.length) return res.status(400).json({ error: 'No active customers matched.' });
+
+        const policies = await readAll(() => supabaseAdmin.from('company_catalogue_policy')
+            .select('company_id, push_mode, reason'));
+        const policyFor = new Map(policies.map(p => [p.company_id, p]));
+
+        // Frozen customers are removed from the run entirely rather than
+        // carried through and skipped at the last moment — a candidate list
+        // that includes them is a candidate list somebody will eventually act on.
+        const frozen = companies.filter(c => (policyFor.get(c.id) || {}).push_mode === 'frozen');
+        const candidates = companies.filter(c => (policyFor.get(c.id) || {}).push_mode !== 'frozen');
+
+        const master = await readAll(() => supabaseAdmin.from('item_library')
+            .select('id, sku, sku_key, name, barcode, is_active'));
+        const bySkuKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
+
+        const perCompany = [];
+        const changes = [];
+        const writes = [];
+
+        for (const co of candidates) {
+            const products = await readAll(() => supabaseAdmin.from('products')
+                .select('id, company_id, sku, name, is_active').eq('company_id', co.id));
+            const active = products.filter(p => p.is_active !== false);
+
+            // Every part number this company already uses, so a rename cannot
+            // create two rows with the same one. A shop holding both
+            // "MMM-09251" and "MMM09251" as separate rows is exactly the case
+            // that would otherwise collide.
+            const skuCount = new Map();
+            for (const p of active) {
+                const k = skuKey(p.sku);
+                skuCount.set(k, (skuCount.get(k) || 0) + 1);
+            }
+
+            const ids = active.map(p => p.id);
+            const codes = ids.length ? await readAll(() => supabaseAdmin.from('product_barcodes')
+                .select('id, product_id, barcode, is_primary').in('product_id', ids)) : [];
+            const primaryFor = new Map();
+            const barcodeOwner = new Map();
+            for (const c of codes) {
+                if (c.is_primary) primaryFor.set(c.product_id, c);
+                if (c.barcode) barcodeOwner.set(String(c.barcode), c.product_id);
+            }
+
+            let examined = 0, changed = 0, nameN = 0, skuN = 0, barcodeN = 0, blocked = 0;
+
+            for (const p of active) {
+                const m = bySkuKey.get(skuKey(p.sku));
+                if (!m) continue;                    // not a master item — left alone
+                examined += 1;
+                let touched = false;
+
+                if (fields.includes('name') && m.name && p.name !== m.name) {
+                    changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                                   field: 'name', old_value: p.name, new_value: m.name });
+                    if (apply) writes.push({ type: 'product', id: p.id, patch: { name: m.name } });
+                    nameN += 1; touched = true;
+                }
+
+                if (fields.includes('sku') && m.sku && p.sku !== m.sku) {
+                    // Two rows for the same part would become two rows with the
+                    // same part number. Refuse and say so; merging them is a
+                    // decision about stock and history, not a rename.
+                    if ((skuCount.get(skuKey(p.sku)) || 0) > 1) {
+                        changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                                       field: 'sku', old_value: p.sku, new_value: m.sku,
+                                       reason: `${co.name} has more than one product that normalises to ${m.sku_key}. Renaming would give two rows the same part number — merge them first.` });
+                        blocked += 1;
+                    } else {
+                        changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                                       field: 'sku', old_value: p.sku, new_value: m.sku });
+                        if (apply) writes.push({ type: 'product', id: p.id, patch: { sku: m.sku } });
+                        skuN += 1; touched = true;
+                    }
+                }
+
+                if (fields.includes('barcode') && m.barcode) {
+                    const current = primaryFor.get(p.id);
+                    if (!current || current.barcode !== m.barcode) {
+                        const owner = barcodeOwner.get(String(m.barcode));
+                        if (owner && owner !== p.id) {
+                            changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                                           field: 'barcode', old_value: current ? current.barcode : null,
+                                           new_value: m.barcode,
+                                           reason: `${m.barcode} is already on another product in ${co.name}. Left alone — one code cannot mean two products.` });
+                            blocked += 1;
+                        } else {
+                            changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                                           field: 'barcode', old_value: current ? current.barcode : null,
+                                           new_value: m.barcode });
+                            if (apply) writes.push({ type: 'barcode', product_id: p.id,
+                                                     replace: current ? current.id : null, barcode: m.barcode });
+                            barcodeOwner.set(String(m.barcode), p.id);
+                            barcodeN += 1; touched = true;
+                        }
+                    }
+                }
+
+                if (touched) changed += 1;
+            }
+
+            perCompany.push({
+                company_id: co.id, company_name: co.name,
+                products: active.length, matched_to_master: examined,
+                products_changing: changed,
+                names: nameN, part_numbers: skuN, barcodes: barcodeN,
+                needs_a_decision: blocked
+            });
+        }
+
+        const summary = {
+            customers_synced: candidates.length,
+            customers_left_alone: frozen.length,
+            products_examined: perCompany.reduce((s, c) => s + c.matched_to_master, 0),
+            products_changing: perCompany.reduce((s, c) => s + c.products_changing, 0),
+            names: perCompany.reduce((s, c) => s + c.names, 0),
+            part_numbers: perCompany.reduce((s, c) => s + c.part_numbers, 0),
+            barcodes: perCompany.reduce((s, c) => s + c.barcodes, 0),
+            needs_a_decision: perCompany.reduce((s, c) => s + c.needs_a_decision, 0)
+        };
+
+        const { data: run } = await supabaseAdmin.from('catalogue_sync_runs').insert({
+            scope: req.body.all_companies === true ? 'all' : 'selected',
+            fields,
+            companies_touched: apply ? candidates.length : 0,
+            products_examined: summary.products_examined,
+            products_changed: apply ? summary.products_changing : 0,
+            field_changes: apply ? (summary.names + summary.part_numbers + summary.barcodes) : 0,
+            skipped_frozen: frozen.length,
+            applied: apply,
+            run_by: req.admin.id,
+            notes: apply ? null : 'Preview only — nothing was written.'
+        }).select().single();
+
+        if (!apply) {
+            return res.json({
+                applied: false,
+                run_id: run ? run.id : null,
+                summary,
+                by_company: perCompany,
+                left_alone: frozen.map(f => ({ company_id: f.id, company_name: f.name,
+                                               reason: (policyFor.get(f.id) || {}).reason || 'Frozen.' })),
+                needs_a_decision: changes.filter(c => c.reason).slice(0, 200),
+                sample: changes.filter(c => !c.reason).slice(0, 100)
+            });
+        }
+
+        // ---- write ----
+        let done = 0;
+        for (const w of writes) {
+            if (w.type === 'product') {
+                const { error } = await supabaseAdmin.from('products')
+                    .update({ ...w.patch, updated_at: new Date().toISOString() }).eq('id', w.id);
+                if (!error) done += 1;
+            } else {
+                if (w.replace) await supabaseAdmin.from('product_barcodes').delete().eq('id', w.replace);
+                const { error } = await supabaseAdmin.from('product_barcodes').insert({
+                    product_id: w.product_id, barcode: w.barcode,
+                    symbology: w.barcode.length === 13 ? 'EAN_13' : w.barcode.length === 12 ? 'UPC_A' : 'OTHER',
+                    is_primary: true, source: 'master_sync', is_internal: false
+                });
+                if (!error) done += 1;
+            }
+        }
+
+        const logRows = changes.map(c => ({ run_id: run ? run.id : null, ...c }));
+        for (let i = 0; i < logRows.length; i += 500) {
+            if (!run) break;
+            const { error } = await supabaseAdmin.from('catalogue_sync_changes').insert(logRows.slice(i, i + 500));
+            if (error) console.error('Sync log write failed (sync already applied):', error.message);
+        }
+
+        await supabaseAdmin.from('audit_log').insert({
+            admin_id: req.admin.id, action: 'catalogue_synced', entity_type: 'products',
+            entity_id: run ? run.id : null, details: { ...summary, fields }, ip_address: req.ip
+        }).then(() => {}, () => {});
+
+        res.json({ applied: true, run_id: run ? run.id : null,
+                   summary: { ...summary, writes_applied: done },
+                   by_company: perCompany,
+                   left_alone: frozen.map(f => ({ company_id: f.id, company_name: f.name })),
+                   needs_a_decision: changes.filter(c => c.reason).slice(0, 200) });
+
+    } catch (err) {
+        console.error('Catalogue sync error:', err);
+        res.status(500).json({ error: 'The sync failed.' });
     }
 });
 

@@ -359,3 +359,51 @@ test('a push aimed only at the closed customer writes nothing rather than errori
     assert.equal(res.body.summary.to_add, 0);
     assert.equal(fake.db.products.length, 0);
 });
+
+// ==================================================================
+// Pricing on arrival
+//
+// Pricing is unique per customer. A push has to arrive at a number somebody
+// can defend — the master's list price, or no price at all — and never at
+// zero, which reads as free.
+// ==================================================================
+
+test('by default items arrive at the master list price', async () => {
+    reset();
+    await push({ all: true, company_ids: [BAYVIEW], apply: true });
+    const disc = fake.db.products.find(p => p.company_id === BAYVIEW && p.sku === 'MMM09251');
+    assert.equal(disc.price, 40.99);
+    assert.equal(disc.price_on_request, false);
+});
+
+test('on_request leaves them unpriced, so nobody can order at a number we did not agree', async () => {
+    reset();
+    await push({ all: true, company_ids: [BAYVIEW], pricing: 'on_request', apply: true });
+    const disc = fake.db.products.find(p => p.company_id === BAYVIEW && p.sku === 'MMM09251');
+    assert.equal(disc.price_on_request, true);
+    assert.equal(disc.price, 0, 'zero is only ever stored alongside the on-request flag');
+});
+
+test('a part with no list price arrives on request under EITHER choice', async () => {
+    for (const pricing of ['list', 'on_request']) {
+        reset();
+        await push({ all: true, company_ids: [BAYVIEW], pricing, apply: true });
+        const stand = fake.db.products.find(p => p.company_id === BAYVIEW && p.sku === 'INTSS-2');
+        assert.equal(stand.price_on_request, true,
+            `with pricing=${pricing}, an item with no price must never read as free`);
+    }
+});
+
+test('the preview says which pricing it used', async () => {
+    reset();
+    const res = await push({ all: true, company_ids: [BAYVIEW], pricing: 'on_request' });
+    assert.equal(res.body.summary.pricing, 'on_request');
+    const dflt = await push({ all: true, company_ids: [BAYVIEW] });
+    assert.equal(dflt.body.summary.pricing, 'list');
+});
+
+test('a junk pricing value falls back to list rather than inventing a price', async () => {
+    reset();
+    const res = await push({ all: true, company_ids: [BAYVIEW], pricing: 'free' });
+    assert.equal(res.body.summary.pricing, 'list');
+});
