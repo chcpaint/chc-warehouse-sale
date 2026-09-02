@@ -281,3 +281,81 @@ test('a master item can be corrected once, and every customer gets it next push'
     assert.equal(res.status, 200);
     assert.equal(fake.db.item_library.find(i => i.id === MMM_1).name, '3M Hookit Gold Abrasive Disc 80D 6in');
 });
+
+// ==================================================================
+// A closed catalogue
+//
+// The strongest rule, and the one that has to hold for brands nobody has
+// written a rule for yet — including brands that do not exist in the master
+// today. A brand-by-brand list would let the next new brand straight in.
+// ==================================================================
+
+const CLOSED_REASON = 'Their list is a specific agreed set of items, not the CHC contract catalogue.';
+
+function resetClosed(extra = {}) {
+    reset({
+        company_catalogue_policy: [
+            { company_id: ASSURED, push_mode: 'closed', reason: CLOSED_REASON }
+        ],
+        // No brand rules at all — the closed policy has to stand on its own.
+        company_catalogue_exclusions: [],
+        ...extra
+    });
+}
+
+test('a closed catalogue receives nothing new, from any brand', async () => {
+    resetClosed();
+    await push({ all: true, all_companies: true, apply: true });
+    assert.deepEqual(skusFor(ASSURED), [],
+        'not PPG, not 3M, not Innotec — nothing');
+    assert.deepEqual(skusFor(BAYVIEW), ['2PCPSL', 'INTSS-2', 'J71', 'MMM09251'],
+        'and every open customer still gets the whole master table');
+});
+
+test('a closed catalogue still receives nothing when a brand-new brand appears', async () => {
+    // The reason this is a policy and not a list of brand rules: a brand added
+    // to the master tomorrow has no rule written for it, and would otherwise
+    // land in the closed catalogue.
+    resetClosed();
+    fake.db.item_library.push({
+        id: 'aaaaaaa5-5555-4555-8555-555555555555', sku: 'BRANDNEW-1', sku_key: 'BRANDNEW1',
+        name: 'Something nobody wrote a rule for', brand: 'Acme', category: 'New',
+        barcode: null, list_price: 5, case_qty: 1, is_active: true
+    });
+    await push({ all: true, all_companies: true, apply: true });
+    assert.deepEqual(skusFor(ASSURED), []);
+    assert.ok(skusFor(BAYVIEW).includes('BRANDNEW-1'), 'open customers do get it');
+});
+
+test('items the closed customer ALREADY has are not disturbed', async () => {
+    resetClosed({
+        products: [{ id: 'p-9', company_id: ASSURED, sku: 'MMM09251', name: 'Their name for it',
+                     brand: '3M', price: 39.00, is_active: true }]
+    });
+    const res = await push({ all: true, company_ids: [ASSURED], apply: true });
+    assert.equal(res.body.summary.to_add, 0);
+    const theirs = fake.db.products.filter(p => p.company_id === ASSURED);
+    assert.equal(theirs.length, 1);
+    assert.equal(theirs[0].price, 39.00, 'a closed catalogue must not be repriced either');
+});
+
+test('the preview names the customer as closed and gives the reason', async () => {
+    resetClosed();
+    const res = await push({ all: true, all_companies: true });
+    const assured = res.body.by_company.find(c => c.company_id === ASSURED);
+    assert.equal(assured.catalogue_closed, true);
+    assert.equal(assured.would_add, 0);
+    assert.equal(assured.excluded_count, 4);
+    assert.match(assured.excluded_reason, /specific agreed set/);
+
+    const bayview = res.body.by_company.find(c => c.company_id === BAYVIEW);
+    assert.equal(bayview.catalogue_closed, false);
+});
+
+test('a push aimed only at the closed customer writes nothing rather than erroring', async () => {
+    resetClosed();
+    const res = await push({ brand: 'PPG', company_ids: [ASSURED], apply: true });
+    assert.equal(res.status, 200, 'a no-op is a valid outcome, not a failure');
+    assert.equal(res.body.summary.to_add, 0);
+    assert.equal(fake.db.products.length, 0);
+});

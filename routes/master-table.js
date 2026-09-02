@@ -965,6 +965,15 @@ router.post('/push', async (req, res) => {
             return null;
         };
 
+        // ---- closed catalogues ----
+        //
+        // A brand rule says "not that brand". A closed catalogue says "nothing
+        // new at all" — which is the only version that stays correct when
+        // somebody adds a brand to the master that nobody wrote a rule for.
+        const policies = await readAll(() => supabaseAdmin.from('company_catalogue_policy')
+            .select('company_id, push_mode, reason'));
+        const policyFor = new Map(policies.map(p => [p.company_id, p]));
+
         // ---- plan, per customer ----
         const perCompany = [];
         const toInsert = [];
@@ -973,9 +982,18 @@ router.post('/push', async (req, res) => {
                 .select('id, sku').eq('company_id', co.id));
             const have = new Set(existing.map(p => skuKey(p.sku)));
 
+            const policy = policyFor.get(co.id);
+            const isClosed = policy && policy.push_mode === 'closed';
+
             let added = 0, already = 0;
             const excluded = [];
             for (const item of items) {
+                // The closed check runs BEFORE the brand rules, because a
+                // closed catalogue's reason is the one that explains it.
+                if (isClosed && !have.has(item.sku_key)) {
+                    excluded.push({ sku: item.sku, brand: item.brand, reason: policy.reason });
+                    continue;
+                }
                 const rule = blockedBy(co.id, item);
                 if (rule) { excluded.push({ sku: item.sku, brand: item.brand, reason: rule.reason }); continue; }
                 if (have.has(item.sku_key)) { already += 1; continue; }
@@ -998,6 +1016,7 @@ router.post('/push', async (req, res) => {
             }
             perCompany.push({
                 company_id: co.id, company_name: co.name,
+                catalogue_closed: !!isClosed,
                 would_add: added, already_had: already,
                 excluded_count: excluded.length,
                 excluded_examples: excluded.slice(0, 5),

@@ -407,3 +407,20 @@ test('the stored library row keeps the asterisk, in case it means something', as
     assert.equal(row.name, '* Norton Thing',
         'stripping it in the database would throw away a signal nobody has decoded yet');
 });
+
+test('the library refuses to bulk-add into a closed catalogue', async () => {
+    // The other half of the guard. Blocking the master push alone would leave
+    // the Item Library screen as an open door into the same catalogue.
+    reset();
+    fake.db.company_catalogue_policy = [
+        { company_id: CO, push_mode: 'closed',
+          reason: 'Their list is a specific agreed set of items.' }
+    ];
+    const res = await request(app()).post(url('/add'))
+        .send({ items: [{ library_id: L_NEW }] });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.catalogue_closed, true);
+    assert.match(res.body.error, /closed to bulk additions/);
+    assert.match(res.body.error, /Products screen/,
+        'the refusal has to say what to do instead, or it just reads as broken');
+});

@@ -88,6 +88,9 @@ const KNOWN_COLUMNS = {
         'id', 'import_id', 'item_id', 'sku_key', 'sku', 'action', 'field',
         'old_value', 'new_value', 'reason', 'created_at'
     ]),
+    company_catalogue_policy: new Set([
+        'company_id', 'push_mode', 'reason', 'updated_at', 'updated_by'
+    ]),
     company_catalogue_exclusions: new Set([
         'id', 'company_id', 'brand', 'category', 'sku_key', 'reason', 'created_at', 'created_by'
     ]),

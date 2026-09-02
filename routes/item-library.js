@@ -204,6 +204,24 @@ router.post('/add', async (req, res) => {
         const ids = [...new Set(items.map(i => String(i.library_id || '')).filter(Boolean))];
         if (!ids.length) return res.status(400).json({ error: 'No valid library items supplied.' });
 
+        // A closed catalogue is a specific agreed list, not the CHC contract
+        // catalogue. Adding to it in bulk from the library is the mistake this
+        // refuses — a person typing one part number on the Products screen is
+        // a deliberate act and is still allowed, which is what the message says.
+        const { data: policy } = await supabaseAdmin
+            .from('company_catalogue_policy')
+            .select('push_mode, reason')
+            .eq('company_id', companyId)
+            .maybeSingle();
+        if (policy && policy.push_mode === 'closed') {
+            return res.status(409).json({
+                error: 'This customer\'s catalogue is closed to bulk additions. ' +
+                       (policy.reason || '') +
+                       ' Add the item on their Products screen if it is genuinely intended.',
+                catalogue_closed: true
+            });
+        }
+
         const { data: libRows, error: libErr } = await supabaseAdmin
             .from('item_library')
             .select('id, sku, sku_key, name, brand, vendor_code, barcode, unit, case_qty, list_price')
