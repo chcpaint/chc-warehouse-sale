@@ -1333,8 +1333,21 @@
     });
 
     function showTab(tab) {
+        // The inventory panel does not exist in this file — RefinishAI injects
+        // it at runtime. Mount it BEFORE looking for it, or the first click on
+        // Inventory searches for an element that has not been created yet.
+        if (tab === 'inventory') { if (window.RAI) window.RAI.show(); }
+        else if (window.RAI) window.RAI.teardown();
+
         document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.add('hidden'));
-        document.getElementById(`tab-${tab}`).classList.remove('hidden');
+
+        // Guarded on purpose. This used to be an unchecked .classList on the
+        // result of getElementById: any tab whose panel was missing threw here,
+        // and because the throw came before the highlight code below, the whole
+        // navigation stopped responding until the page was reloaded. A missing
+        // panel should degrade to "nothing happens", never to a dead menu.
+        const panel = document.getElementById(`tab-${tab}`);
+        if (panel) panel.classList.remove('hidden');
 
         document.querySelectorAll('[data-tab]').forEach(el => el.classList.remove('tab-active'));
         const tabBtn = document.querySelector(`[data-tab="${tab}"]`);
@@ -1343,8 +1356,6 @@
         if (tab === 'cart') renderCart();
         if (tab === 'orders') loadOrders();
         if (tab === 'reports') loadReports();
-        if (tab === 'inventory') { if (window.RAI) window.RAI.show(); }
-        else if (window.RAI) window.RAI.teardown();
 
         // Keep the drawer's highlight honest even when navigation came from
         // somewhere else — an empty-cart "Browse products" link, say.

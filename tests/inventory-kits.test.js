@@ -778,3 +778,54 @@ test('every suggestion carries a reason a person can check', () => {
         assert.ok(typeof s.why === 'string' && s.why.length > 0);
     }
 });
+
+// ------------------------------------------------------------------
+// Order attribution.
+//
+// Migration 025 added handled_by / handled_by_name / handled_at so the console
+// can answer "who dealt with this order". The columns shipped, the route wrote
+// to them, and nothing tested the write — so when the fake's column guard did
+// not know about them, every status change 500'd and only a live demo found it.
+// This is that missing test.
+// ------------------------------------------------------------------
+
+test('changing an order status records who did it', async () => {
+    reset();
+    // Seed our own order rather than lean on a fixture this file does not have.
+    // The insert also runs the column guard, so it proves the shape twice.
+    const { data: order } = await fake.from('orders').insert({
+        company_id: CO, order_number: 'CHC-TEST-0001', company_name: 'Assured Collision',
+        contact_name: 'Shop Manager', contact_email: 'shop@example.com',
+        items: [{ sku: 'PRF611N', quantity: 1, unit_price: 200 }],
+        subtotal: 200, tax: 26, total: 226, status: 'pending'
+    }).select().single();
+    const before = fake.db.orders.length;
+
+    // Goes through the fake's own update path, which runs the column guard.
+    // Poking fake.db directly would skip that check and prove nothing.
+    await fake.from('orders')
+        .update({
+            status: 'confirmed',
+            handled_by: 'admin-1',
+            handled_by_name: 'Frank G',
+            handled_at: new Date().toISOString()
+        })
+        .eq('id', order.id);
+
+    const updated = fake.db.orders.find(o => o.id === order.id);
+    assert.equal(updated.handled_by_name, 'Frank G');
+    assert.equal(updated.handled_by, 'admin-1');
+    assert.ok(updated.handled_at, 'handled_at must be stamped');
+    assert.equal(fake.db.orders.length, before, 'updating must not add a row');
+});
+
+test('the fake knows every column migration 025 added to orders', () => {
+    // Reads the guard directly: if a migration adds an orders column and this
+    // list is not updated in the same change, routes writing it fail only at
+    // runtime. Naming them here makes that a test failure instead.
+    const { KNOWN_COLUMNS } = require('./helpers/fake-supabase');
+    assert.ok(KNOWN_COLUMNS && KNOWN_COLUMNS.orders, 'KNOWN_COLUMNS.orders must be exported');
+    for (const col of ['handled_by', 'handled_by_name', 'handled_at']) {
+        assert.ok(KNOWN_COLUMNS.orders.has(col), `orders.${col} missing from KNOWN_COLUMNS`);
+    }
+});
