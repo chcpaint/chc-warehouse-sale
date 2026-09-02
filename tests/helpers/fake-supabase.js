@@ -41,7 +41,12 @@ const KNOWN_COLUMNS = {
         'payment_status', 'payment_provider', 'payment_intent_id', 'amount_paid', 'paid_at',
         'invoice_path', 'invoice_filename', 'invoice_uploaded_at', 'invoice_uploaded_by',
         'closed_at', 'closed_by',
-        'po_source', 'po_normalized', 'placed_by_user_id'
+        'po_source', 'po_normalized', 'placed_by_user_id',
+        // Added by migration 025 for order attribution. They were missing here
+        // until a demo run hit PUT /orders/:id/status and the guard refused the
+        // write — which is the guard doing its job, but it should have been
+        // caught by a test instead of by a demo.
+        'handled_by', 'handled_by_name', 'handled_at'
     ]),
     company_po_sequences: new Set([
         'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',
@@ -471,4 +476,4 @@ function createFakeSupabase(seed = {}) {
     return client;
 }
 
-module.exports = { createFakeSupabase };
+module.exports = { createFakeSupabase, KNOWN_COLUMNS };
