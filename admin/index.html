@@ -414,6 +414,9 @@
                                 <label class="flex items-center gap-1.5 text-sm text-gray-600">
                                     <input type="checkbox" id="mt-sync-barcode" checked class="w-4 h-4 rounded border-gray-300"> barcode
                                 </label>
+                                <label class="flex items-center gap-1.5 text-sm text-gray-600">
+                                    <input type="checkbox" id="mt-sync-brand" checked class="w-4 h-4 rounded border-gray-300"> brand
+                                </label>
                             </div>
                             <button onclick="mtSyncPreview()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
                                 <i class="fas fa-eye mr-1"></i> Preview
@@ -2494,7 +2497,7 @@
     // ---------- bringing catalogues into line ----------
 
     function mtSyncBody(apply) {
-        const fields = ['name', 'sku', 'barcode']
+        const fields = ['name', 'sku', 'barcode', 'brand']
             .filter(f => document.getElementById('mt-sync-' + f).checked);
         if (!fields.length) { alert('Choose at least one of name, part number or barcode.'); return null; }
         const co = document.getElementById('mt-sync-company').value;
@@ -2520,7 +2523,7 @@
                   <span class="text-sm text-gray-600">
                     <b>${s.products_changing.toLocaleString()}</b> item(s) would change across
                     ${s.customers_synced} customer(s) —
-                    ${s.names} name(s), ${s.part_numbers} part number(s), ${s.barcodes} barcode(s).
+                    ${s.names} name(s), ${s.part_numbers} part number(s), ${s.barcodes} barcode(s), ${s.brands} brand(s).
                     ${s.needs_a_decision ? `<span class="text-amber-700">${s.needs_a_decision} need a decision.</span>` : ''}
                   </span>
                   ${s.products_changing ? `<button onclick="mtSyncApply()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Apply</button>` : ''}
@@ -2537,6 +2540,7 @@
                     <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Names</th>
                     <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Part #</th>
                     <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Barcodes</th>
+                    <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Brands</th>
                     <th class="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Needs a look</th>
                   </tr></thead>
                   <tbody>${d.by_company.map(c => `
@@ -2547,6 +2551,7 @@
                       <td class="px-4 py-2 text-right text-gray-500">${c.names}</td>
                       <td class="px-4 py-2 text-right text-gray-500">${c.part_numbers}</td>
                       <td class="px-4 py-2 text-right text-gray-500">${c.barcodes}</td>
+                      <td class="px-4 py-2 text-right text-gray-500">${c.brands}</td>
                       <td class="px-4 py-2 text-right ${c.needs_a_decision ? 'text-amber-700 font-semibold' : 'text-gray-300'}">${c.needs_a_decision || '—'}</td>
                     </tr>`).join('')}</tbody>
                 </table>
@@ -2587,7 +2592,7 @@
                 <p class="text-sm text-green-800 font-semibold">Done.</p>
                 <p class="text-sm text-green-700 mt-1">
                   ${d.summary.names} name(s), ${d.summary.part_numbers} part number(s) and
-                  ${d.summary.barcodes} barcode(s) brought into line.
+                  ${d.summary.barcodes} barcode(s) and ${d.summary.brands} brand(s) brought into line.
                   ${d.summary.needs_a_decision ? `${d.summary.needs_a_decision} left for you to look at.` : ''}
                 </p>
               </div>`;

@@ -266,3 +266,50 @@ test('a sync has to say who it is for', async () => {
     assert.equal(res.status, 400);
     assert.match(res.body.error, /which customers/i);
 });
+
+// ==================================================================
+// Brand
+//
+// A wrong brand is not cosmetic. The catalogue's brand filter is how anyone
+// finds a product line, so a PPG part filed as "Uncategorized" is invisible
+// to the person looking for it — which is exactly how a shop concludes it
+// does not stock a line it does stock.
+// ==================================================================
+
+test('a wrong brand is corrected to the master', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'J71', sku_key: 'J71',
+                         name: 'Shop-Line Coarse Aluminum Ga', brand: 'PPG', barcode: null, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'J71', name: 'Shop-Line Coarse Aluminum Ga',
+                     brand: 'Uncategorized', price: 396.70, is_active: true }]
+    });
+    const res = await sync({ all_companies: true, apply: true });
+    assert.equal(prod(P_BAY).brand, 'PPG');
+    assert.equal(res.body.summary.brands, 1);
+    const logged = fake.db.catalogue_sync_changes.find(c => c.field === 'brand');
+    assert.equal(logged.old_value, 'Uncategorized');
+    assert.equal(logged.new_value, 'PPG');
+});
+
+test('brand can be left out of a sync like any other field', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'J71', sku_key: 'J71', name: 'Shop-Line Coarse Aluminum Ga',
+                         brand: 'PPG', barcode: null, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'J71', name: 'Wrong name',
+                     brand: 'Uncategorized', price: 396.70, is_active: true }]
+    });
+    await sync({ all_companies: true, fields: ['name'], apply: true });
+    assert.equal(prod(P_BAY).name, 'Shop-Line Coarse Aluminum Ga');
+    assert.equal(prod(P_BAY).brand, 'Uncategorized', 'brand was not in scope');
+});
+
+test('a blank brand in the master never wipes the one a shop has', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'J71', sku_key: 'J71', name: 'Coarse Aluminum',
+                         brand: null, barcode: null, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'J71', name: 'Coarse Aluminum',
+                     brand: 'PPG', price: 396.70, is_active: true }]
+    });
+    await sync({ all_companies: true, apply: true });
+    assert.equal(prod(P_BAY).brand, 'PPG', 'the master not knowing is not the same as the master saying "none"');
+});
