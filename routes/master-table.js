@@ -50,6 +50,8 @@ const { stripHtml, isValidUUID } = require('../utils/sanitize');
 
 const router = express.Router();
 
+const blankish = v => v === null || v === undefined || String(v).trim() === '';
+
 // The screen is fenced in the API, not only in the console. Hiding a nav item
 // is presentation; this is the boundary.
 router.use(requireSuperAdmin);
@@ -1126,7 +1128,14 @@ router.post('/sync', async (req, res) => {
         // brand is here because a wrong one is not cosmetic: the catalogue's
         // brand filter is how anyone finds a line, so a PPG part filed under
         // "Uncategorized" is invisible to the person looking for it.
-        const ALLOWED = ['name', 'sku', 'barcode', 'brand'];
+        const ALLOWED = ['name', 'sku', 'barcode', 'brand', 'category'];
+
+        // category is FILL-ONLY, never an overwrite. A category a shop assigned
+        // is information they earned and it is the thing their location
+        // restrictions read; replacing it from a master that was blank until
+        // yesterday would be destroying data to achieve tidiness. It only ever
+        // reaches a product that has none.
+        const FILL_ONLY = new Set(['category']);
         let fields = Array.isArray(req.body.fields) && req.body.fields.length
             ? req.body.fields.filter(f => ALLOWED.includes(f))
             : ALLOWED.slice();
@@ -1187,7 +1196,7 @@ router.post('/sync', async (req, res) => {
                 if (c.barcode) barcodeOwner.set(String(c.barcode), c.product_id);
             }
 
-            let examined = 0, changed = 0, nameN = 0, skuN = 0, barcodeN = 0, brandN = 0, blocked = 0;
+            let examined = 0, changed = 0, nameN = 0, skuN = 0, barcodeN = 0, brandN = 0, categoryN = 0, blocked = 0;
 
             for (const p of active) {
                 const m = bySkuKey.get(skuKey(p.sku));
@@ -1200,6 +1209,13 @@ router.post('/sync', async (req, res) => {
                                    field: 'name', old_value: p.name, new_value: m.name });
                     if (apply) writes.push({ type: 'product', id: p.id, patch: { name: m.name } });
                     nameN += 1; touched = true;
+                }
+
+                if (fields.includes('category') && m.category && blankish(p.category)) {
+                    changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                                   field: 'category', old_value: null, new_value: m.category });
+                    if (apply) writes.push({ type: 'product', id: p.id, patch: { category: m.category } });
+                    categoryN += 1; touched = true;
                 }
 
                 if (fields.includes('brand') && m.brand && p.brand !== m.brand) {
@@ -1255,7 +1271,7 @@ router.post('/sync', async (req, res) => {
                 company_id: co.id, company_name: co.name,
                 products: active.length, matched_to_master: examined,
                 products_changing: changed,
-                names: nameN, part_numbers: skuN, barcodes: barcodeN, brands: brandN,
+                names: nameN, part_numbers: skuN, barcodes: barcodeN, brands: brandN, categories: categoryN,
                 needs_a_decision: blocked
             });
         }
@@ -1269,6 +1285,7 @@ router.post('/sync', async (req, res) => {
             part_numbers: perCompany.reduce((s, c) => s + c.part_numbers, 0),
             barcodes: perCompany.reduce((s, c) => s + c.barcodes, 0),
             brands: perCompany.reduce((s, c) => s + c.brands, 0),
+            categories: perCompany.reduce((s, c) => s + c.categories, 0),
             needs_a_decision: perCompany.reduce((s, c) => s + c.needs_a_decision, 0)
         };
 
@@ -1278,7 +1295,8 @@ router.post('/sync', async (req, res) => {
             companies_touched: apply ? candidates.length : 0,
             products_examined: summary.products_examined,
             products_changed: apply ? summary.products_changing : 0,
-            field_changes: apply ? (summary.names + summary.part_numbers + summary.barcodes + summary.brands) : 0,
+            field_changes: apply ? (summary.names + summary.part_numbers + summary.barcodes
+                                    + summary.brands + summary.categories) : 0,
             skipped_frozen: frozen.length,
             applied: apply,
             run_by: req.admin.id,
@@ -1337,6 +1355,392 @@ router.post('/sync', async (req, res) => {
     } catch (err) {
         console.error('Catalogue sync error:', err);
         res.status(500).json({ error: 'The sync failed.' });
+    }
+});
+
+/**
+ * POST /api/admin/master/prices
+ *   { brand: 'PPG' | null, company_ids | all_companies, apply }
+ *
+ * Push the master's list price out to customer catalogues.
+ *
+ * Most pricing is per customer and nothing automated touches it. Some lines
+ * are not: PPG carries one list price everywhere. That used to happen as a
+ * side effect of one customer's file upload — a price change across every
+ * catalogue, with no preview and no record of who caused it. This is the same
+ * outcome as a deliberate act: previewed per customer, logged old-and-new,
+ * and scoped to the brand you name.
+ *
+ * A frozen customer is not repriced. A closed one is — closed means "no new
+ * items", not "wrong prices forever".
+ */
+router.post('/prices', async (req, res) => {
+    try {
+        const apply = req.body.apply === true;
+        const brand = clean(req.body.brand);
+        if (!brand) {
+            return res.status(400).json({
+                error: 'Name the brand whose prices are set centrally. There is no "all prices" — most pricing is per customer.'
+            });
+        }
+
+        const allCompanies = await readAll(() => supabaseAdmin.from('companies')
+            .select('id, name, is_active').eq('is_active', true));
+        let companies = allCompanies;
+        if (Array.isArray(req.body.company_ids) && req.body.company_ids.length) {
+            const want = new Set(req.body.company_ids.filter(isValidUUID));
+            companies = allCompanies.filter(c => want.has(c.id));
+        } else if (req.body.all_companies !== true) {
+            return res.status(400).json({ error: 'Choose which customers, or say all of them.' });
+        }
+
+        const policies = await readAll(() => supabaseAdmin.from('company_catalogue_policy')
+            .select('company_id, push_mode, reason'));
+        const policyFor = new Map(policies.map(p => [p.company_id, p]));
+        const frozen = companies.filter(c => (policyFor.get(c.id) || {}).push_mode === 'frozen');
+        const candidates = companies.filter(c => (policyFor.get(c.id) || {}).push_mode !== 'frozen');
+
+        const master = await readAll(() => supabaseAdmin.from('item_library')
+            .select('sku_key, sku, name, list_price, is_active').ilike('brand', brand));
+        const priceOf = new Map(master
+            .filter(m => m.is_active !== false && Number(m.list_price) > 0)
+            .map(m => [m.sku_key, m]));
+        if (!priceOf.size) {
+            return res.status(400).json({ error: `No priced ${brand} items in the master table.` });
+        }
+
+        const perCompany = [];
+        const changes = [];
+        for (const co of candidates) {
+            const products = await readAll(() => supabaseAdmin.from('products')
+                .select('id, sku, name, price, is_active').eq('company_id', co.id));
+            let changing = 0, matched = 0, rise = 0, drop = 0;
+            for (const p of products.filter(x => x.is_active !== false)) {
+                const m = priceOf.get(skuKey(p.sku));
+                if (!m) continue;
+                matched += 1;
+                const now = Number(p.price);
+                const want = Number(m.list_price);
+                if (Math.round(now * 100) === Math.round(want * 100)) continue;
+                changing += 1;
+                if (want > now) rise += 1; else drop += 1;
+                changes.push({ company_id: co.id, product_id: p.id, sku_key: m.sku_key,
+                               field: 'price', old_value: String(now), new_value: String(want) });
+            }
+            perCompany.push({ company_id: co.id, company_name: co.name,
+                              matched, changing, going_up: rise, going_down: drop });
+        }
+
+        const summary = {
+            brand,
+            customers: candidates.length,
+            customers_left_alone: frozen.length,
+            products_matched: perCompany.reduce((s, c) => s + c.matched, 0),
+            prices_changing: perCompany.reduce((s, c) => s + c.changing, 0),
+            going_up: perCompany.reduce((s, c) => s + c.going_up, 0),
+            going_down: perCompany.reduce((s, c) => s + c.going_down, 0)
+        };
+
+        const { data: run } = await supabaseAdmin.from('catalogue_sync_runs').insert({
+            scope: `prices:${brand}`, fields: ['price'],
+            companies_touched: apply ? candidates.length : 0,
+            products_examined: summary.products_matched,
+            products_changed: apply ? summary.prices_changing : 0,
+            field_changes: apply ? summary.prices_changing : 0,
+            skipped_frozen: frozen.length, applied: apply, run_by: req.admin.id,
+            notes: apply ? null : 'Preview only — nothing was written.'
+        }).select().single();
+
+        if (!apply) {
+            return res.json({ applied: false, run_id: run ? run.id : null, summary,
+                              by_company: perCompany,
+                              left_alone: frozen.map(f => ({ company_id: f.id, company_name: f.name })),
+                              sample: changes.slice(0, 60) });
+        }
+
+        let done = 0;
+        for (const c of changes) {
+            const { error } = await supabaseAdmin.from('products')
+                .update({ price: Number(c.new_value), updated_at: new Date().toISOString() })
+                .eq('id', c.product_id);
+            if (!error) done += 1;
+        }
+        const logRows = changes.map(c => ({ run_id: run ? run.id : null, ...c }));
+        for (let i = 0; run && i < logRows.length; i += 500) {
+            const { error } = await supabaseAdmin.from('catalogue_sync_changes').insert(logRows.slice(i, i + 500));
+            if (error) console.error('Price log write failed (prices already applied):', error.message);
+        }
+        await supabaseAdmin.from('audit_log').insert({
+            admin_id: req.admin.id, action: 'master_prices_applied', entity_type: 'products',
+            entity_id: run ? run.id : null, details: summary, ip_address: req.ip
+        }).then(() => {}, () => {});
+
+        res.json({ applied: true, run_id: run ? run.id : null,
+                   summary: { ...summary, prices_written: done }, by_company: perCompany });
+
+    } catch (err) {
+        console.error('Master price apply error:', err);
+        res.status(500).json({ error: 'Applying master prices failed.' });
+    }
+});
+
+/**
+ * GET /api/admin/master/gaps
+ *
+ * Where the master is blank and a customer is not — the worklist for filling
+ * the master in.
+ *
+ * This exists because the sync only ever writes a value the master HAS. A
+ * blank master field is treated as "we do not know", never as "set it to
+ * nothing", which is right — but it means a gap in the master is silent, and
+ * silently does nothing forever. This is the report that makes it loud.
+ *
+ * Where several customers disagree about the same field, all their answers
+ * are shown. Picking one is a decision for a person.
+ */
+router.get('/gaps', async (req, res) => {
+    try {
+        const master = await readAll(() => supabaseAdmin.from('item_library')
+            .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active'));
+        const byKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
+
+        const products = await readAll(() => supabaseAdmin.from('products')
+            .select('id, company_id, sku, name, brand, category, price, is_active').eq('is_active', true));
+        const companies = await readAll(() => supabaseAdmin.from('companies').select('id, name'));
+        const nameOf = new Map(companies.map(c => [c.id, c.name]));
+
+        const ids = products.map(p => p.id);
+        const codes = [];
+        for (let i = 0; i < ids.length; i += 500) {
+            const slice = ids.slice(i, i + 500);
+            const { data } = await supabaseAdmin.from('product_barcodes')
+                .select('product_id, barcode, is_primary').in('product_id', slice);
+            codes.push(...(data || []));
+        }
+        const codeFor = new Map();
+        for (const c of codes) if (c.is_primary && c.barcode) codeFor.set(c.product_id, c.barcode);
+
+        // field -> sku_key -> { master item, suggestions: Map(value -> [customers]) }
+        const gaps = new Map();
+        const note = (field, item, value, companyId) => {
+            if (!value && value !== 0) return;
+            if (!gaps.has(field)) gaps.set(field, new Map());
+            const forField = gaps.get(field);
+            if (!forField.has(item.sku_key)) {
+                forField.set(item.sku_key, { sku: item.sku, name: item.name, brand: item.brand, values: new Map() });
+            }
+            const row = forField.get(item.sku_key);
+            const key = String(value);
+            if (!row.values.has(key)) row.values.set(key, []);
+            const who = nameOf.get(companyId) || 'Unknown';
+            if (!row.values.get(key).includes(who)) row.values.get(key).push(who);
+        };
+
+        const blank = v => v === null || v === undefined || String(v).trim() === '';
+        for (const p of products) {
+            const m = byKey.get(skuKey(p.sku));
+            if (!m) continue;
+            if (blank(m.barcode))                          note('barcode',   m, codeFor.get(p.id), p.company_id);
+            if (blank(m.brand))                            note('brand',     m, p.brand,           p.company_id);
+            if (blank(m.category))                         note('category',  m, p.category,        p.company_id);
+            if (!(Number(m.list_price) > 0) && Number(p.price) > 0)
+                                                           note('list_price', m, p.price,          p.company_id);
+        }
+
+        const shape = field => {
+            const forField = gaps.get(field);
+            if (!forField) return [];
+            return [...forField.entries()].map(([sku_key, row]) => ({
+                sku_key, sku: row.sku, name: row.name, brand: row.brand,
+                // Sorted so the most widely agreed answer is first — it is
+                // usually the right one, and always the one to check first.
+                suggestions: [...row.values.entries()]
+                    .map(([value, customers]) => ({ value, customers, agreement: customers.length }))
+                    .sort((a, b) => b.agreement - a.agreement)
+            })).sort((a, b) => b.suggestions[0].agreement - a.suggestions[0].agreement
+                            || String(a.sku).localeCompare(String(b.sku)));
+        };
+
+        const barcode = shape('barcode'), brand = shape('brand'),
+              category = shape('category'), price = shape('list_price');
+
+        res.json({
+            summary: {
+                master_items: byKey.size,
+                missing_a_barcode: master.filter(m => m.is_active !== false && blank(m.barcode)).length,
+                barcode_fillable_from_a_customer: barcode.length,
+                missing_a_brand: master.filter(m => m.is_active !== false && blank(m.brand)).length,
+                brand_fillable_from_a_customer: brand.length,
+                missing_a_category: master.filter(m => m.is_active !== false && blank(m.category)).length,
+                category_fillable_from_a_customer: category.length,
+                missing_a_price: master.filter(m => m.is_active !== false && !(Number(m.list_price) > 0)).length,
+                price_fillable_from_a_customer: price.length
+            },
+            barcode: barcode.slice(0, 500),
+            brand: brand.slice(0, 500),
+            category: category.slice(0, 500),
+            list_price: price.slice(0, 500)
+        });
+    } catch (err) {
+        console.error('Master gaps error:', err);
+        res.status(500).json({ error: 'Failed to work out what the master is missing.' });
+    }
+});
+
+/**
+ * POST /api/admin/master/backfill
+ *   { fields: ['category','brand','barcode','list_price'], apply: false }
+ *
+ * The gaps report the other way round: take what customers already know and
+ * write it INTO the master.
+ *
+ * Category is the case that prompted this. It is blank on every master row and
+ * present on a thousand customer products — real, earned information that the
+ * outward sync must never overwrite and would otherwise leave stranded in one
+ * shop's catalogue. Filling the master is how it reaches everybody.
+ *
+ * TWO RULES, BOTH ABSOLUTE
+ *
+ *   1. Only where the master is BLANK. This never overwrites the master with
+ *      a customer's value — the master is the authority, and a customer
+ *      disagreeing with it is not evidence that the master is wrong.
+ *
+ *   2. Only where every customer who has an opinion gives the SAME answer.
+ *      Where two shops disagree, both answers are reported and neither is
+ *      applied. Picking the more popular one would be a guess wearing the
+ *      costume of a decision.
+ */
+router.post('/backfill', async (req, res) => {
+    try {
+        const apply = req.body.apply === true;
+        const ALLOWED = ['category', 'brand', 'barcode', 'list_price'];
+        const fields = Array.isArray(req.body.fields) && req.body.fields.length
+            ? req.body.fields.filter(f => ALLOWED.includes(f))
+            : ALLOWED.slice();
+        if (!fields.length) return res.status(400).json({ error: 'Choose at least one field to fill in.' });
+
+        const master = await readAll(() => supabaseAdmin.from('item_library')
+            .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active'));
+        const byKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
+
+        const products = await readAll(() => supabaseAdmin.from('products')
+            .select('id, company_id, sku, brand, category, price, is_active').eq('is_active', true));
+        const companies = await readAll(() => supabaseAdmin.from('companies').select('id, name'));
+        const nameOf = new Map(companies.map(c => [c.id, c.name]));
+
+        const ids = products.map(p => p.id);
+        const codeFor = new Map();
+        for (let i = 0; i < ids.length; i += 500) {
+            const { data } = await supabaseAdmin.from('product_barcodes')
+                .select('product_id, barcode, is_primary').in('product_id', ids.slice(i, i + 500));
+            for (const c of data || []) if (c.is_primary && c.barcode) codeFor.set(c.product_id, String(c.barcode));
+        }
+
+        const blank = v => v === null || v === undefined || String(v).trim() === '';
+        const isBlankFor = (m, f) => f === 'list_price' ? !(Number(m.list_price) > 0) : blank(m[f]);
+        const valueFrom = (p, f) => f === 'barcode' ? codeFor.get(p.id)
+                                  : f === 'list_price' ? (Number(p.price) > 0 ? String(p.price) : null)
+                                  : p[f];
+
+        // sku_key -> field -> Map(value -> [customer names])
+        const opinions = new Map();
+        for (const p of products) {
+            const m = byKey.get(skuKey(p.sku));
+            if (!m) continue;
+            for (const f of fields) {
+                if (!isBlankFor(m, f)) continue;
+                const v = valueFrom(p, f);
+                if (blank(v)) continue;
+                if (!opinions.has(m.sku_key)) opinions.set(m.sku_key, new Map());
+                const forItem = opinions.get(m.sku_key);
+                if (!forItem.has(f)) forItem.set(f, new Map());
+                const vals = forItem.get(f);
+                const key = String(v);
+                if (!vals.has(key)) vals.set(key, []);
+                const who = nameOf.get(p.company_id) || 'Unknown';
+                if (!vals.get(key).includes(who)) vals.get(key).push(who);
+            }
+        }
+
+        const willFill = [];
+        const disputed = [];
+        for (const [sku_key, forItem] of opinions) {
+            const m = byKey.get(sku_key);
+            for (const [field, vals] of forItem) {
+                const answers = [...vals.entries()];
+                if (answers.length === 1) {
+                    willFill.push({ item_id: m.id, sku_key, sku: m.sku, name: m.name, field,
+                                    value: answers[0][0], customers: answers[0][1] });
+                } else {
+                    disputed.push({ sku_key, sku: m.sku, name: m.name, field,
+                                    answers: answers.map(([value, customers]) => ({ value, customers }))
+                                                    .sort((a, b) => b.customers.length - a.customers.length) });
+                }
+            }
+        }
+
+        const countBy = list => fields.reduce((acc, f) => {
+            acc[f] = list.filter(x => x.field === f).length; return acc;
+        }, {});
+        const summary = {
+            fields,
+            would_fill: willFill.length,
+            by_field: countBy(willFill),
+            left_for_a_person: disputed.length,
+            disputed_by_field: countBy(disputed)
+        };
+
+        if (!apply) {
+            return res.json({ applied: false, summary,
+                              sample: willFill.slice(0, 100),
+                              needs_a_decision: disputed.slice(0, 100) });
+        }
+
+        const { data: run } = await supabaseAdmin.from('item_library_imports').insert({
+            filename: null, sheet_name: null, source_label: 'backfill_from_customers',
+            rows_in_file: willFill.length, created_count: 0,
+            updated_count: new Set(willFill.map(w => w.item_id)).size,
+            unchanged_count: 0, skipped_count: disputed.length,
+            field_changes: willFill.length, applied: true,
+            imported_by: req.admin.id,
+            notes: `Filled blank master fields from customer catalogues where every customer agreed. ${disputed.length} left for a person.`
+        }).select().single();
+
+        // One update per item, carrying every field it gains.
+        const patches = new Map();
+        for (const w of willFill) {
+            if (!patches.has(w.item_id)) patches.set(w.item_id, {});
+            patches.get(w.item_id)[w.field] = w.field === 'list_price' ? Number(w.value) : w.value;
+        }
+        let filled = 0;
+        for (const [itemId, patch] of patches) {
+            const { error } = await supabaseAdmin.from('item_library')
+                .update({ ...patch, updated_at: new Date().toISOString() }).eq('id', itemId);
+            if (!error) filled += Object.keys(patch).length;
+        }
+
+        const logRows = willFill.map(w => ({
+            import_id: run ? run.id : null, item_id: w.item_id, sku_key: w.sku_key, sku: w.sku,
+            action: 'updated', field: w.field, old_value: null, new_value: String(w.value),
+            reason: `Filled from ${w.customers.join(', ')} — the master was blank and every customer agreed.`
+        }));
+        for (let i = 0; run && i < logRows.length; i += 500) {
+            const { error } = await supabaseAdmin.from('item_library_changes').insert(logRows.slice(i, i + 500));
+            if (error) console.error('Backfill log write failed (backfill already applied):', error.message);
+        }
+
+        await supabaseAdmin.from('audit_log').insert({
+            admin_id: req.admin.id, action: 'master_backfilled', entity_type: 'item_library',
+            entity_id: run ? run.id : null, details: summary, ip_address: req.ip
+        }).then(() => {}, () => {});
+
+        res.json({ applied: true, import_id: run ? run.id : null,
+                   summary: { ...summary, fields_written: filled },
+                   needs_a_decision: disputed.slice(0, 100) });
+
+    } catch (err) {
+        console.error('Master backfill error:', err);
+        res.status(500).json({ error: 'Filling the master failed.' });
     }
 });
 

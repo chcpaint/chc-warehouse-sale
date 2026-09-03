@@ -313,3 +313,277 @@ test('a blank brand in the master never wipes the one a shop has', async () => {
     await sync({ all_companies: true, apply: true });
     assert.equal(prod(P_BAY).brand, 'PPG', 'the master not knowing is not the same as the master saying "none"');
 });
+
+// ==================================================================
+// Master prices
+//
+// Most pricing is per customer and nothing automated moves it. PPG is the
+// exception: one list price everywhere. That used to happen as a side effect
+// of one customer's file upload, with no preview and no record of who caused
+// it. As a deliberate action it needs to be previewable, scoped, and logged.
+// ==================================================================
+
+const priceRun = body => request(app()).post('/master/prices').send(body);
+
+function resetPrices(extra = {}) {
+    reset({
+        item_library: [
+            { id: 'lib-1', sku: 'J71', sku_key: 'J71', name: 'Shop-Line Coarse Aluminum Ga',
+              brand: 'PPG', barcode: null, list_price: 396.70, is_active: true },
+            { id: 'lib-2', sku: 'MMM09251', sku_key: 'MMM09251', name: '3M Hookit Gold Disc',
+              brand: '3M', barcode: null, list_price: 40.99, is_active: true }
+        ],
+        products: [
+            { id: P_BAY, company_id: BAYVIEW, sku: 'J71', name: 'Shop-Line Coarse Aluminum Ga',
+              brand: 'PPG', price: 380.00, is_active: true },
+            { id: P_UNKNOWN, company_id: BAYVIEW, sku: 'MMM09251', name: '3M Hookit Gold Disc',
+              brand: '3M', price: 37.50, is_active: true },
+            { id: P_ASSURED, company_id: ASSURED, sku: 'J71', name: 'Shop-Line Coarse Aluminum Ga',
+              brand: 'PPG', price: 396.70, is_active: true }
+        ],
+        ...extra
+    });
+}
+
+test('applying master prices moves only the named brand', async () => {
+    resetPrices();
+    await priceRun({ brand: 'PPG', all_companies: true, apply: true });
+    assert.equal(prod(P_BAY).price, 396.70, 'the PPG item comes to the master price');
+    assert.equal(prod(P_UNKNOWN).price, 37.50, 'the 3M item is left alone — its price is theirs');
+});
+
+test('it says which way each price is moving before it moves', async () => {
+    resetPrices();
+    const res = await priceRun({ brand: 'PPG', all_companies: true });
+    assert.equal(res.body.applied, false);
+    assert.equal(res.body.summary.prices_changing, 1);
+    assert.equal(res.body.summary.going_up, 1);
+    assert.equal(res.body.summary.going_down, 0);
+    assert.equal(prod(P_BAY).price, 380.00, 'a preview that repriced would not be a preview');
+});
+
+test('a price already correct is not rewritten', async () => {
+    // Assured is CLOSED here, not frozen — which is how production has it.
+    // Closed means "no new items", not "wrong prices forever", so they are a
+    // candidate for repricing and their already-correct price must simply be
+    // left alone rather than counted as a change.
+    resetPrices({
+        company_catalogue_policy: [
+            { company_id: ASSURED, push_mode: 'closed', reason: 'Agreed list; nothing new added.' }
+        ]
+    });
+    const res = await priceRun({ brand: 'PPG', all_companies: true });
+    const assured = res.body.by_company.find(c => c.company_id === ASSURED);
+    assert.ok(assured, 'a closed catalogue is still repriced');
+    assert.equal(assured.matched, 1);
+    assert.equal(assured.changing, 0, 'already at the master price');
+    assert.equal(res.body.summary.prices_changing, 1, 'only Bayview moves');
+});
+
+test('every price change is logged with what it was', async () => {
+    resetPrices();
+    await priceRun({ brand: 'PPG', all_companies: true, apply: true });
+    const logged = fake.db.catalogue_sync_changes.find(c => c.field === 'price');
+    assert.equal(logged.old_value, '380');
+    assert.equal(logged.new_value, '396.7');
+});
+
+test('there is no "reprice everything" — a brand has to be named', async () => {
+    resetPrices();
+    const res = await priceRun({ all_companies: true, apply: true });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /most pricing is per customer/i);
+});
+
+test('a frozen customer is not repriced', async () => {
+    resetPrices({
+        company_catalogue_policy: [
+            { company_id: BAYVIEW, push_mode: 'frozen', reason: 'Leave them alone.' }
+        ]
+    });
+    await priceRun({ brand: 'PPG', all_companies: true, apply: true });
+    assert.equal(prod(P_BAY).price, 380.00);
+});
+
+// ==================================================================
+// What the master is missing
+// ==================================================================
+
+test('the gaps report finds what customers know and the master does not', async () => {
+    reset({
+        item_library: [
+            { id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'EHP Crystal Silver hL',
+              brand: 'PPG', category: null, barcode: null, list_price: null, is_active: true }
+        ],
+        products: [
+            { id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'EHP Crystal Silver hL',
+              brand: 'PPG', category: 'Colour', price: 1056.14, is_active: true },
+            { id: P_ASSURED, company_id: ASSURED, sku: 'T4000', name: 'EHP Crystal Silver hL',
+              brand: 'PPG', category: 'Colour', price: 1056.14, is_active: true }
+        ],
+        product_barcodes: [
+            { id: 'bc-1', product_id: P_BAY, barcode: '5025427724525', is_primary: true }
+        ]
+    });
+    const res = await request(app()).get('/master/gaps');
+    assert.equal(res.status, 200);
+
+    const cat = res.body.category[0];
+    assert.equal(cat.sku, 'T4000');
+    assert.equal(cat.suggestions[0].value, 'Colour');
+    assert.equal(cat.suggestions[0].agreement, 2, 'both customers say the same thing');
+    assert.deepEqual(cat.suggestions[0].customers.sort(), ['Assured Collision', 'Bayview Auto Body']);
+
+    assert.equal(res.body.barcode[0].suggestions[0].value, '5025427724525');
+    assert.equal(res.body.list_price[0].suggestions[0].value, '1056.14');
+    assert.equal(res.body.summary.missing_a_barcode, 1);
+    assert.equal(res.body.summary.barcode_fillable_from_a_customer, 1);
+});
+
+test('where customers disagree, every answer is shown rather than one being picked', async () => {
+    reset({
+        item_library: [
+            { id: 'lib-1', sku: 'J71', sku_key: 'J71', name: 'Coarse Aluminum',
+              brand: null, category: null, barcode: null, list_price: 1, is_active: true }
+        ],
+        products: [
+            { id: P_BAY, company_id: BAYVIEW, sku: 'J71', name: 'x', brand: 'PPG', price: 1, is_active: true },
+            { id: P_ASSURED, company_id: ASSURED, sku: 'J71', name: 'x', brand: 'Shop-Line', price: 1, is_active: true }
+        ]
+    });
+    const res = await request(app()).get('/master/gaps');
+    const brand = res.body.brand[0];
+    assert.equal(brand.suggestions.length, 2, 'a disagreement is a decision for a person, not something to average');
+    assert.ok(brand.suggestions.every(s => s.agreement === 1));
+});
+
+test('a field the master already has is not reported as a gap', async () => {
+    reset({
+        item_library: [
+            { id: 'lib-1', sku: 'J71', sku_key: 'J71', name: 'Coarse Aluminum',
+              brand: 'PPG', category: 'Colour', barcode: '123', list_price: 5, is_active: true }
+        ],
+        products: [
+            { id: P_BAY, company_id: BAYVIEW, sku: 'J71', name: 'x', brand: 'Other',
+              category: 'Something else', price: 9, is_active: true }
+        ]
+    });
+    const res = await request(app()).get('/master/gaps');
+    assert.deepEqual(res.body.brand, []);
+    assert.deepEqual(res.body.category, []);
+    assert.deepEqual(res.body.list_price, []);
+});
+
+// ==================================================================
+// Filling the master from what customers already know
+//
+// Category is blank on every master row and set on a thousand customer
+// products. That is real information sitting in one shop's catalogue where
+// nobody else can use it. Two rules, both absolute: never overwrite the
+// master, and never pick a winner when customers disagree.
+// ==================================================================
+
+const backfill = body => request(app()).post('/master/backfill').send(body);
+const lib = key => fake.db.item_library.find(l => l.sku_key === key);
+
+test('a blank master field is filled from customers who agree', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'EHP Crystal Silver hL',
+                         brand: 'PPG', category: null, barcode: null, list_price: null, is_active: true }],
+        products: [
+            { id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', brand: 'PPG',
+              category: 'Colour', price: 1056.14, is_active: true },
+            { id: P_ASSURED, company_id: ASSURED, sku: 'T4000', name: 'x', brand: 'PPG',
+              category: 'Colour', price: 1056.14, is_active: true }
+        ]
+    });
+    const res = await backfill({ apply: true });
+    assert.equal(lib('T4000').category, 'Colour');
+    assert.equal(Number(lib('T4000').list_price), 1056.14);
+    assert.equal(res.body.summary.by_field.category, 1);
+});
+
+test('it never overwrites something the master already has', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'EHP Crystal Silver hL',
+                         brand: 'PPG', category: 'Colour', barcode: null, list_price: 5, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', brand: 'PPG',
+                     category: 'Something else', price: 999, is_active: true }]
+    });
+    await backfill({ apply: true });
+    assert.equal(lib('T4000').category, 'Colour', 'a customer disagreeing is not evidence the master is wrong');
+    assert.equal(Number(lib('T4000').list_price), 5);
+});
+
+test('where customers disagree nothing is written, and both answers are reported', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'J71', sku_key: 'J71', name: 'Coarse Aluminum',
+                         brand: 'PPG', category: null, barcode: null, list_price: 1, is_active: true }],
+        products: [
+            { id: P_BAY, company_id: BAYVIEW, sku: 'J71', name: 'x', category: 'Colour', price: 1, is_active: true },
+            { id: P_ASSURED, company_id: ASSURED, sku: 'J71', name: 'x', category: 'Primer/Sealer', price: 1, is_active: true }
+        ]
+    });
+    const res = await backfill({ apply: true });
+    assert.equal(lib('J71').category, null, 'picking the more popular answer would be a guess in a costume');
+    assert.equal(res.body.summary.left_for_a_person, 1);
+    const d = res.body.needs_a_decision[0];
+    assert.equal(d.answers.length, 2);
+    assert.deepEqual(d.answers.map(a => a.value).sort(), ['Colour', 'Primer/Sealer']);
+});
+
+test('a preview fills nothing', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'x', brand: 'PPG',
+                         category: null, barcode: null, list_price: 1, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', category: 'Colour', price: 1, is_active: true }]
+    });
+    const res = await backfill({});
+    assert.equal(res.body.applied, false);
+    assert.equal(res.body.summary.would_fill, 1);
+    assert.equal(lib('T4000').category, null);
+});
+
+test('every fill records which customers it came from', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'x', brand: 'PPG',
+                         category: null, barcode: null, list_price: 1, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', category: 'Colour', price: 1, is_active: true }]
+    });
+    await backfill({ apply: true });
+    const logged = fake.db.item_library_changes.find(c => c.field === 'category');
+    assert.equal(logged.new_value, 'Colour');
+    assert.match(logged.reason, /Bayview Auto Body/);
+    assert.match(logged.reason, /master was blank/);
+});
+
+// ------------------------------------------------------------------
+// Category going back out: fill only, never overwrite
+// ------------------------------------------------------------------
+
+test('the sync gives a category to a product that has none', async () => {
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'x', brand: 'PPG',
+                         category: 'Colour', barcode: null, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', brand: 'PPG',
+                     category: null, price: 1, is_active: true }]
+    });
+    const res = await sync({ all_companies: true, apply: true });
+    assert.equal(prod(P_BAY).category, 'Colour');
+    assert.equal(res.body.summary.categories, 1);
+});
+
+test('the sync NEVER overwrites a category a shop already assigned', async () => {
+    // Their category is what their location restrictions read. Replacing it
+    // from a master that was blank until yesterday would be destroying data
+    // to achieve tidiness.
+    reset({
+        item_library: [{ id: 'lib-1', sku: 'T4000', sku_key: 'T4000', name: 'x', brand: 'PPG',
+                         category: 'Colour', barcode: null, is_active: true }],
+        products: [{ id: P_BAY, company_id: BAYVIEW, sku: 'T4000', name: 'x', brand: 'PPG',
+                     category: 'Equip/Filter/Booth', price: 1, is_active: true }]
+    });
+    const res = await sync({ all_companies: true, apply: true });
+    assert.equal(prod(P_BAY).category, 'Equip/Filter/Booth');
+    assert.equal(res.body.summary.categories, 0);
+});
