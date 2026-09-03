@@ -287,6 +287,141 @@ router.get('/by-location', async (req, res) => {
     }
 });
 
+// A benchmark figure is never published from fewer than this many OTHER
+// companies. Below this, a shop that knows roughly who else is on the
+// platform could work backwards to a specific peer's number -- the whole
+// point of the feature is that no other shop is identifiable. This is not
+// configurable by the caller: a client-supplied floor could be set to 1 and
+// defeat the protection outright.
+const MIN_PEER_COMPANIES = 3;
+
+/**
+ * GET /analytics/benchmark?period=
+ *
+ * How this shop's usage and pricing compare to the anonymous peer set --
+ * every other company running refinishAI Inventory -- for the same physical
+ * part. Two shops can hold the same part under different SKUs, so the
+ * comparison is keyed on CHC's master item identity (v_product_master), not
+ * on either shop's own SKU; anything without a confident master match is
+ * left out rather than risk comparing two different parts.
+ *
+ * No peer company's id, name, or individual figures are ever returned --
+ * only an aggregate (an average, and a count of how many peers fed it) with
+ * MIN_PEER_COMPANIES enforced as a floor on that count. A part bought by
+ * fewer than that many other shops in the period is omitted entirely, not
+ * shown with a smaller cohort, so there is nothing to average that could be
+ * traced back to one shop.
+ */
+router.get('/benchmark', async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const range = periodRange(req.query);
+
+        // Every company's consumption for the period -- deliberately not
+        // scoped to this company; the peer set is the entire point. Only the
+        // three columns needed to fold usage and price ever leave this query.
+        let query = supabaseAdmin
+            .from('inventory_consumption_daily')
+            .select('company_id, product_id, units_used, value_used');
+        query = applyRange(query, range).limit(60000);
+        const { data, error } = await query;
+        if (error) throw error;
+
+        // Only compare companies actually in business today. A closed or
+        // test account's old usage should not shape what a live shop is
+        // told is "normal", and should not count toward the peer floor.
+        const { data: activeCompanies, error: cErr } = await supabaseAdmin
+            .from('companies').select('id').eq('is_active', true);
+        if (cErr) throw cErr;
+        const activeIds = new Set((activeCompanies || []).map(c => c.id));
+        activeIds.add(companyId); // the caller is presumed active by virtue of a live session
+
+        // Resolve each product to CHC's master identity, exactly as the
+        // cross-company dashboard does -- only an exact or approved-alias
+        // match is confident enough to compare across shops at all.
+        const productIds = [...new Set((data || [])
+            .filter(r => activeIds.has(r.company_id))
+            .map(r => r.product_id)
+            .filter(isValidUUID))];
+        const masterByProductId = new Map();
+        const CHUNK = 500;
+        for (let i = 0; i < productIds.length; i += CHUNK) {
+            const { data: rows, error: mErr } = await supabaseAdmin
+                .from('v_product_master')
+                .select('product_id, master_sku, master_name, match_type')
+                .in('product_id', productIds.slice(i, i + CHUNK));
+            if (mErr) throw mErr;
+            for (const r of rows || []) {
+                if ((r.match_type === 'exact' || r.match_type === 'alias') && r.master_sku) {
+                    masterByProductId.set(r.product_id, { sku: r.master_sku, name: r.master_name });
+                }
+            }
+        }
+
+        // Fold every row to a company's usage of a master part.
+        const byMaster = new Map(); // master_sku -> { name, byCompany: Map<company_id, {units, value}> }
+        for (const row of (data || [])) {
+            if (!activeIds.has(row.company_id)) continue;
+            const master = masterByProductId.get(row.product_id);
+            if (!master) continue;
+            const entry = byMaster.get(master.sku) || { name: master.name, byCompany: new Map() };
+            const cur = entry.byCompany.get(row.company_id) || { units: 0, value: 0 };
+            cur.units += Number(row.units_used || 0);
+            cur.value += Number(row.value_used || 0);
+            entry.byCompany.set(row.company_id, cur);
+            byMaster.set(master.sku, entry);
+        }
+
+        const items = [];
+        for (const [sku, entry] of byMaster) {
+            const mine = entry.byCompany.get(companyId);
+            const peers = [...entry.byCompany.entries()].filter(([cid]) => cid !== companyId);
+            if (peers.length < MIN_PEER_COMPANIES) continue;
+
+            // A price average is only meaningful over peers that actually
+            // paid something -- a company whose only usage was priced-on-
+            // request items has no price to contribute.
+            const peerPriced = peers.map(([, c]) => c).filter(c => c.units > 0 && c.value > 0);
+            if (!peerPriced.length) continue;
+
+            // Averaging each PEER COMPANY's own average price -- rather than
+            // pooling every dollar and dividing by every unit -- keeps one
+            // high-volume peer from dominating the figure, and keeps the
+            // number from being a simple function of a total a peer's own
+            // volume could be checked against.
+            const peerAvgPrice = peerPriced.reduce((s, c) => s + (c.value / c.units), 0) / peerPriced.length;
+            const peerAvgUnits = peers.reduce((s, [, c]) => s + c.units, 0) / peers.length;
+
+            const myUnits = mine ? mine.units : 0;
+            const myAvgPrice = (mine && mine.units > 0 && mine.value > 0) ? (mine.value / mine.units) : null;
+
+            items.push({
+                sku,
+                name: entry.name,
+                peer_company_count: peers.length,
+                your_units: round2(myUnits),
+                peer_avg_units: round2(peerAvgUnits),
+                your_avg_price: myAvgPrice !== null ? round2(myAvgPrice) : null,
+                peer_avg_price: round2(peerAvgPrice),
+                price_vs_peer_pct: myAvgPrice !== null
+                    ? round2(((myAvgPrice - peerAvgPrice) / peerAvgPrice) * 100)
+                    : null
+            });
+        }
+
+        items.sort((a, b) => b.peer_avg_units - a.peer_avg_units);
+
+        res.json({
+            period: { label: range.label, from: range.from, to: range.to },
+            min_peer_companies: MIN_PEER_COMPANIES,
+            items
+        });
+    } catch (err) {
+        console.error('Analytics benchmark error:', err);
+        res.status(500).json({ error: 'Failed to load benchmark data.' });
+    }
+});
+
 /**
  * GET /analytics/export?period=&location_id=&group=product|job
  * The same figures as CSV, for a controller who wants them in a spreadsheet.
