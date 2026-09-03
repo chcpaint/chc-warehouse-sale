@@ -177,7 +177,8 @@
         "                        <div id=\"inv-camera-wrap\" class=\"hidden mt-4\">",
         "                            <div class=\"relative bg-black rounded-lg overflow-hidden max-w-md mx-auto\">",
         "                                <video id=\"inv-video\" playsinline muted class=\"w-full\"></video>",
-        "                                <div class=\"absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-green-400/80 rounded-lg pointer-events-none\"></div>",
+        "                                <div id=\"inv-camera-box\" class=\"absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-green-400/80 rounded-lg pointer-events-none\"></div>",
+        "                                <div id=\"inv-camera-flash\" class=\"absolute inset-0 bg-white opacity-0 pointer-events-none\"></div>",
         "                            </div>",
         "                            <p id=\"inv-camera-hint\" class=\"text-center text-xs text-gray-500 mt-2\">",
         "                                Hold the barcode inside the green box.",
@@ -875,6 +876,17 @@
     const CAMERA_FORMATS = ['upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'itf'];
 
     RAI.toggleCamera = async function () {
+        // This is a direct tap, so it's the only moment iOS Safari will
+        // cooperate on two things that only ever bite on a phone: a text
+        // input's on-screen keyboard eating the whole camera view, and
+        // WebAudio staying silent because it was never unlocked inside a
+        // real user gesture. Both need handling here, before the camera
+        // itself starts (which happens after an await, too late for iOS).
+        if (document.activeElement && document.activeElement !== document.body
+            && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
+        RAI.unlockAudio();
         if (inv.camera.on) { RAI.stopCamera(); return; }
         await RAI.startCamera();
     }
@@ -899,6 +911,12 @@
         wrap.classList.remove('hidden');
         hint.textContent = 'Starting camera…';
         RAI.setCameraLabel('Stop');
+        // The keyboard (if it was still animating shut) and the address bar
+        // both shrink the visible viewport on a phone; once the frame is in
+        // the DOM, make sure it's actually the thing on screen.
+        if (typeof wrap.scrollIntoView === 'function') {
+            wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
 
         try {
             inv.camera.stream = await navigator.mediaDevices.getUserMedia({
@@ -1002,8 +1020,22 @@
         inv.camera.lastCode = code;
         inv.camera.lastAt = now;
         RAI.beep();
+        RAI.flashCameraBox();
+        // iOS Safari has never implemented the Vibration API (it's a
+        // WebKit/Apple limitation, not something a web page can work
+        // around), so an iPhone gets no haptic buzz here whatever this
+        // does — the beep and the flash are what carry "got it" there.
         if (navigator.vibrate) navigator.vibrate(40);
         RAI.submitScan(code);
+    }
+
+    /** A quick white flash over the video, so a capture is obvious even with the sound off. */
+    RAI.flashCameraBox = function () {
+        const flash = document.getElementById('inv-camera-flash');
+        if (!flash) return;
+        flash.classList.remove('inv-capture-flash');
+        void flash.offsetWidth; // restart the animation on back-to-back scans
+        flash.classList.add('inv-capture-flash');
     }
 
     RAI.stopStreamOnly = function () {
@@ -1041,10 +1073,32 @@
     }
 
     let audioCtx = null;
+
+    /**
+     * iOS Safari mutes any sound that wasn't started inside the JS call
+     * stack of a real tap — by the time a barcode is decoded (async, off a
+     * video frame callback) it's too late to ask. Call this from the tap
+     * that opens the camera instead, so the beep on an actual capture,
+     * moments later, is allowed to play.
+     */
+    RAI.unlockAudio = function () {
+        if (inv.settings && inv.settings.scan_sound === false) return;
+        try {
+            audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            gain.gain.value = 0; // silent — this tick just unlocks the context
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.01);
+        } catch (e) { /* audio is a nicety, never a blocker */ }
+    }
+
     RAI.beep = function (bad) {
         if (inv.settings && inv.settings.scan_sound === false) return;
         try {
             audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain); gain.connect(audioCtx.destination);

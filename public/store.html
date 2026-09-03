@@ -28,6 +28,12 @@
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
+        /* refinishAI Inventory: a visible "got it" on a camera scan, since
+           iPhone gives no vibration through the browser and a shop floor is
+           often too loud to notice the beep. */
+        .inv-capture-flash { animation: invCaptureFlash 220ms ease-out; }
+        @keyframes invCaptureFlash { 0% { opacity: .85; } 100% { opacity: 0; } }
+
         /* ============================================================
            SLIDE-OUT MENU
 

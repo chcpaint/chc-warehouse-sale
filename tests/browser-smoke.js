@@ -488,6 +488,40 @@ check('the camera falls back to the front camera when no rear camera is availabl
     } finally { await page.close(); server.close(); }
 });
 
+check('opening the camera dismisses the keyboard, and a capture flashes the frame', async (browser) => {
+    const { app } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.waitForSelector('#inv-view-scan:not(.hidden)');
+
+        // Focus the manual-entry box first, exactly like a phone keyboard
+        // left open from a moment ago — the camera view sits below it and
+        // a keyboard covers the lower half of a phone screen.
+        await page.click('#inv-scan-input');
+        const outcome = await page.evaluate(async () => {
+            const focusedBefore = document.activeElement && document.activeElement.id;
+            window.BarcodeDetector = class {
+                static async getSupportedFormats() { return ['code_128']; }
+                async detect() { return []; }
+            };
+            await RAI.toggleCamera();
+            const focusedAfter = document.activeElement && document.activeElement.id;
+            RAI.onCameraCode('0012345678905'); // simulate a capture directly
+            const flashed = document.getElementById('inv-camera-flash').classList.contains('inv-capture-flash');
+            RAI.stopCamera();
+            return { focusedBefore, focusedAfter, flashed };
+        });
+
+        assert.equal(outcome.focusedBefore, 'inv-scan-input', 'the input should have been focused to start with');
+        assert.notEqual(outcome.focusedAfter, 'inv-scan-input', 'opening the camera should blur the input so its keyboard closes');
+        assert.equal(outcome.flashed, true, 'a capture should flash the camera frame');
+    } finally { await page.close(); server.close(); }
+});
+
 check('a scan without a name is refused before it reaches the server', async (browser) => {
     const { app, hits } = makeServer({ inventoryEnabled: true });
     const { server, port } = await listen(app);
