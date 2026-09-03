@@ -940,7 +940,7 @@
             const found = await inv.camera.detector.detect(video);
             if (found && found.length) RAI.onCameraCode(found[0].rawValue);
         } catch (e) { /* a dropped frame is not an error worth surfacing */ }
-        inv.camera.raf = requestAnimationFrame(detectLoop);
+        inv.camera.raf = requestAnimationFrame(RAI.detectLoop);
     }
 
     RAI.startHtml5Fallback = async function (hint) {
@@ -965,12 +965,21 @@
         document.getElementById('inv-video').classList.add('hidden');
 
         inv.camera.html5 = new window.Html5Qrcode('inv-html5-host', { verbose: false });
-        await inv.camera.html5.start(
-            { facingMode: 'environment' },
-            { fps: 10, qrbox: { width: 280, height: 140 } },
-            (decoded) => RAI.onCameraCode(decoded),
-            () => { /* per-frame miss; ignore */ }
-        );
+        const scanConfig = { fps: 10, qrbox: { width: 280, height: 140 } };
+        const onDecoded = (decoded) => RAI.onCameraCode(decoded);
+        const onMiss = () => { /* per-frame miss; ignore */ };
+
+        // 'environment' (the rear camera) is what a phone or tablet should
+        // use, but it is a hard requirement here — a laptop with only a
+        // front camera fails outright rather than falling back, exactly
+        // the case that made this look "broken" on a MacBook. Try it,
+        // then fall back to the front camera as any device is guaranteed
+        // to have one.
+        try {
+            await inv.camera.html5.start({ facingMode: 'environment' }, scanConfig, onDecoded, onMiss);
+        } catch (envErr) {
+            await inv.camera.html5.start({ facingMode: 'user' }, scanConfig, onDecoded, onMiss);
+        }
         inv.camera.on = true;
         hint.textContent = 'Hold the barcode inside the frame.';
     }

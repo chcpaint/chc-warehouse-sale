@@ -222,6 +222,13 @@ function listen(app) {
 const MINI_TAILWIND = `
     .hidden { display: none !important; }
     .fade-in, .flex, .grid, .block { display: block; }
+    /* Real Tailwind's responsive utilities (min-width: 1024px etc.) would
+       override .hidden at the desktop viewport size Playwright uses by
+       default; without this, "hidden lg:flex" elements like the main nav
+       bar stay display:none forever and every visibility-based check on
+       what's inside it (#nav-inventory included) times out. */
+    .lg\\:flex { display: flex !important; }
+    .sm\\:inline { display: inline !important; }
 `;
 
 async function stubCdns(page) {
@@ -391,6 +398,93 @@ check('human-speed typing is not mistaken for a scan', async (browser) => {
         await page.waitForTimeout(400);
 
         assert.equal(hits.lookup.length, 0, 'slow typing must not fire a scan');
+    } finally { await page.close(); server.close(); }
+});
+
+// ------------------------------------------------------------
+// CAMERA SCANNING
+//
+// A phone or a MacBook, and a browser with or without the native
+// BarcodeDetector API, are four different code paths through
+// RAI.startCamera(). Both checks below pin regressions that only ever
+// showed up once a real camera was live: a detect loop that referenced
+// its own name wrong and died silently after one frame (any BarcodeDetector
+// browser — Chrome desktop and Android included), and a hard-coded rear-
+// camera request that failed outright on a device with no rear camera (any
+// laptop) instead of falling back to the one camera it has.
+// ------------------------------------------------------------
+
+check('the camera keeps detecting frames instead of dying after the first one', async (browser) => {
+    const { app } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    const pageErrors = [];
+    page.on('pageerror', e => pageErrors.push(String(e)));
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.waitForSelector('#inv-view-scan:not(.hidden)');
+
+        const detectCalls = await page.evaluate(async () => {
+            let calls = 0;
+            window.BarcodeDetector = class {
+                static async getSupportedFormats() { return ['code_128']; }
+                async detect() { calls++; return []; }
+            };
+            await RAI.toggleCamera();
+            await new Promise((resolve) => {
+                let frames = 0;
+                (function tick() {
+                    frames++;
+                    if (frames >= 6) return resolve();
+                    requestAnimationFrame(tick);
+                })();
+            });
+            RAI.stopCamera();
+            return calls;
+        });
+
+        assert.ok(detectCalls >= 3, `detect() should keep firing across animation frames, saw ${detectCalls} call(s)`);
+        assert.deepEqual(pageErrors.filter(e => /detectLoop/.test(e)), [], 'no ReferenceError from the detect loop');
+    } finally { await page.close(); server.close(); }
+});
+
+check('the camera falls back to the front camera when no rear camera is available', async (browser) => {
+    const { app } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.waitForSelector('#inv-view-scan:not(.hidden)');
+
+        const outcome = await page.evaluate(async () => {
+            // No native BarcodeDetector — the path every iPhone/iPad and
+            // most desktop Safari installs actually take.
+            delete window.BarcodeDetector;
+            RAI.loadScriptOnce = async () => {}; // no CDN in this stub server
+            window.Html5Qrcode = class {
+                constructor() { this.constraintsTried = []; }
+                async start(constraint) {
+                    this.constraintsTried.push(constraint.facingMode);
+                    if (constraint.facingMode === 'environment') throw new Error('OverconstrainedError: no matching camera');
+                }
+                async stop() {}
+                clear() {}
+            };
+            await RAI.toggleCamera();
+            const html5 = RAI.state.camera.html5;
+            const started = RAI.state.camera.on === true;
+            const hint = document.getElementById('inv-camera-hint').textContent;
+            RAI.stopCamera();
+            return { constraintsTried: html5 && html5.constraintsTried, started, hint };
+        });
+
+        assert.deepEqual(outcome.constraintsTried, ['environment', 'user'], 'should try the rear camera, then fall back to the front one');
+        assert.equal(outcome.started, true, 'the camera should end up running, not stuck on the failed rear-camera request');
+        assert.match(outcome.hint, /hold the barcode/i);
     } finally { await page.close(); server.close(); }
 });
 
@@ -723,11 +817,22 @@ check('the page reports no console errors while the module runs', async (browser
 (async () => {
     // The container ships a pinned Chromium; use it rather than downloading one.
     const pinned = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-    const launchOpts = { args: ['--no-sandbox'] };
+    const launchOpts = { args: [
+        '--no-sandbox',
+        // A synthetic camera device, auto-granted, so the camera checks below
+        // exercise a real getUserMedia()/MediaStream round trip rather than a
+        // hand-rolled stand-in.
+        '--use-fake-device-for-media-stream',
+        '--use-fake-ui-for-media-stream'
+    ] };
     if (require('node:fs').existsSync(pinned)) launchOpts.executablePath = pinned;
     const browser = await chromium.launch(launchOpts);
     let pass = 0, fail = 0;
-    for (const { name, fn } of results) {
+    // SMOKE_FILTER=<substring> runs just the matching check(s) -- handy since
+    // the full file, one Chromium page per check, is slow to run end to end.
+    const filter = process.env.SMOKE_FILTER;
+    const toRun = filter ? results.filter(r => r.name.includes(filter)) : results;
+    for (const { name, fn } of toRun) {
         try {
             await Promise.race([
                 fn(browser),
