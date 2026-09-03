@@ -69,6 +69,17 @@ router.use('/dashboard', require('./admin-dashboard'));
 // company-scoped routes so /master is never read as a company id.
 router.use('/master', require('./master-table'));
 
+// CHC master kits — the kit and its lines themselves, and switching a kit on
+// or off for many customers at once. Super-admin only, enforced inside that
+// router. Mounted before the company-scoped routes so /kits is never read as
+// a company id.
+router.use('/kits', require('./inventory-kits-master'));
+
+// The Fusor-to-Norton/3M/SEM/Kent/Wurth crossover reference sheet: searched
+// while curating a kit line's alternatives, and re-importable when CHC gets
+// a new one. Super-admin only, enforced inside that router.
+router.use('/crossover', require('./crossover-reference-admin'));
+
 /**
  * GET /api/admin/stats
  */

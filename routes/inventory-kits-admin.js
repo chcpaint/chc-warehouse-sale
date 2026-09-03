@@ -281,25 +281,38 @@ router.get('/:kitId/mapping', async (req, res) => {
         const kitItems = items || [];
         if (kitItems.length === 0) return res.json({ kit, lines: [] });
 
-        const [{ data: maps }, { data: products }] = await Promise.all([
+        const [{ data: maps }, { data: products }, { data: alternatives }] = await Promise.all([
             supabaseAdmin.from('kit_product_map')
-                .select('kit_item_id, product_id, quantity, is_excluded, note, updated_at')
+                .select('kit_item_id, product_id, quantity, is_excluded, note, alternative_id, unit_price_override, updated_at')
                 .eq('company_id', companyId)
                 .in('kit_item_id', kitItems.map(i => i.id)),
             supabaseAdmin.from('products')
                 .select('id, sku, name, price, category, is_active')
                 .eq('company_id', companyId)
+                .eq('is_active', true),
+            supabaseAdmin.from('kit_item_alternatives')
+                .select('id, kit_item_id, brand, brand_part_number, brand_name, speed, size, is_active')
+                .in('kit_item_id', kitItems.map(i => i.id))
                 .eq('is_active', true)
         ]);
 
         const catalogue = products || [];
         const mapByItem = new Map((maps || []).map(m => [m.kit_item_id, m]));
         const byId = new Map(catalogue.map(p => [p.id, p]));
+        const altsByItem = new Map();
+        for (const a of alternatives || []) {
+            if (!altsByItem.has(a.kit_item_id)) altsByItem.set(a.kit_item_id, []);
+            altsByItem.get(a.kit_item_id).push(a);
+        }
 
         const lines = kitItems.map(item => {
             const map = mapByItem.get(item.id) || null;
             const resolvedId = map ? map.product_id : item.product_id;
             const product = resolvedId ? byId.get(resolvedId) : null;
+            const lineAlternatives = altsByItem.get(item.id) || [];
+            const chosenAlternative = map?.alternative_id ? lineAlternatives.find(a => a.id === map.alternative_id) || null : null;
+            const unitPriceOverride = map?.unit_price_override !== undefined && map?.unit_price_override !== null
+                ? Number(map.unit_price_override) : null;
 
             return {
                 kit_item_id: item.id,
@@ -316,6 +329,15 @@ router.get('/:kitId/mapping', async (req, res) => {
                 effective_quantity: Number(map?.quantity ?? item.quantity),
                 note: map?.note || null,
                 mapped_at: map?.updated_at || null,
+
+                // What brand this line may also be filled with (Norton/3M/SEM/
+                // Kent/Wurth/etc.), which one this shop picked (display only —
+                // mapped_product above is still what gets expensed), and what
+                // they pay for it if that differs from the catalogue price.
+                alternatives: lineAlternatives,
+                chosen_alternative: chosenAlternative,
+                unit_price_override: unitPriceOverride,
+                effective_unit_price: unitPriceOverride !== null ? unitPriceOverride : (product ? Number(product.price ?? 0) : null),
 
                 // Only compute suggestions where they are needed. On a resolved
                 // line they would be noise.
@@ -392,6 +414,29 @@ router.put('/mapping/:kitItemId', async (req, res) => {
             if (quantity > 100000) return res.status(400).json({ error: 'Quantity is out of range.' });
         }
 
+        // Which brand alternative (Norton/3M/SEM/Kent/Wurth/etc.) this shop
+        // picked for the line, purely for display -- product_id above is
+        // still what actually gets expensed. Must belong to THIS line, the
+        // same tenancy discipline as product_id above.
+        let alternativeId = null;
+        if (req.body?.alternative_id !== undefined && req.body?.alternative_id !== null && req.body?.alternative_id !== '') {
+            alternativeId = req.body.alternative_id;
+            if (!isValidUUID(alternativeId)) return res.status(400).json({ error: 'Invalid alternative id.' });
+            const { data: alt } = await supabaseAdmin
+                .from('kit_item_alternatives').select('id').eq('id', alternativeId).eq('kit_item_id', kitItemId).maybeSingle();
+            if (!alt) return res.status(400).json({ error: 'That alternative does not belong to this line.' });
+        }
+
+        // What this shop pays per unit of this line, when it differs from the
+        // mapped product's own catalogue price.
+        let unitPriceOverride = null;
+        if (req.body?.unit_price_override !== undefined && req.body?.unit_price_override !== null && req.body?.unit_price_override !== '') {
+            unitPriceOverride = Number(req.body.unit_price_override);
+            if (!Number.isFinite(unitPriceOverride) || unitPriceOverride < 0) {
+                return res.status(400).json({ error: 'Price must be zero or a positive number.' });
+            }
+        }
+
         const { data: saved, error } = await supabaseAdmin
             .from('kit_product_map')
             .upsert({
@@ -401,17 +446,20 @@ router.put('/mapping/:kitItemId', async (req, res) => {
                 quantity,
                 is_excluded: isExcluded,
                 note: text(req.body?.note, 300) || null,
+                alternative_id: isExcluded ? null : alternativeId,
+                unit_price_override: unitPriceOverride,
                 updated_at: new Date().toISOString(),
                 updated_by: req.admin.id
             }, { onConflict: 'company_id,kit_item_id' })
-            .select('id, product_id, quantity, is_excluded, note')
+            .select('id, product_id, quantity, is_excluded, note, alternative_id, unit_price_override')
             .single();
 
         if (error) throw error;
 
         await logAction(req.admin.id, 'kit_line_mapped', 'company', companyId, {
             kit: item.repair_kits?.name, kit_sku: item.sku,
-            product_id: saved.product_id, excluded: saved.is_excluded
+            product_id: saved.product_id, excluded: saved.is_excluded,
+            alternative_id: saved.alternative_id, unit_price_override: saved.unit_price_override
         }, req.ip);
 
         res.json({ message: 'Mapping saved.', mapping: saved });

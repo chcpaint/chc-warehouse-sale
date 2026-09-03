@@ -61,6 +61,11 @@ const KNOWN_COLUMNS = {
         'id', 'company_id', 'location_id', 'kit_id', 'kit_name', 'job_ref', 'multiplier',
         'line_count', 'total_cost', 'actor_label', 'actor_type', 'created_by', 'created_at'
     ]),
+    order_receipts: new Set([
+        'id', 'company_id', 'order_id', 'location_id', 'product_id', 'sku', 'name',
+        'quantity_received', 'quantity_ordered', 'unexpected_item', 'scanned_barcode',
+        'movement_id', 'actor_label', 'actor_type', 'created_at'
+    ]),
     scheduler_runs: new Set(['id', 'job', 'run_key', 'detail', 'result', 'started_at', 'finished_at']),
     products: new Set([
         'id', 'company_id', 'brand', 'name', 'sku', 'description', 'category', 'price',
@@ -110,6 +115,29 @@ const KNOWN_COLUMNS = {
     item_library_conflicts: new Set([
         'id', 'company_id', 'product_id', 'sku', 'barcode', 'reason',
         'resolved_at', 'resolved_by', 'created_at'
+    ]),
+    repair_kits: new Set([
+        'id', 'company_id', 'name', 'description', 'source', 'sort_order', 'is_active', 'updated_at'
+    ]),
+    kit_items: new Set([
+        'id', 'kit_id', 'sku', 'product_id', 'quantity', 'unit', 'sort_order', 'needs_review',
+        'ref_unit_price', 'ref_line_total', 'ref_source'
+    ]),
+    company_kit_access: new Set(['company_id', 'kit_id', 'enabled']),
+    kit_product_map: new Set([
+        'id', 'company_id', 'kit_item_id', 'product_id', 'quantity', 'is_excluded', 'note',
+        'updated_at', 'updated_by',
+        // Added by migration 033 for brand-crossover alternatives and per-company pricing.
+        'alternative_id', 'unit_price_override'
+    ]),
+    kit_item_alternatives: new Set([
+        'id', 'kit_item_id', 'brand', 'brand_part_number', 'brand_name', 'speed', 'size', 'notes',
+        'crossover_reference_id', 'is_active', 'sort_order', 'created_at', 'created_by', 'updated_at'
+    ]),
+    product_crossover_reference: new Set([
+        'id', 'base_brand', 'base_category', 'base_name', 'base_part_number', 'base_speed', 'base_size',
+        'alt_brand', 'alt_product_line', 'alt_name', 'alt_part_number', 'alt_speed', 'alt_size',
+        'sheet_name', 'source_file', 'imported_at', 'imported_by'
     ])
 };
 
@@ -151,7 +179,21 @@ function matches(row, filters) {
                 const rx = new RegExp('^' + String(f.val).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i');
                 return rx.test(String(val ?? ''));
             }
-            case 'or': return true;   // the routes only use .or() for search narrowing
+            // .or('col.op.val,col.op.val') — PostgREST's compound filter string.
+            // Was a no-op ("the routes only use .or() for search narrowing") until
+            // a crossover-lookup search relied on it to match either side of a
+            // brand-alternative row, and the fake happily returned every row
+            // regardless of the query — the same shape of gap .not() was fixed
+            // for below. `f.row` carries the full row (not the single-column
+            // stand-in the other cases get) so each sub-condition can read its
+            // own column.
+            case 'or': {
+                const conds = String(f.raw || '').split(',').map(s => s.trim()).filter(Boolean);
+                return conds.some(c => {
+                    const [col, op, ...rest] = c.split('.');
+                    return matches({ [col]: (f.row || {})[col] }, [{ col, op, val: rest.join('.') }]);
+                });
+            }
             // .not(col, op, val) — the negation of the same comparison.
             // Was a no-op until a stats endpoint counted "rows with a barcode"
             // through .not('barcode','is',null) and the fake happily returned
@@ -185,7 +227,7 @@ class Query {
     gte(col, val)  { this.filters.push({ col, op: 'gte', val }); return this; }
     lte(col, val)  { this.filters.push({ col, op: 'lte', val }); return this; }
     ilike(col, val){ this.filters.push({ col, op: 'ilike', val }); return this; }
-    or()           { return this; }
+    or(condStr)    { this.filters.push({ col: null, op: 'or', raw: condStr }); return this; }
     /**
      * .not('col', 'is', null) / .not('status', 'in', '(cancelled)')
      *
@@ -222,7 +264,9 @@ class Query {
 
     rows() {
         const list = this.db[this.table] || [];
-        return list.filter(r => this.filters.every(f => matches({ [f.col]: this._value(r, f.col) }, [f])));
+        return list.filter(r => this.filters.every(f =>
+            f.op === 'or' ? matches({}, [{ ...f, row: r }]) : matches({ [f.col]: this._value(r, f.col) }, [f])
+        ));
     }
 
     _withEmbeds(rows) {
@@ -290,7 +334,7 @@ class Query {
         if (this.mode === 'delete') {
             const hit = this.rows();
             db[table] = db[table].filter(r => !hit.includes(r));
-            return { data: clone(hit), error: null };
+            return { data: clone(hit), error: null, count: this.opts && this.opts.count ? hit.length : undefined };
         }
 
         // select
@@ -322,7 +366,8 @@ function createFakeSupabase(seed = {}) {
         inventory_count_sessions: [], inventory_count_lines: [], inventory_transfers: [],
         inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
         repair_kits: [], kit_items: [], company_kit_access: [],
-        kit_product_map: [], kit_consumptions: [],
+        kit_product_map: [], kit_consumptions: [], order_receipts: [],
+        kit_item_alternatives: [], product_crossover_reference: [],
         scheduler_runs: [], inventory_status: [], company_po_sequences: [],
         ...clone(seed)
     };
@@ -447,7 +492,7 @@ function createFakeSupabase(seed = {}) {
                 insert: (payload) => new Query(db, table, 'insert', payload),
                 update: (payload) => new Query(db, table, 'update', payload),
                 upsert: (payload, opts) => new Query(db, table, 'upsert', payload, opts),
-                delete: () => new Query(db, table, 'delete')
+                delete: (opts) => new Query(db, table, 'delete', undefined, opts)
             };
         },
         async rpc(name, args) {

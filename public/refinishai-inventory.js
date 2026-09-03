@@ -177,7 +177,8 @@
         "                        <div id=\"inv-camera-wrap\" class=\"hidden mt-4\">",
         "                            <div class=\"relative bg-black rounded-lg overflow-hidden max-w-md mx-auto\">",
         "                                <video id=\"inv-video\" playsinline muted class=\"w-full\"></video>",
-        "                                <div class=\"absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-green-400/80 rounded-lg pointer-events-none\"></div>",
+        "                                <div id=\"inv-camera-box\" class=\"absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-green-400/80 rounded-lg pointer-events-none\"></div>",
+        "                                <div id=\"inv-camera-flash\" class=\"absolute inset-0 bg-white opacity-0 pointer-events-none\"></div>",
         "                            </div>",
         "                            <p id=\"inv-camera-hint\" class=\"text-center text-xs text-gray-500 mt-2\">",
         "                                Hold the barcode inside the green box.",
@@ -493,30 +494,56 @@
         "                            Both sides are recorded as one event, so a shortfall at one shop and a",
         "                            surplus at another are never left looking unexplained.",
         "                        </p>",
-        "                        <div class=\"grid md:grid-cols-2 gap-3 mb-3\">",
+        "                        <div class=\"grid md:grid-cols-2 gap-3 mb-4\">",
         "                            <div>",
         "                                <label class=\"block text-xs uppercase tracking-wide text-gray-400 mb-1\">From</label>",
-        "                                <select id=\"inv-tr-from\" class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
+        "                                <select id=\"inv-tr-from\" onchange=\"RAI.onTransferLocationChange()\"",
+        "                                    class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
         "                            </div>",
         "                            <div>",
         "                                <label class=\"block text-xs uppercase tracking-wide text-gray-400 mb-1\">To</label>",
-        "                                <select id=\"inv-tr-to\" class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
+        "                                <select id=\"inv-tr-to\" onchange=\"RAI.onTransferLocationChange()\"",
+        "                                    class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
         "                            </div>",
         "                        </div>",
-        "                        <div class=\"flex flex-wrap gap-2\">",
-        "                            <div class=\"relative flex-1 min-w-[14rem]\">",
-        "                                <i class=\"fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400\"></i>",
-        "                                <input id=\"inv-tr-scan\" type=\"text\" autocomplete=\"off\"",
-        "                                    placeholder=\"Scan or type the part number\"",
-        "                                    class=\"w-full border rounded-lg pl-10 pr-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none\"",
-        "                                    onkeydown=\"if(event.key==='Enter'){event.preventDefault();RAI.transferLookup(this.value);}\">",
-        "                            </div>",
-        "                            <input id=\"inv-tr-qty\" type=\"number\" step=\"0.5\" min=\"0\" value=\"1\"",
-        "                                class=\"w-24 border rounded-lg px-3 py-2.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
+        "                        <div class=\"flex flex-wrap items-center gap-3 mb-3\">",
+        "                            <span id=\"inv-tr-hint\" class=\"text-sm text-gray-500\">",
+        "                                Each scan adds one. Scan it again to add another, or type the quantity on the line.",
+        "                            </span>",
         "                            <input id=\"inv-tr-reason\" type=\"text\" maxlength=\"200\" placeholder=\"Reason (optional)\"",
-        "                                class=\"flex-1 min-w-[10rem] border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
+        "                                class=\"border rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[12rem] focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
         "                        </div>",
+        "                        <div class=\"relative\">",
+        "                            <i class=\"fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400\"></i>",
+        "                            <input id=\"inv-tr-scan\" type=\"text\" autocomplete=\"off\"",
+        "                                placeholder=\"Scan a barcode or type a part number, then press Enter\"",
+        "                                class=\"w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-3 text-lg focus:border-blue-500 focus:outline-none\"",
+        "                                onkeydown=\"if(event.key==='Enter'){event.preventDefault();RAI.transferScan(this.value);}\">",
+        "                        </div>",
+        "                        <p class=\"text-xs text-gray-400 mt-2\">",
+        "                            A USB or Bluetooth scanner works anywhere on this page — no need to click the box first.",
+        "                        </p>",
         "                        <div id=\"inv-tr-result\" class=\"mt-3\"></div>",
+        "                    </div>",
+        "",
+        "                    <!-- Staged. Nothing moves until Post. -->",
+        "                    <div class=\"bg-white rounded-xl shadow-sm overflow-hidden mb-4\">",
+        "                        <div class=\"px-5 py-3 border-b flex flex-wrap items-center justify-between gap-2\">",
+        "                            <div>",
+        "                                <h3 class=\"font-semibold text-gray-700\">Ready to move <span id=\"inv-tr-basket-count\" class=\"text-gray-400 font-normal\"></span></h3>",
+        "                                <p class=\"text-xs text-gray-400\">Nothing is written until you post it.</p>",
+        "                            </div>",
+        "                            <div class=\"flex items-center gap-2\">",
+        "                                <button onclick=\"RAI.clearTransferBasket()\" class=\"text-sm text-gray-400 hover:text-gray-600 px-3 py-2\">Clear</button>",
+        "                                <button onclick=\"RAI.commitTransferBasket()\" id=\"inv-tr-basket-post\" disabled",
+        "                                    class=\"bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40\">",
+        "                                    <i class=\"fas fa-check mr-1\"></i> Post",
+        "                                </button>",
+        "                            </div>",
+        "                        </div>",
+        "                        <div id=\"inv-tr-basket-list\" class=\"divide-y max-h-96 overflow-y-auto\">",
+        "                            <div class=\"px-5 py-8 text-center text-gray-400 text-sm\">Nothing scanned yet.</div>",
+        "                        </div>",
         "                    </div>",
         "",
         "                    <div class=\"bg-white rounded-xl shadow-sm overflow-hidden\">",
@@ -650,6 +677,8 @@
         mode: 'consume',
         session: [],
         basket: [],
+        trBasket: [],
+        trActiveProductId: null,
         stock: [],
         replenishment: [],
         camera: { on: false, target: 'scan', stream: null, detector: null, raf: null, html5: null, lastCode: '', lastAt: 0 },
@@ -740,7 +769,7 @@
         if (view === 'history') RAI.loadInvHistory();
         if (view === 'kits') RAI.loadKits();
         if (view === 'count') RAI.loadCount();
-        if (view === 'transfer') RAI.loadTransfers();
+        if (view === 'transfer') { RAI.loadTransfers(); RAI.renderTransferBasket(); }
         if (view === 'analytics') RAI.loadAnalytics();
         if (view === 'scan') RAI.focusScanInput();
     }
@@ -807,9 +836,16 @@
             const section = document.getElementById('tab-inventory');
             if (!section || section.classList.contains('hidden')) return;
 
+            // A wedge scanner just types into whatever has focus. On the Transfer
+            // screen that target is inv-tr-scan, not inv-scan-input, and the
+            // result belongs in the transfer basket, not the use/receive/count
+            // one — same buffering, different destination.
+            const inTransfer = inv.view === 'transfer';
+            const scanInputId = inTransfer ? 'inv-tr-scan' : 'inv-scan-input';
+
             const target = e.target;
             const typingElsewhere = target && (target.tagName === 'TEXTAREA' ||
-                (target.tagName === 'INPUT' && target.id !== 'inv-scan-input'));
+                (target.tagName === 'INPUT' && target.id !== scanInputId));
             if (typingElsewhere) return;
 
             const now = Date.now();
@@ -821,7 +857,7 @@
                     e.preventDefault();
                     const code = wedgeBuffer;
                     wedgeBuffer = '';
-                    RAI.submitScan(code);
+                    if (inTransfer) RAI.transferScan(code); else RAI.submitScan(code);
                 } else {
                     wedgeBuffer = '';
                 }
@@ -840,6 +876,17 @@
     const CAMERA_FORMATS = ['upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'itf'];
 
     RAI.toggleCamera = async function () {
+        // This is a direct tap, so it's the only moment iOS Safari will
+        // cooperate on two things that only ever bite on a phone: a text
+        // input's on-screen keyboard eating the whole camera view, and
+        // WebAudio staying silent because it was never unlocked inside a
+        // real user gesture. Both need handling here, before the camera
+        // itself starts (which happens after an await, too late for iOS).
+        if (document.activeElement && document.activeElement !== document.body
+            && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
+        RAI.unlockAudio();
         if (inv.camera.on) { RAI.stopCamera(); return; }
         await RAI.startCamera();
     }
@@ -864,6 +911,12 @@
         wrap.classList.remove('hidden');
         hint.textContent = 'Starting camera…';
         RAI.setCameraLabel('Stop');
+        // The keyboard (if it was still animating shut) and the address bar
+        // both shrink the visible viewport on a phone; once the frame is in
+        // the DOM, make sure it's actually the thing on screen.
+        if (typeof wrap.scrollIntoView === 'function') {
+            wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
 
         try {
             inv.camera.stream = await navigator.mediaDevices.getUserMedia({
@@ -905,7 +958,7 @@
             const found = await inv.camera.detector.detect(video);
             if (found && found.length) RAI.onCameraCode(found[0].rawValue);
         } catch (e) { /* a dropped frame is not an error worth surfacing */ }
-        inv.camera.raf = requestAnimationFrame(detectLoop);
+        inv.camera.raf = requestAnimationFrame(RAI.detectLoop);
     }
 
     RAI.startHtml5Fallback = async function (hint) {
@@ -930,12 +983,21 @@
         document.getElementById('inv-video').classList.add('hidden');
 
         inv.camera.html5 = new window.Html5Qrcode('inv-html5-host', { verbose: false });
-        await inv.camera.html5.start(
-            { facingMode: 'environment' },
-            { fps: 10, qrbox: { width: 280, height: 140 } },
-            (decoded) => RAI.onCameraCode(decoded),
-            () => { /* per-frame miss; ignore */ }
-        );
+        const scanConfig = { fps: 10, qrbox: { width: 280, height: 140 } };
+        const onDecoded = (decoded) => RAI.onCameraCode(decoded);
+        const onMiss = () => { /* per-frame miss; ignore */ };
+
+        // 'environment' (the rear camera) is what a phone or tablet should
+        // use, but it is a hard requirement here — a laptop with only a
+        // front camera fails outright rather than falling back, exactly
+        // the case that made this look "broken" on a MacBook. Try it,
+        // then fall back to the front camera as any device is guaranteed
+        // to have one.
+        try {
+            await inv.camera.html5.start({ facingMode: 'environment' }, scanConfig, onDecoded, onMiss);
+        } catch (envErr) {
+            await inv.camera.html5.start({ facingMode: 'user' }, scanConfig, onDecoded, onMiss);
+        }
         inv.camera.on = true;
         hint.textContent = 'Hold the barcode inside the frame.';
     }
@@ -958,8 +1020,22 @@
         inv.camera.lastCode = code;
         inv.camera.lastAt = now;
         RAI.beep();
+        RAI.flashCameraBox();
+        // iOS Safari has never implemented the Vibration API (it's a
+        // WebKit/Apple limitation, not something a web page can work
+        // around), so an iPhone gets no haptic buzz here whatever this
+        // does — the beep and the flash are what carry "got it" there.
         if (navigator.vibrate) navigator.vibrate(40);
         RAI.submitScan(code);
+    }
+
+    /** A quick white flash over the video, so a capture is obvious even with the sound off. */
+    RAI.flashCameraBox = function () {
+        const flash = document.getElementById('inv-camera-flash');
+        if (!flash) return;
+        flash.classList.remove('inv-capture-flash');
+        void flash.offsetWidth; // restart the animation on back-to-back scans
+        flash.classList.add('inv-capture-flash');
     }
 
     RAI.stopStreamOnly = function () {
@@ -997,10 +1073,32 @@
     }
 
     let audioCtx = null;
+
+    /**
+     * iOS Safari mutes any sound that wasn't started inside the JS call
+     * stack of a real tap — by the time a barcode is decoded (async, off a
+     * video frame callback) it's too late to ask. Call this from the tap
+     * that opens the camera instead, so the beep on an actual capture,
+     * moments later, is allowed to play.
+     */
+    RAI.unlockAudio = function () {
+        if (inv.settings && inv.settings.scan_sound === false) return;
+        try {
+            audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            gain.gain.value = 0; // silent — this tick just unlocks the context
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.01);
+        } catch (e) { /* audio is a nicety, never a blocker */ }
+    }
+
     RAI.beep = function (bad) {
         if (inv.settings && inv.settings.scan_sound === false) return;
         try {
             audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain); gain.connect(audioCtx.destination);
@@ -2009,58 +2107,251 @@
             </tr>`).join('');
     };
 
-    RAI.transferLookup = async function (rawCode) {
+    // ------------------------------------------------------------
+    // THE TRANSFER BASKET
+    //
+    // Same shape as the scan basket above: a scan stages a line, the same
+    // barcode again adds to it, the quantity can be typed directly, and one
+    // Post writes the whole list. Kept as its own basket rather than folded
+    // into inv.basket because a transfer carries two locations, not one, and
+    // switching either one mid-basket invalidates every on-hand number
+    // already staged — a distinction the single-location modes don't have.
+    // ------------------------------------------------------------
+
+    RAI.transferLocations = function () {
+        return {
+            from: (document.getElementById('inv-tr-from') || {}).value || '',
+            to: (document.getElementById('inv-tr-to') || {}).value || ''
+        };
+    };
+
+    /** From or To changed. Staged on-hand figures were read at the old From, so they cannot follow. */
+    RAI.onTransferLocationChange = function () {
+        if (inv.trBasket.length && !confirm('Changing the location clears the list you have scanned so far. Continue?')) {
+            RAI.loadTransfers();
+            return;
+        }
+        inv.trBasket = [];
+        inv.trActiveProductId = null;
+        RAI.renderTransferBasket();
+        RAI.transferResult('');
+        RAI.loadTransfers();
+    };
+
+    RAI.transferScan = async function (rawCode) {
         const code = String(rawCode || '').trim();
+        const input = document.getElementById('inv-tr-scan');
+        if (input) input.value = '';
         if (!code) return;
         if (!RAI.requireActor('inv-tr-result')) return;
 
-        const from = (document.getElementById('inv-tr-from') || {}).value;
-        const to   = (document.getElementById('inv-tr-to') || {}).value;
-        if (!from || !to) { RAI.transferResult('Choose both a source and a destination.', 'amber'); return; }
+        const { from, to } = RAI.transferLocations();
+        if (!from || !to) { RAI.transferResult('Choose both a source and a destination first.', 'amber'); return; }
         if (from === to) { RAI.transferResult('Source and destination must be different.', 'amber'); return; }
 
-        const qty = parseFloat((document.getElementById('inv-tr-qty') || {}).value);
-        if (!Number.isFinite(qty) || qty <= 0) { RAI.transferResult('Enter a quantity greater than zero.', 'amber'); return; }
+        if (inv.busy) return;
+        inv.busy = true;
+        try {
+            const lookup = await RAI.api(
+                `/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${from}`);
+            const found = await lookup.json();
+            if (lookup.status === 300) { RAI.beep(true); RAI.transferResult('That barcode is on more than one item — use the Scan tab to identify it, then search here by part number.', 'amber'); return; }
+            if (!lookup.ok) { RAI.beep(true); RAI.transferResult(found.error || 'No product matches that code.', 'red'); return; }
 
-        const lookup = await RAI.api(
-            `/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${from}`);
-        const found = await lookup.json();
-        if (lookup.status === 300) { RAI.transferResult('That barcode is on more than one item — use the Scan tab.', 'amber'); return; }
-        if (!lookup.ok) { RAI.beep(true); RAI.transferResult(found.error || 'No product matches that code.', 'red'); return; }
+            RAI.addToTransferBasket(found.product, code);
+        } catch (err) {
+            console.error('[Inventory] transfer scan failed:', err);
+            RAI.transferResult('Could not reach the server. Scan again.', 'red');
+        } finally {
+            inv.busy = false;
+            if (input) input.focus();
+        }
+    };
 
-        const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/transfers`, {
-            method: 'POST',
-            body: JSON.stringify({
-                from_location_id: from,
-                to_location_id: to,
-                product_id: found.product.id,
-                quantity: qty,
-                reason: (document.getElementById('inv-tr-reason') || {}).value || '',
-                actor_label: RAI.invActor()
-            })
-        });
-        const data = await resp.json();
-        if (!resp.ok) { RAI.beep(true); RAI.transferResult(data.error || 'Could not record that transfer.', 'red'); return; }
-
+    RAI.addToTransferBasket = function (product, code) {
+        const existing = inv.trBasket.find(l => l.product_id === product.id);
+        if (existing) {
+            existing.quantity = round4(existing.quantity + 1);
+            existing.error = null;
+        } else {
+            inv.trBasket.unshift({
+                product_id: product.id,
+                name: product.name,
+                sku: product.sku,
+                code: code,
+                on_hand: product.level ? Number(product.level.on_hand) : null,
+                quantity: 1,
+                error: null
+            });
+        }
+        inv.trBasket.sort((a, b) => (a.product_id === product.id ? -1 : b.product_id === product.id ? 1 : 0));
+        inv.trActiveProductId = product.id;
         RAI.beep();
-        RAI.transferResult(
-            `${data.message} ${RAI.esc(found.product.name)} now shows ${RAI.formatQty(data.from_on_hand)} at source, ${RAI.formatQty(data.to_on_hand)} at destination.`,
-            'green');
-        const scan = document.getElementById('inv-tr-scan');
-        if (scan) scan.value = '';
-        RAI.loadTransfers();
-        RAI.loadInvSummary();
+        RAI.transferResult('');
+        RAI.renderTransferBasket();
+    };
+
+    RAI.setTransferLineQty = function (productId, value) {
+        const line = inv.trBasket.find(l => l.product_id === productId);
+        if (!line) return;
+        const n = parseFloat(value);
+        if (!Number.isFinite(n) || n < 0) return;
+        if (n === 0) { RAI.removeTransferLine(productId); return; }
+        line.quantity = round4(n);
+        line.error = null;
+        RAI.renderTransferBasket();
+    };
+
+    RAI.bumpTransferLine = function (productId, delta) {
+        const line = inv.trBasket.find(l => l.product_id === productId);
+        if (!line) return;
+        const next = round4(line.quantity + delta);
+        if (next <= 0) { RAI.removeTransferLine(productId); return; }
+        line.quantity = next;
+        line.error = null;
+        RAI.renderTransferBasket();
+    };
+
+    RAI.removeTransferLine = function (productId) {
+        inv.trBasket = inv.trBasket.filter(l => l.product_id !== productId);
+        if (inv.trActiveProductId === productId) inv.trActiveProductId = null;
+        RAI.renderTransferBasket();
+    };
+
+    RAI.clearTransferBasket = function () {
+        if (inv.trBasket.length > 1 && !confirm('Clear everything scanned but not yet posted?')) return;
+        inv.trBasket = [];
+        inv.trActiveProductId = null;
+        RAI.renderTransferBasket();
+        const input = document.getElementById('inv-tr-scan');
+        if (input) input.focus();
+    };
+
+    RAI.renderTransferBasket = function () {
+        const el = document.getElementById('inv-tr-basket-list');
+        const count = document.getElementById('inv-tr-basket-count');
+        const post = document.getElementById('inv-tr-basket-post');
+        if (!el) return;
+
+        const units = inv.trBasket.reduce((s, l) => s + Number(l.quantity || 0), 0);
+        if (count) count.textContent = inv.trBasket.length
+            ? `— ${inv.trBasket.length} item(s), ${RAI.formatQty(units)} unit(s)` : '';
+        if (post) post.disabled = inv.trBasket.length === 0;
+
+        if (!inv.trBasket.length) {
+            el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 text-sm">Nothing scanned yet.</div>';
+            return;
+        }
+
+        el.innerHTML = inv.trBasket.map(l => `
+            <div class="px-4 py-3 flex items-center gap-3 ${l.product_id === inv.trActiveProductId ? 'bg-blue-50' : ''}">
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium text-gray-800 truncate">${RAI.esc(l.name)}</div>
+                    <div class="text-xs text-gray-500">
+                        ${RAI.esc(l.sku || '')}
+                        ${l.on_hand !== null && l.on_hand !== undefined ? ` · on hand ${RAI.formatQty(l.on_hand)} at source` : ''}
+                    </div>
+                    ${l.error ? `<div class="text-xs text-red-600 mt-1">${RAI.esc(l.error)}</div>` : ''}
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                    <button onclick="RAI.bumpTransferLine('${l.product_id}', -1)" type="button"
+                        class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">&minus;</button>
+                    <input type="number" step="0.5" min="0" value="${l.quantity}"
+                        onchange="RAI.setTransferLineQty('${l.product_id}', this.value)"
+                        onfocus="this.select()"
+                        aria-label="Move how many of ${RAI.esc(l.name)}"
+                        class="w-20 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <button onclick="RAI.bumpTransferLine('${l.product_id}', 1)" type="button"
+                        class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">+</button>
+                    <button onclick="RAI.removeTransferLine('${l.product_id}')" type="button" title="Take this off the list"
+                        class="w-9 h-9 rounded-lg text-gray-300 hover:text-red-600">&times;</button>
+                </div>
+            </div>`).join('');
+    };
+
+    /**
+     * Write the whole staged list as one batch. Lines that fail (almost
+     * always a shortfall at the source) stay on the list carrying their
+     * reason, same discipline as commitBasket.
+     */
+    RAI.commitTransferBasket = async function () {
+        if (!inv.trBasket.length || inv.busy) return;
+        if (!RAI.requireActor('inv-tr-result')) return;
+
+        const { from, to } = RAI.transferLocations();
+        if (!from || !to) { RAI.transferResult('Choose both a source and a destination first.', 'amber'); return; }
+        if (from === to) { RAI.transferResult('Source and destination must be different.', 'amber'); return; }
+
+        inv.busy = true;
+        const post = document.getElementById('inv-tr-basket-post');
+        if (post) { post.disabled = true; post.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Posting'; }
+
+        const reason = (document.getElementById('inv-tr-reason') || {}).value || '';
+        const sending = inv.trBasket.slice();
+
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/transfers/bulk`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    from_location_id: from,
+                    to_location_id: to,
+                    actor_label: RAI.invActor(),
+                    reason,
+                    transfers: sending.map(l => ({
+                        product_id: l.product_id,
+                        quantity: l.quantity,
+                        scanned_barcode: l.code
+                    }))
+                })
+            });
+            const data = await resp.json();
+            const results = data.results || [];
+
+            const failed = [];
+            results.forEach((r, i) => {
+                const line = sending[i];
+                if (!line) return;
+                if (!r.ok) { line.error = r.error || 'Could not be posted.'; failed.push(line); }
+            });
+            if (!results.length && !resp.ok) {
+                sending.forEach(l => { l.error = data.error || 'Could not be posted.'; });
+                inv.trBasket = sending;
+            } else {
+                inv.trBasket = failed;
+            }
+
+            const posted = results.filter(r => r.ok).length;
+            RAI.beep(failed.length > 0);
+            RAI.transferResult(
+                failed.length
+                    ? `${posted} moved, ${failed.length} still to sort out — fix the quantity and post again.`
+                    : `${posted} item(s) moved.`,
+                failed.length ? 'amber' : 'green');
+
+            RAI.renderTransferBasket();
+            RAI.loadTransfers();
+            RAI.loadInvSummary();
+        } catch (err) {
+            console.error('[Inventory] transfer post failed:', err);
+            RAI.transferResult('Could not reach the server. Nothing was moved — everything is still on the list.', 'red');
+        } finally {
+            inv.busy = false;
+            if (post) { post.disabled = inv.trBasket.length === 0; post.innerHTML = '<i class="fas fa-check mr-1"></i> Post'; }
+            const input = document.getElementById('inv-tr-scan');
+            if (input) input.focus();
+        }
     };
 
     RAI.transferResult = function (message, tone) {
         const el = document.getElementById('inv-tr-result');
         if (!el) return;
+        if (!message) { el.innerHTML = ''; return; }
         const map = {
             green: 'bg-green-50 border-green-200 text-green-800',
             amber: 'bg-amber-50 border-amber-200 text-amber-800',
             red:   'bg-red-50 border-red-200 text-red-700'
         };
-        el.innerHTML = `<div class="border rounded-lg px-4 py-3 text-sm ${map[tone] || map.amber}">${message}</div>`;
+        el.innerHTML = `<div class="border rounded-lg px-4 py-3 text-sm ${map[tone] || map.amber}">${RAI.esc(message)}</div>`;
     };
 
     // ============================================================

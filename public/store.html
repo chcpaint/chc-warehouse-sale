@@ -28,6 +28,12 @@
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
+        /* refinishAI Inventory: a visible "got it" on a camera scan, since
+           iPhone gives no vibration through the browser and a shop floor is
+           often too loud to notice the beep. */
+        .inv-capture-flash { animation: invCaptureFlash 220ms ease-out; }
+        @keyframes invCaptureFlash { 0% { opacity: .85; } 100% { opacity: 0; } }
+
         /* ============================================================
            SLIDE-OUT MENU
 
@@ -304,6 +310,21 @@
 
             <!-- ============ PRODUCTS TAB ============ -->
             <section id="tab-products" class="fade-in">
+                <!-- Scan straight into the cart. A scan or a typed part number behaves
+                     exactly like clicking Add to Cart below: the same item again adds
+                     another, and the quantity on any line can still be typed directly
+                     once it's in the cart. -->
+                <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
+                    <div class="relative">
+                        <i class="fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                        <input type="text" id="scan-to-cart-input" autocomplete="off"
+                            placeholder="Scan a barcode or type a part number to add it to the cart"
+                            class="w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-2.5 focus:border-blue-500 focus:outline-none"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();scanToCart(this.value);}">
+                    </div>
+                    <div id="scan-to-cart-result" class="mt-2"></div>
+                </div>
+
                 <!-- Filters -->
                 <div class="bg-white rounded-xl shadow-sm border p-4 mb-6">
                     <div class="flex flex-wrap gap-3 items-center">
@@ -1725,14 +1746,25 @@
             || state.promotions.find(p => p.products?.id === productId)?.products;
         if (!product) return;
 
-        const existing = state.cart.find(c => c.product_id === productId);
+        const promo = state.promotions.find(p => p.products?.id === productId);
+        addProductToCart(product, promo);
+        renderProducts();
+    }
+
+    /**
+     * The one place a line is actually pushed onto or bumped on the cart.
+     * addToCart (a click, from a product already on screen) and scanToCart
+     * (a barcode or typed part number, possibly for a product never loaded
+     * into state.products at all) both end here, so "the same item again
+     * adds another" is one rule, not two implementations of it.
+     */
+    function addProductToCart(product, promo) {
+        const existing = state.cart.find(c => c.product_id === product.id);
         if (existing) {
             existing.quantity++;
         } else {
-            // Check for active promo price
-            const promo = state.promotions.find(p => p.products?.id === productId);
             state.cart.push({
-                product_id: productId,
+                product_id: product.id,
                 name: product.name,
                 brand: product.brand,
                 sku: product.sku,
@@ -1744,8 +1776,151 @@
             });
         }
         saveCart();
-        renderProducts();
     }
+
+    // ------------------------------------------------------------
+    // SCAN TO CART
+    //
+    // Same idea as refinishAI Inventory's scanning, aimed at the cart instead
+    // of the stock ledger: a scan (or a typed part number, so a keyboard-wedge
+    // scan of a shelf label works too) adds one, scanning it again adds
+    // another. There is no separate "post" step here because the cart already
+    // is the staged list -- checkout is what commits it.
+    // ------------------------------------------------------------
+    let scanToCartBusy = false;
+
+    async function scanToCart(rawCode) {
+        const code = String(rawCode || '').trim();
+        const input = document.getElementById('scan-to-cart-input');
+        if (input) input.value = '';
+        if (!code || scanToCartBusy) return;
+        scanToCartBusy = true;
+
+        try {
+            const params = new URLSearchParams({ code });
+            if (state.location && state.location.id) params.set('location_id', state.location.id);
+
+            const resp = await apiFetch(`/store/${state.slug}/products/lookup?${params}`);
+            const data = await resp.json();
+
+            if (resp.status === 300 && data.ambiguous) {
+                scanCartFeedback(renderScanCandidates(data), 'amber');
+                return;
+            }
+            if (!resp.ok) {
+                scanBeep(true);
+                scanCartFeedback(escapeHtml(data.error || 'No product matches that code.'), 'red');
+                return;
+            }
+
+            scanBeep();
+            pickScannedProduct(data.product.id, data.product);
+        } catch (err) {
+            console.error('[Scan] lookup failed:', err);
+            scanCartFeedback('Could not reach the server. Scan again.', 'red');
+        } finally {
+            scanToCartBusy = false;
+            if (input) input.focus();
+        }
+    }
+
+    function renderScanCandidates(data) {
+        const rows = data.candidates.map(c => `
+            <button onclick="pickScannedProduct('${c.id}')"
+                class="w-full text-left px-3 py-2 hover:bg-blue-50 border-b last:border-b-0 rounded">
+                <div class="font-medium text-gray-800">${escapeHtml(c.name)}</div>
+                <div class="text-xs text-gray-500">${escapeHtml(c.sku || '')} · ${escapeHtml(c.brand || '')}</div>
+            </button>`).join('');
+        return `<div class="text-sm font-medium mb-1">${escapeHtml(data.message)}</div>
+                <div class="bg-white border rounded-lg overflow-hidden">${rows}</div>`;
+    }
+
+    // Kept as a small pending list rather than re-fetching: candidates were
+    // already returned by the lookup that found them ambiguous.
+    let pendingScanCandidates = [];
+
+    function pickScannedProduct(productId, knownProduct) {
+        let product = knownProduct;
+        if (!product) {
+            product = pendingScanCandidates.find(c => c.id === productId)
+                || state.products.find(p => p.id === productId);
+        }
+        if (!product) return;
+
+        // A product the scan found is not necessarily on the currently loaded
+        // page of state.products (a different brand/category filter, or page
+        // 2) -- keep it available so the qty-in-cart badge and future +/-
+        // clicks on this same session still resolve it.
+        if (!state.products.find(p => p.id === product.id)) {
+            pendingScanCandidates.push(product);
+        }
+
+        addProductToCart(product, null);
+        renderProducts();
+        scanCartFeedback(`${escapeHtml(product.name)} added to cart.`, 'green');
+    }
+
+    function scanCartFeedback(html, tone) {
+        const el = document.getElementById('scan-to-cart-result');
+        if (!el) return;
+        if (!html) { el.innerHTML = ''; return; }
+        const map = {
+            green: 'bg-green-50 border-green-200 text-green-800',
+            amber: 'bg-amber-50 border-amber-200 text-amber-800',
+            red:   'bg-red-50 border-red-200 text-red-700'
+        };
+        el.innerHTML = `<div class="border rounded-lg px-3 py-2 text-sm ${map[tone] || map.amber}">${html}</div>`;
+    }
+
+    let scanAudioCtx = null;
+    function scanBeep(bad) {
+        try {
+            scanAudioCtx = scanAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            const osc = scanAudioCtx.createOscillator();
+            const gain = scanAudioCtx.createGain();
+            osc.connect(gain); gain.connect(scanAudioCtx.destination);
+            osc.frequency.value = bad ? 220 : 880;
+            gain.gain.setValueAtTime(0.08, scanAudioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, scanAudioCtx.currentTime + 0.16);
+            osc.start(); osc.stop(scanAudioCtx.currentTime + 0.16);
+        } catch (e) { /* audio is a nicety, never a blocker */ }
+    }
+
+    // A USB/Bluetooth scanner just types into whatever has focus, then sends
+    // Enter -- so while the Products tab is open and nothing else is being
+    // typed into, route that straight into the scan box without requiring a
+    // click first, the same convenience refinishAI Inventory's own scan view
+    // gives a warehouse scanner.
+    let wedgeBuffer = '';
+    let wedgeLastKeyAt = 0;
+    document.addEventListener('keydown', (e) => {
+        const productsTab = document.getElementById('tab-products');
+        if (!productsTab || productsTab.classList.contains('hidden')) return;
+
+        const target = e.target;
+        const typingElsewhere = target && (target.tagName === 'TEXTAREA' ||
+            (target.tagName === 'INPUT' && target.id !== 'scan-to-cart-input'));
+        if (typingElsewhere) return;
+
+        const now = Date.now();
+        const gap = now - wedgeLastKeyAt;
+        wedgeLastKeyAt = now;
+
+        if (e.key === 'Enter' || e.key === 'Tab') {
+            if (wedgeBuffer.length >= 4) {
+                e.preventDefault();
+                const code = wedgeBuffer;
+                wedgeBuffer = '';
+                scanToCart(code);
+            } else {
+                wedgeBuffer = '';
+            }
+            return;
+        }
+        if (e.key.length !== 1) return;
+        if (gap > 50) wedgeBuffer = '';
+        wedgeBuffer += e.key;
+    });
 
     function updateCart(productId, qty) {
         if (qty <= 0) {

@@ -434,6 +434,115 @@ router.post('/counts/:id/cancel', async (req, res) => {
  * inbound leg fails — the stock is never counted in two places at once, and a
  * partial transfer leaves a visible, self-cancelling pair rather than a hole.
  */
+/**
+ * One product, one direction, both ledger legs. Shared by the single-line
+ * endpoint below and the batch endpoint the scan basket posts to — a transfer
+ * is the same operation either way, and a shortfall or a reversed leg must be
+ * handled identically regardless of which door it came in.
+ *
+ * `from` and `to` are already-resolved locations (validated once by the
+ * caller, not per line, since a scan basket shares one From/To pair).
+ *
+ * @returns {{ok:true, message, transfer, from_on_hand, to_on_hand}|{ok:false, error}}
+ */
+async function performOneTransfer({ companyId, settings, from, to, actor, productId, quantity, reason, scannedBarcode }) {
+    if (!isValidUUID(productId)) return { ok: false, error: 'A valid product is required.' };
+
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty) || qty <= 0 || qty > 1000000) {
+        return { ok: false, error: 'Transfer quantity must be greater than zero.' };
+    }
+
+    const { data: product } = await supabaseAdmin
+        .from('products').select('id, sku, name, category, is_active')
+        .eq('id', productId).eq('company_id', companyId).maybeSingle();
+    if (!product) return { ok: false, error: 'Product not found for this account.' };
+    if (product.is_active === false) return { ok: false, error: 'That product is no longer active.' };
+
+    // The destination's category lock applies to arriving stock too.
+    if (to.restrict_to_category && (product.category || '') !== to.restrict_to_category) {
+        return { ok: false, error: `${to.name} only stocks ${to.restrict_to_category} items.` };
+    }
+
+    const { data: fromLevel } = await supabaseAdmin
+        .from('inventory_levels').select('on_hand')
+        .eq('location_id', from.id).eq('product_id', productId).maybeSingle();
+    const available = Number(fromLevel?.on_hand ?? 0);
+
+    if (!settings.allow_negative && available < qty) {
+        return { ok: false, error: `Only ${available} on hand for ${product.sku || product.name} at ${from.name}.`, on_hand: available };
+    }
+
+    const reasonText = reason || `Transfer to ${to.name}`;
+    const delta = round4(qty);
+    const barcode = scannedBarcode ? canonicalBarcode(scannedBarcode) : null;
+
+    const { data: outMove, error: outErr } = await supabaseAdmin
+        .from('stock_movements')
+        .insert({
+            company_id: companyId, location_id: from.id, product_id: productId,
+            qty_change: -delta, movement_type: 'transfer_out',
+            reason: `${reasonText} (to ${to.name})`,
+            source_doc_type: 'transfer',
+            scanned_barcode: barcode,
+            actor_type: 'store', actor_label: actor
+        })
+        .select('id, on_hand_after').single();
+    if (outErr) return { ok: false, error: outErr.message };
+
+    const { data: inMove, error: inErr } = await supabaseAdmin
+        .from('stock_movements')
+        .insert({
+            company_id: companyId, location_id: to.id, product_id: productId,
+            qty_change: delta, movement_type: 'transfer_in',
+            reason: `${reasonText} (from ${from.name})`,
+            source_doc_type: 'transfer',
+            scanned_barcode: barcode,
+            actor_type: 'store', actor_label: actor
+        })
+        .select('id, on_hand_after').single();
+
+    if (inErr) {
+        // Reverse the outbound leg so the stock reappears where it started.
+        // The ledger is append-only, so this is a compensating movement, not
+        // a delete — the failed attempt stays visible.
+        await supabaseAdmin.from('stock_movements').insert({
+            company_id: companyId, location_id: from.id, product_id: productId,
+            qty_change: delta, movement_type: 'adjust',
+            reason: `Reversing failed transfer to ${to.name}`,
+            source_doc_type: 'transfer_reversal', source_doc_id: outMove.id,
+            actor_type: 'system', actor_label: 'refinishAI Inventory'
+        });
+        console.error('Transfer inbound leg failed, reversed:', inErr.message);
+        return { ok: false, error: 'The transfer could not be completed and was reversed.' };
+    }
+
+    const { data: transfer } = await supabaseAdmin
+        .from('inventory_transfers')
+        .insert({
+            company_id: companyId,
+            from_location_id: from.id,
+            to_location_id: to.id,
+            product_id: productId,
+            quantity: delta,
+            reason: reasonText,
+            actor_label: actor,
+            out_movement_id: outMove.id,
+            in_movement_id: inMove.id
+        })
+        .select().single();
+
+    return {
+        ok: true,
+        message: `${delta} × ${product.sku || product.name} moved from ${from.name} to ${to.name}.`,
+        transfer,
+        product_id: product.id,
+        sku: product.sku,
+        from_on_hand: Number(outMove.on_hand_after),
+        to_on_hand: Number(inMove.on_hand_after)
+    };
+}
+
 router.post('/transfers', async (req, res) => {
     try {
         const companyId = req.company.id;
@@ -448,102 +557,79 @@ router.post('/transfers', async (req, res) => {
         const actor = actorLabel(req);
         if (!actor) return res.status(400).json({ error: 'Enter your name to record a transfer.' });
 
-        const productId = req.body?.product_id;
-        if (!isValidUUID(productId)) return res.status(400).json({ error: 'A valid product is required.' });
-
-        const qty = Number(req.body?.quantity);
-        if (!Number.isFinite(qty) || qty <= 0 || qty > 1000000) {
-            return res.status(400).json({ error: 'Transfer quantity must be greater than zero.' });
-        }
-
-        const { data: product } = await supabaseAdmin
-            .from('products').select('id, sku, name, category, is_active')
-            .eq('id', productId).eq('company_id', companyId).maybeSingle();
-        if (!product) return res.status(404).json({ error: 'Product not found for this account.' });
-        if (product.is_active === false) return res.status(400).json({ error: 'That product is no longer active.' });
-
-        // The destination's category lock applies to arriving stock too.
-        if (to.restrict_to_category && (product.category || '') !== to.restrict_to_category) {
-            return res.status(400).json({ error: `${to.name} only stocks ${to.restrict_to_category} items.` });
-        }
-
-        const { data: fromLevel } = await supabaseAdmin
-            .from('inventory_levels').select('on_hand')
-            .eq('location_id', from.id).eq('product_id', productId).maybeSingle();
-        const available = Number(fromLevel?.on_hand ?? 0);
-
-        if (!settings.allow_negative && available < qty) {
-            return res.status(409).json({
-                error: `${from.name} only has ${available} on hand.`,
-                on_hand: available, requested: qty
-            });
-        }
-
-        const reason = text(req.body?.reason, 200) || `Transfer to ${to.name}`;
-        const delta = round4(qty);
-
-        const { data: outMove, error: outErr } = await supabaseAdmin
-            .from('stock_movements')
-            .insert({
-                company_id: companyId, location_id: from.id, product_id: productId,
-                qty_change: -delta, movement_type: 'transfer_out',
-                reason: `${reason} (to ${to.name})`,
-                source_doc_type: 'transfer',
-                actor_type: 'store', actor_label: actor
-            })
-            .select('id, on_hand_after').single();
-        if (outErr) throw outErr;
-
-        const { data: inMove, error: inErr } = await supabaseAdmin
-            .from('stock_movements')
-            .insert({
-                company_id: companyId, location_id: to.id, product_id: productId,
-                qty_change: delta, movement_type: 'transfer_in',
-                reason: `${reason} (from ${from.name})`,
-                source_doc_type: 'transfer',
-                actor_type: 'store', actor_label: actor
-            })
-            .select('id, on_hand_after').single();
-
-        if (inErr) {
-            // Reverse the outbound leg so the stock reappears where it started.
-            // The ledger is append-only, so this is a compensating movement, not
-            // a delete — the failed attempt stays visible.
-            await supabaseAdmin.from('stock_movements').insert({
-                company_id: companyId, location_id: from.id, product_id: productId,
-                qty_change: delta, movement_type: 'adjust',
-                reason: `Reversing failed transfer to ${to.name}`,
-                source_doc_type: 'transfer_reversal', source_doc_id: outMove.id,
-                actor_type: 'system', actor_label: 'refinishAI Inventory'
-            });
-            console.error('Transfer inbound leg failed, reversed:', inErr.message);
-            return res.status(500).json({ error: 'The transfer could not be completed and was reversed.' });
-        }
-
-        const { data: transfer } = await supabaseAdmin
-            .from('inventory_transfers')
-            .insert({
-                company_id: companyId,
-                from_location_id: from.id,
-                to_location_id: to.id,
-                product_id: productId,
-                quantity: delta,
-                reason,
-                actor_label: actor,
-                out_movement_id: outMove.id,
-                in_movement_id: inMove.id
-            })
-            .select().single();
-
-        res.status(201).json({
-            message: `${delta} × ${product.sku || product.name} moved from ${from.name} to ${to.name}.`,
-            transfer,
-            from_on_hand: Number(outMove.on_hand_after),
-            to_on_hand: Number(inMove.on_hand_after)
+        const outcome = await performOneTransfer({
+            companyId, settings, from, to, actor,
+            productId: req.body?.product_id,
+            quantity: req.body?.quantity,
+            reason: text(req.body?.reason, 200)
         });
+
+        if (!outcome.ok) {
+            const status = outcome.on_hand !== undefined ? 409 : (outcome.error.includes('not found') ? 404 : 400);
+            return res.status(status).json(outcome);
+        }
+        res.status(201).json(outcome);
     } catch (err) {
         console.error('Transfer error:', err);
         res.status(500).json({ error: 'Failed to record that transfer.' });
+    }
+});
+
+/**
+ * POST /transfers/bulk
+ * Body: { from_location_id, to_location_id, actor_label, reason?, transfers: [{ product_id, quantity, scanned_barcode? }] }
+ *
+ * The scan-basket equivalent of the single-line endpoint above: one From/To
+ * pair, validated once, then every staged line posted as its own two-legged
+ * transfer. Mirrors /movements/bulk's shape — per-line ok/error — so a line
+ * that fails (usually a shortfall) stays on the caller's list with its reason
+ * while the rest go through.
+ */
+router.post('/transfers/bulk', async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const settings = req.inventorySettings;
+
+        const from = await resolveLocation(companyId, req.body?.from_location_id);
+        const to   = await resolveLocation(companyId, req.body?.to_location_id);
+        if (!from) return res.status(400).json({ error: 'Select a valid source location.' });
+        if (!to)   return res.status(400).json({ error: 'Select a valid destination location.' });
+        if (from.id === to.id) return res.status(400).json({ error: 'Source and destination must be different.' });
+
+        const actor = actorLabel(req);
+        if (!actor) return res.status(400).json({ error: 'Enter your name to record a transfer.' });
+
+        const reason = text(req.body?.reason, 200);
+        const lines = Array.isArray(req.body?.transfers) ? req.body.transfers : [];
+        if (lines.length === 0) return res.status(400).json({ error: 'No transfers supplied.' });
+        if (lines.length > 500) return res.status(400).json({ error: 'Maximum 500 transfers per batch.' });
+
+        const results = [];
+        for (const [idx, line] of lines.entries()) {
+            try {
+                const outcome = await performOneTransfer({
+                    companyId, settings, from, to, actor,
+                    productId: line?.product_id,
+                    quantity: line?.quantity,
+                    reason,
+                    scannedBarcode: line?.scanned_barcode
+                });
+                results.push({ index: idx, ...outcome });
+            } catch (e) {
+                results.push({ index: idx, ok: false, error: e.message || 'Failed to record that transfer.' });
+            }
+        }
+
+        const applied = results.filter(r => r.ok).length;
+        res.status(applied ? 201 : 400).json({
+            message: `${applied} of ${lines.length} transfer(s) recorded.`,
+            applied,
+            failed: results.length - applied,
+            results
+        });
+    } catch (err) {
+        console.error('Bulk transfer error:', err);
+        res.status(500).json({ error: 'Failed to record that batch.' });
     }
 });
 

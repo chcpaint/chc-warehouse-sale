@@ -443,6 +443,98 @@ test('another company cannot transfer using this company\'s locations', async ()
     assert.equal(fake.db.inventory_transfers.length, 0);
 });
 
+// ---------- transfers: the scan basket posts here ----------
+
+test('a batch of staged transfers writes a two-legged transfer per line', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    await receive(PRODUCT_2, 5, LOC_A);
+
+    const res = await request(app()).post(`${S}/transfers/bulk`).send({
+        from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam',
+        transfers: [
+            { product_id: PRODUCT_ID, quantity: 3, scanned_barcode: '0051131020474' },
+            { product_id: PRODUCT_2, quantity: 2 }
+        ]
+    });
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.applied, 2);
+    assert.equal(res.body.failed, 0);
+    assert.equal(res.body.results[0].ok, true);
+    assert.equal(res.body.results[0].to_on_hand, 3);
+    assert.equal(res.body.results[1].to_on_hand, 2);
+    assert.equal(fake.db.inventory_transfers.length, 2);
+    assert.equal(fake.db.stock_movements.filter(m => m.movement_type === 'transfer_out').length, 2);
+});
+
+test('scanning the same item twice into one batch stages it as one line client-side, but the batch endpoint itself just sums whatever it is sent', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+
+    // The basket UI collapses repeat scans into a single incremented line
+    // before posting; the endpoint has no opinion about that and simply
+    // applies each line it is given.
+    const res = await request(app()).post(`${S}/transfers/bulk`).send({
+        from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam',
+        transfers: [{ product_id: PRODUCT_ID, quantity: 2 }]
+    });
+    assert.equal(res.body.results[0].to_on_hand, 2);
+});
+
+test('one shortfall in a batch fails only that line and leaves the rest posted', async () => {
+    reset();
+    await receive(PRODUCT_ID, 2, LOC_A);
+    await receive(PRODUCT_2, 5, LOC_A);
+
+    const res = await request(app()).post(`${S}/transfers/bulk`).send({
+        from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam',
+        transfers: [
+            { product_id: PRODUCT_ID, quantity: 5 },   // only 2 on hand
+            { product_id: PRODUCT_2, quantity: 1 }
+        ]
+    });
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.applied, 1);
+    assert.equal(res.body.failed, 1);
+    assert.equal(res.body.results[0].ok, false);
+    assert.match(res.body.results[0].error, /Only 2 on hand/);
+    assert.equal(res.body.results[1].ok, true);
+    assert.equal(fake.db.inventory_transfers.length, 1);
+});
+
+test('a transfer batch needs a name, a from, and a to before touching any line', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const line = { product_id: PRODUCT_ID, quantity: 1 };
+
+    assert.equal((await request(app()).post(`${S}/transfers/bulk`)
+        .send({ from_location_id: LOC_A, to_location_id: LOC_B, transfers: [line] })).status, 400);
+    assert.equal((await request(app()).post(`${S}/transfers/bulk`)
+        .send({ from_location_id: LOC_A, to_location_id: LOC_A, actor_label: 'Sam', transfers: [line] })).status, 400);
+    assert.equal((await request(app()).post(`${S}/transfers/bulk`)
+        .send({ from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam', transfers: [] })).status, 400);
+    assert.equal(fake.db.inventory_transfers.length, 0);
+});
+
+test('another company cannot batch-transfer using this company\'s locations', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    authCompany = { id: '99999999-9999-4999-8999-999999999999', name: 'Someone else', slug: 'other' };
+    fake.db.companies.push({
+        id: authCompany.id, name: 'Someone else', slug: 'other',
+        settings: { inventory: { enabled: true } }
+    });
+
+    const res = await request(app()).post('/api/store/other/inventory/transfers/bulk').send({
+        from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Mallory',
+        transfers: [{ product_id: PRODUCT_ID, quantity: 1 }]
+    });
+    assert.equal(res.status, 400);
+    assert.equal(fake.db.inventory_transfers.length, 0);
+});
+
 // ---------- analytics ----------
 
 const { periodRange } = require('../routes/inventory-analytics');
