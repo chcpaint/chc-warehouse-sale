@@ -488,6 +488,45 @@ check('the camera falls back to the front camera when no rear camera is availabl
     } finally { await page.close(); server.close(); }
 });
 
+check('the Safari fallback asks for a real resolution and only the formats this shop scans', async (browser) => {
+    // A UPC/EAN barcode is thin bars a low-resolution camera stream can't
+    // resolve, and this is the config that most affects whether html5-qrcode
+    // ever actually decodes one -- pin it so a future edit can't quietly
+    // drop the resolution ask or widen back out to every symbology the
+    // decoder knows (which was measurably slower to get a hit with).
+    const { app } = makeServer({ inventoryEnabled: true });
+    const { server, port } = await listen(app);
+    const page = await browser.newPage();
+    try {
+        await login(page, `http://127.0.0.1:${port}`);
+        await page.waitForSelector('#nav-inventory:not(.hidden)');
+        await page.click('#nav-inventory');
+        await page.waitForSelector('#inv-view-scan:not(.hidden)');
+
+        const config = await page.evaluate(async () => {
+            delete window.BarcodeDetector;
+            RAI.loadScriptOnce = async () => {};
+            window.Html5QrcodeSupportedFormats = { UPC_A: 14, UPC_E: 15, EAN_13: 9, EAN_8: 10, CODE_128: 5, CODE_39: 4, QR_CODE: 0, ITF: 8 };
+            let seenConfig = null;
+            window.Html5Qrcode = class {
+                async start(_constraint, config) { seenConfig = config; }
+                async stop() {}
+                clear() {}
+            };
+            await RAI.toggleCamera();
+            RAI.stopCamera();
+            return seenConfig;
+        });
+
+        assert.ok(config.videoConstraints, 'should ask for a specific camera resolution, not the browser default');
+        assert.ok(config.videoConstraints.width && config.videoConstraints.width.ideal >= 1280,
+            'the resolution ask should be high enough to resolve barcode bars, saw ' + JSON.stringify(config.videoConstraints));
+        assert.ok(Array.isArray(config.formatsToSupport) && config.formatsToSupport.length > 0 && config.formatsToSupport.length < 17,
+            'should restrict to the formats this shop scans rather than the decoder\'s full default list');
+        assert.ok(config.formatsToSupport.includes(14), 'UPC_A must be one of the supported formats');
+    } finally { await page.close(); server.close(); }
+});
+
 check('opening the camera dismisses the keyboard, and a capture flashes the frame', async (browser) => {
     const { app } = makeServer({ inventoryEnabled: true });
     const { server, port } = await listen(app);
