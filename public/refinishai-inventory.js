@@ -983,7 +983,31 @@
         document.getElementById('inv-video').classList.add('hidden');
 
         inv.camera.html5 = new window.Html5Qrcode('inv-html5-host', { verbose: false });
-        const scanConfig = { fps: 10, qrbox: { width: 280, height: 140 } };
+        // A UPC/EAN barcode is thin bars, not a QR code's error-corrected
+        // blocks -- the decoder needs real pixel detail on those bars to
+        // read them, and a browser's default (often 640x480-ish) camera
+        // resolution frequently isn't enough. Ask for the camera's best
+        // available resolution explicitly; `ideal` degrades gracefully on
+        // a camera that can't do 1080p rather than failing to start.
+        const highRes = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+        const scanConfig = {
+            fps: 12,
+            qrbox: { width: 300, height: 150 },
+            // Restricting to the symbologies this shop actually scans (vs.
+            // the decoder's full default list) means every frame is spent
+            // trying to read a barcode, not a QR/Aztec/PDF417/etc. code
+            // nobody is holding up to the camera.
+            formatsToSupport: window.Html5QrcodeSupportedFormats ? [
+                window.Html5QrcodeSupportedFormats.UPC_A,
+                window.Html5QrcodeSupportedFormats.UPC_E,
+                window.Html5QrcodeSupportedFormats.EAN_13,
+                window.Html5QrcodeSupportedFormats.EAN_8,
+                window.Html5QrcodeSupportedFormats.CODE_128,
+                window.Html5QrcodeSupportedFormats.CODE_39,
+                window.Html5QrcodeSupportedFormats.QR_CODE,
+                window.Html5QrcodeSupportedFormats.ITF
+            ] : undefined
+        };
         const onDecoded = (decoded) => RAI.onCameraCode(decoded);
         const onMiss = () => { /* per-frame miss; ignore */ };
 
@@ -992,14 +1016,22 @@
         // front camera fails outright rather than falling back, exactly
         // the case that made this look "broken" on a MacBook. Try it,
         // then fall back to the front camera as any device is guaranteed
-        // to have one.
+        // to have one. The resolution ask has to travel with the facing
+        // mode inside `videoConstraints` -- passing both separately, the
+        // library uses one or the other, not a merge of the two.
         try {
-            await inv.camera.html5.start({ facingMode: 'environment' }, scanConfig, onDecoded, onMiss);
+            await inv.camera.html5.start(
+                { facingMode: 'environment' },
+                { ...scanConfig, videoConstraints: { ...highRes, facingMode: 'environment' } },
+                onDecoded, onMiss);
         } catch (envErr) {
-            await inv.camera.html5.start({ facingMode: 'user' }, scanConfig, onDecoded, onMiss);
+            await inv.camera.html5.start(
+                { facingMode: 'user' },
+                { ...scanConfig, videoConstraints: { ...highRes, facingMode: 'user' } },
+                onDecoded, onMiss);
         }
         inv.camera.on = true;
-        hint.textContent = 'Hold the barcode inside the frame.';
+        hint.textContent = 'Hold the barcode inside the frame, filling as much of it as you can.';
     }
 
     RAI.loadScriptOnce = function (src) {
