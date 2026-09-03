@@ -122,6 +122,34 @@ create table kit_consumptions (
     id uuid primary key default gen_random_uuid(),
     company_id uuid references companies(id) on delete cascade,
     kit_name text, job_ref text, total_cost numeric, created_at timestamptz not null default now());
+-- repair_kits / kit_items / company_kit_access predate every migration here
+-- (loaded once from a Skyline export, per 016's own comment) — stood in for
+-- the same reason companies and admin_users are, so a migration that builds
+-- on them can be smoke-tested too.
+create table repair_kits (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid references companies(id) on delete cascade,
+    name text not null, description text, source text, sort_order integer not null default 0,
+    is_active boolean not null default true, updated_at timestamptz not null default now());
+create table kit_items (
+    id uuid primary key default gen_random_uuid(),
+    kit_id uuid not null references repair_kits(id) on delete cascade,
+    sku text, product_id uuid references products(id) on delete set null,
+    quantity numeric not null default 1, unit text, sort_order integer not null default 0,
+    needs_review boolean not null default false);
+create table company_kit_access (
+    company_id uuid not null references companies(id) on delete cascade,
+    kit_id uuid not null references repair_kits(id) on delete cascade,
+    enabled boolean not null default false,
+    primary key (company_id, kit_id));
+create table kit_product_map (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    kit_item_id uuid not null references kit_items(id) on delete cascade,
+    product_id uuid references products(id) on delete cascade,
+    quantity numeric, is_excluded boolean not null default false, note text,
+    updated_at timestamptz not null default now(), updated_by uuid references admin_users(id) on delete set null,
+    constraint kit_product_map_unique unique (company_id, kit_item_id));
 
 -- Two customers, so the migrations that seed a rule by name have something to
 -- find. "Assured" is deliberately present: a migration that silently seeds

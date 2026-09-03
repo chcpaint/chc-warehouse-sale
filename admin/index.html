@@ -89,6 +89,9 @@
                 <button onclick="adminNav('master')" data-nav="master" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-master">
                     <i class="fas fa-database w-5"></i> Master Table
                 </button>
+                <button onclick="adminNav('kits')" data-nav="kits" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-kits">
+                    <i class="fas fa-boxes-packing w-5"></i> Kits
+                </button>
                 <button onclick="adminNav('promotions')" data-nav="promotions" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-tags w-5"></i> Promotions
                 </button>
@@ -533,6 +536,135 @@
                         </div>
                         <div id="mt-paging" class="px-5 py-3 border-t text-sm text-gray-500"></div>
                     </div>
+                </section>
+
+                <!-- Kits (CHC master kits, brand alternatives, customer access) -->
+                <section id="section-kits" class="hidden fade-in">
+
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-800">Master kits</h2>
+                            <p class="text-xs text-gray-500 mt-0.5">A kit built here is offered to customers; each shop still maps its own lines to its own catalogue.</p>
+                        </div>
+                        <button onclick="ktToggleNewKit()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            <i class="fas fa-plus mr-1"></i> New master kit
+                        </button>
+                    </div>
+
+                    <div id="kt-new-kit-form" class="hidden bg-white rounded-xl shadow-sm border p-5 mb-6">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                            <input id="kt-new-name" placeholder="Kit name" class="border rounded-lg px-3 py-2 text-sm">
+                            <input id="kt-new-description" placeholder="Description (optional)" class="border rounded-lg px-3 py-2 text-sm">
+                        </div>
+                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Lines — one per line: SKU, quantity, unit</label>
+                        <textarea id="kt-new-lines" rows="5" placeholder="FUS208B, 1, each&#10;FUS2098, 2, each" class="w-full border rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+                        <div class="flex items-center gap-3 mt-3">
+                            <button onclick="ktCreateKit()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Create kit</button>
+                            <button onclick="ktToggleNewKit()" class="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                            <span id="kt-new-kit-error" class="text-sm text-red-600"></span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-1 bg-white rounded-xl shadow-sm border">
+                            <div class="p-4 border-b font-semibold text-gray-800">Kits</div>
+                            <div id="kt-kit-list" class="divide-y max-h-[75vh] overflow-y-auto"></div>
+                        </div>
+
+                        <div class="lg:col-span-2 space-y-6">
+                            <div id="kt-detail-empty" class="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400">
+                                Select a kit on the left to see its lines and customer access.
+                            </div>
+                            <div id="kt-detail" class="hidden space-y-6">
+
+                                <div class="bg-white rounded-xl shadow-sm border p-5">
+                                    <div class="flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <h3 id="kt-detail-name" class="font-bold text-lg text-gray-800"></h3>
+                                            <p id="kt-detail-meta" class="text-xs text-gray-500 mt-1"></p>
+                                        </div>
+                                        <div class="flex gap-3 text-sm">
+                                            <button onclick="ktToggleEditKit()" class="text-blue-600 hover:text-blue-800 font-semibold"><i class="fas fa-pen mr-1"></i>Edit</button>
+                                            <button onclick="ktDeleteKit()" class="text-red-500 hover:text-red-700 font-semibold"><i class="fas fa-trash mr-1"></i>Delete</button>
+                                        </div>
+                                    </div>
+                                    <div id="kt-edit-kit-form" class="hidden mt-4 pt-4 border-t">
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                            <input id="kt-edit-name" placeholder="Kit name" class="border rounded-lg px-3 py-2 text-sm">
+                                            <input id="kt-edit-description" placeholder="Description" class="border rounded-lg px-3 py-2 text-sm">
+                                        </div>
+                                        <label class="flex items-center gap-2 text-sm text-gray-600 mb-3">
+                                            <input type="checkbox" id="kt-edit-active" class="w-4 h-4 rounded border-gray-300"> Active
+                                        </label>
+                                        <div class="flex items-center gap-3">
+                                            <button onclick="ktSaveKit()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">Save</button>
+                                            <button onclick="ktToggleEditKit()" class="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="bg-white rounded-xl shadow-sm border p-5">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <h3 class="font-semibold text-gray-800">Lines</h3>
+                                        <button onclick="ktToggleAddLine()" class="text-sm text-blue-600 hover:text-blue-800 font-semibold"><i class="fas fa-plus mr-1"></i>Add line</button>
+                                    </div>
+                                    <div id="kt-add-line-form" class="hidden bg-gray-50 border rounded-lg p-3 mb-3 flex flex-wrap items-end gap-3">
+                                        <div>
+                                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">SKU</label>
+                                            <input id="kt-add-line-sku" class="border rounded-lg px-3 py-2 text-sm">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Quantity</label>
+                                            <input id="kt-add-line-qty" type="number" step="any" value="1" class="border rounded-lg px-3 py-2 text-sm w-24">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Unit</label>
+                                            <input id="kt-add-line-unit" value="each" class="border rounded-lg px-3 py-2 text-sm w-24">
+                                        </div>
+                                        <button onclick="ktAddLine()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Add</button>
+                                    </div>
+                                    <div id="kt-lines" class="space-y-3"></div>
+                                </div>
+
+                                <div id="kt-access-panel" class="bg-white rounded-xl shadow-sm border p-5">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <h3 class="font-semibold text-gray-800">Customer access</h3>
+                                        <div class="flex gap-2">
+                                            <button onclick="ktBulkAccess(true)" class="text-sm bg-green-100 hover:bg-green-200 text-green-800 px-3 py-1.5 rounded-lg font-semibold">Enable selected</button>
+                                            <button onclick="ktBulkAccess(false)" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg font-semibold">Disable selected</button>
+                                        </div>
+                                    </div>
+                                    <div id="kt-access-list" class="max-h-72 overflow-y-auto divide-y"></div>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-sm border p-5 mt-6">
+                        <h3 class="font-semibold text-gray-800">Brand crossover reference sheet</h3>
+                        <p class="text-xs text-gray-500 mt-0.5 mb-3">
+                            CHC's own lookup for "if a shop wants this in Norton, 3M, SEM, Kent or Wurth instead of Fusor, here's the part." Used above to suggest a line's alternatives — re-importing is additive, so a corrected sheet is reviewed like anything else.
+                        </p>
+                        <div class="flex flex-wrap items-center gap-2 mb-3">
+                            <input type="file" id="kt-xref-file" accept=".xlsx,.xls" class="text-sm">
+                            <button onclick="ktImportCrossover()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-upload mr-1"></i> Import
+                            </button>
+                            <span id="kt-xref-import-result" class="text-sm"></span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 mb-3">
+                            <input id="kt-xref-q" placeholder="Search a part number or name" class="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[200px]">
+                            <select id="kt-xref-brand" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                                <option value="">All brands</option>
+                            </select>
+                            <button onclick="ktSearchCrossover()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-search mr-1"></i> Search
+                            </button>
+                        </div>
+                        <div id="kt-xref-results" class="overflow-x-auto"></div>
+                    </div>
+
                 </section>
 
                 <!-- Companies Management -->
@@ -1701,6 +1833,7 @@
             // super-admin only. The API refuses anyone else regardless; this
             // just stops a dead menu item being offered.
             document.getElementById('nav-master').classList.add('hidden');
+            document.getElementById('nav-kits').classList.add('hidden');
             document.getElementById('nav-audit').classList.add('hidden');
             document.getElementById('nav-branding').classList.add('hidden');
         }
@@ -1729,7 +1862,7 @@
         document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products',
-            library: 'Item Library', master: 'Master Table',
+            library: 'Item Library', master: 'Master Table', kits: 'Kits',
             promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
@@ -1738,6 +1871,7 @@
         if (section === 'products') loadAdminProducts();
         if (section === 'library') libInit();
         if (section === 'master') mtInit();
+        if (section === 'kits') ktInit();
         if (section === 'promotions') loadAdminPromotions();
         if (section === 'orders') loadAdminOrders();
         if (section === 'admins') loadAdminUsers();
@@ -3310,8 +3444,87 @@
                 ${!resolved && !excluded && !suggestions
                     ? '<p class="mt-2 text-xs text-gray-500">Nothing in this catalogue looks like this part number. Either it needs adding to the catalogue, or this shop does not use it.</p>'
                     : ''}
+                ${!excluded ? renderKitLineAltPrice(line) : ''}
             </div>`;
         }).join('');
+    }
+
+    /**
+     * The brand-alternative dropdown and price-override field for one line.
+     * Both are curated at the master kit level (routes/inventory-kits-master.js)
+     * and are display-only here — product_id above is still what gets expensed
+     * — but this is where a shop's own choice and what they actually pay get
+     * recorded, per the "configure per customer, add pricing" ask.
+     */
+    function renderKitLineAltPrice(line) {
+        if (!line.alternatives || line.alternatives.length === 0) {
+            return line.mapped_product
+                ? `<p class="mt-2 text-xs text-gray-400">No brand alternatives curated for this line yet — see the Kits tab.</p>`
+                : '';
+        }
+        const chosenId = line.chosen_alternative?.id || '';
+        const options = line.alternatives.map(a => {
+            const label = `${a.brand} ${a.brand_part_number}${a.brand_name ? ' — ' + a.brand_name : ''}`;
+            return `<option value="${a.id}" ${a.id === chosenId ? 'selected' : ''}>${esc(label)}</option>`;
+        }).join('');
+
+        return `
+        <div class="mt-3 pt-3 border-t flex flex-wrap items-end gap-3">
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Brand this shop uses</label>
+                <select id="kit-alt-select-${line.kit_item_id}" class="border rounded-lg px-3 py-2 text-sm bg-white min-w-[220px]">
+                    <option value="">Fusor (as listed)</option>
+                    ${options}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Price they pay</label>
+                <input id="kit-price-input-${line.kit_item_id}" type="number" step="0.01" min="0"
+                    placeholder="${line.mapped_product ? Number(line.mapped_product.price).toFixed(2) : 'catalogue price'}"
+                    value="${line.unit_price_override !== null ? line.unit_price_override : ''}"
+                    class="border rounded-lg px-3 py-2 text-sm w-32">
+            </div>
+            <button onclick="saveKitAltPrice('${line.kit_item_id}')" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 rounded-lg text-sm font-semibold">Save</button>
+            ${line.effective_unit_price !== null ? `<span class="text-xs text-gray-500">Currently billed at $${Number(line.effective_unit_price).toFixed(2)}</span>` : ''}
+        </div>`;
+    }
+
+    async function saveKitAltPrice(kitItemId) {
+        const line = kitMappingState.lines.find(l => l.kit_item_id === kitItemId);
+        if (!line) return;
+        const altVal = document.getElementById(`kit-alt-select-${kitItemId}`).value;
+        const priceVal = document.getElementById(`kit-price-input-${kitItemId}`).value;
+
+        // Send the line's existing product/quantity along with the new fields —
+        // the PUT replaces the mapping wholesale, so leaving these out would
+        // clear a mapping this same save was never meant to touch.
+        const body = kitMappingBody(line, {
+            alternative_id: altVal || null,
+            unit_price_override: priceVal === '' ? null : priceVal
+        });
+
+        if (await saveKitMapping(kitItemId, body)) {
+            await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
+        }
+    }
+
+    /**
+     * PUT /mapping/:kitItemId replaces the whole mapping row rather than
+     * patching it, so every save has to carry forward whatever it isn't
+     * explicitly changing — otherwise picking a brand alternative would
+     * silently clear the product match, and applying a suggestion would
+     * silently clear the brand alternative.
+     */
+    function kitMappingBody(line, overrides) {
+        const body = {
+            product_id: line.mapped_product ? line.mapped_product.id : null,
+            is_excluded: line.is_excluded,
+            note: line.note || null,
+            alternative_id: line.chosen_alternative?.id || null,
+            unit_price_override: line.unit_price_override
+        };
+        if (line.quantity_override !== null) body.quantity = line.quantity_override;
+        return { ...body, ...overrides };
     }
 
     async function saveKitMapping(kitItemId, body) {
@@ -3330,14 +3543,16 @@
     }
 
     async function applyKitSuggestion(kitItemId, productId) {
-        if (await saveKitMapping(kitItemId, { product_id: productId })) {
+        const line = kitMappingState.lines.find(l => l.kit_item_id === kitItemId);
+        if (await saveKitMapping(kitItemId, kitMappingBody(line, { product_id: productId, is_excluded: false }))) {
             await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
             loadKitsAdmin();
         }
     }
 
     async function excludeKitLine(kitItemId) {
-        if (await saveKitMapping(kitItemId, { is_excluded: true })) {
+        const line = kitMappingState.lines.find(l => l.kit_item_id === kitItemId);
+        if (await saveKitMapping(kitItemId, kitMappingBody(line, { is_excluded: true }))) {
             await openKitMapping(kitMappingState.kitId, document.getElementById('kit-mapping-name').textContent);
             loadKitsAdmin();
         }
@@ -3382,6 +3597,457 @@
             loadKitsAdmin();
         } catch (err) {
             alert('Failed to save those mappings.');
+        }
+    }
+
+    // ============================================================
+    // KITS (master admin) — routes/inventory-kits-master.js +
+    // routes/crossover-reference-admin.js
+    //
+    // The other side of REPAIR KITS above: that screen is one company mapping
+    // its own catalogue onto a kit's lines; this one is building the kit
+    // itself, curating which brand alternatives (Norton/3M/SEM/Kent/Wurth)
+    // a line may be filled with, and switching a kit on for many customers
+    // at once instead of one at a time.
+    // ============================================================
+
+    let ktState = { kits: [], selectedKitId: null, detail: null, access: null };
+
+    async function ktInit() {
+        await ktLoadKits();
+        ktLoadBrandFilter();
+    }
+
+    function ktToggleNewKit() {
+        document.getElementById('kt-new-kit-form').classList.toggle('hidden');
+    }
+
+    async function ktLoadKits() {
+        const host = document.getElementById('kt-kit-list');
+        host.innerHTML = '<p class="text-center text-gray-400 py-4 px-4">Loading...</p>';
+        try {
+            const resp = await adminFetch('/kits');
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load kits.');
+            ktState.kits = data.kits || [];
+            ktRenderKitList();
+        } catch (err) {
+            host.innerHTML = `<p class="text-center text-red-600 py-4 px-4">${esc(err.message)}</p>`;
+        }
+    }
+
+    function ktRenderKitList() {
+        const host = document.getElementById('kt-kit-list');
+        if (ktState.kits.length === 0) {
+            host.innerHTML = '<p class="text-center text-gray-400 py-6 px-4">No kits yet.</p>';
+            return;
+        }
+        host.innerHTML = ktState.kits.map(k => `
+            <button onclick="ktSelectKit('${k.id}')" class="w-full text-left px-4 py-3 hover:bg-gray-50 ${k.id === ktState.selectedKitId ? 'bg-blue-50' : ''}">
+                <p class="font-semibold text-gray-800 text-sm">
+                    ${esc(k.name)}
+                    ${!k.is_active ? '<span class="ml-2 text-xs bg-gray-100 text-gray-500 rounded px-1.5 py-0.5">inactive</span>' : ''}
+                </p>
+                <p class="text-xs text-gray-500 mt-0.5">
+                    ${k.is_master ? '<span class="text-gray-500">CHC master</span>' : `<span class="text-indigo-600">${esc(k.owner_company_name || 'Company kit')}</span>`}
+                    &middot; ${k.line_count} line${k.line_count === 1 ? '' : 's'}
+                    ${k.is_master ? ` &middot; ${k.companies_enabled} customer${k.companies_enabled === 1 ? '' : 's'} on` : ''}
+                </p>
+            </button>
+        `).join('');
+    }
+
+    async function ktCreateKit() {
+        const errEl = document.getElementById('kt-new-kit-error');
+        errEl.textContent = '';
+        const name = document.getElementById('kt-new-name').value.trim();
+        const description = document.getElementById('kt-new-description').value.trim();
+        const raw = document.getElementById('kt-new-lines').value;
+
+        if (!name) { errEl.textContent = 'A kit name is required.'; return; }
+
+        const lines = raw.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+            const [sku, qty, unit] = l.split(',').map(s => (s || '').trim());
+            return { sku, quantity: qty ? Number(qty) : 1, unit: unit || 'each' };
+        });
+        if (lines.length === 0) { errEl.textContent = 'At least one line is required (SKU, quantity, unit).'; return; }
+
+        try {
+            const resp = await adminFetch('/kits', {
+                method: 'POST',
+                body: JSON.stringify({ name, description, lines })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { errEl.textContent = data.error || 'Failed to create that kit.'; return; }
+
+            document.getElementById('kt-new-name').value = '';
+            document.getElementById('kt-new-description').value = '';
+            document.getElementById('kt-new-lines').value = '';
+            ktToggleNewKit();
+            await ktLoadKits();
+            ktSelectKit(data.kit.id);
+        } catch (err) {
+            errEl.textContent = 'Failed to create that kit.';
+        }
+    }
+
+    async function ktSelectKit(kitId) {
+        ktState.selectedKitId = kitId;
+        ktRenderKitList();
+        document.getElementById('kt-detail-empty').classList.add('hidden');
+        document.getElementById('kt-detail').classList.remove('hidden');
+        document.getElementById('kt-edit-kit-form').classList.add('hidden');
+        document.getElementById('kt-add-line-form').classList.add('hidden');
+        document.getElementById('kt-lines').innerHTML = '<p class="text-gray-400 py-3">Loading...</p>';
+
+        try {
+            const resp = await adminFetch(`/kits/${kitId}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load that kit.');
+            ktState.detail = data;
+
+            document.getElementById('kt-detail-name').textContent = data.kit.name;
+            document.getElementById('kt-detail-meta').textContent =
+                `${data.kit.is_master ? 'CHC master kit' : 'Company kit'}${data.kit.description ? ' — ' + data.kit.description : ''}${data.kit.source ? ' · source: ' + data.kit.source : ''}`;
+
+            ktRenderLines();
+
+            const accessPanel = document.getElementById('kt-access-panel');
+            if (data.kit.is_master) {
+                accessPanel.classList.remove('hidden');
+                await ktLoadAccess(kitId);
+            } else {
+                accessPanel.classList.add('hidden');
+            }
+        } catch (err) {
+            document.getElementById('kt-lines').innerHTML = `<p class="text-red-600 py-3">${esc(err.message)}</p>`;
+        }
+    }
+
+    function ktRenderLines() {
+        const host = document.getElementById('kt-lines');
+        const lines = ktState.detail?.lines || [];
+        if (lines.length === 0) { host.innerHTML = '<p class="text-gray-400 py-3">No lines yet.</p>'; return; }
+
+        host.innerHTML = lines.map(line => {
+            const altChips = (line.alternatives || []).map(a => `
+                <span class="inline-flex items-center gap-2 bg-indigo-50 text-indigo-800 text-xs rounded-full pl-3 pr-1.5 py-1">
+                    ${esc(a.brand)} ${esc(a.brand_part_number)}${a.brand_name ? ' — ' + esc(a.brand_name) : ''}
+                    <button onclick="ktRemoveAlternative('${a.id}')" class="text-indigo-400 hover:text-red-600"><i class="fas fa-times-circle"></i></button>
+                </span>`).join('');
+
+            const suggestions = (line.suggested_alternatives || []).map(s => `
+                <button onclick='ktAttachSuggestion(${JSON.stringify(line.id)}, ${JSON.stringify(s)})'
+                    class="text-left border rounded-lg px-3 py-2 hover:border-blue-400 hover:bg-blue-50 w-full">
+                    <span class="font-mono text-xs text-gray-700">${esc(s.alt_brand)} ${esc(s.alt_part_number || '')}</span>
+                    <span class="text-xs text-gray-500"> — ${esc(s.alt_name || '')}</span>
+                    <span class="block text-xs ${s.score >= 100 ? 'text-green-700' : 'text-gray-400'}">${esc(s.why)} (base: ${esc(s.base_part_number || '')})</span>
+                </button>`).join('');
+
+            const altFormOpen = ktState.openAltFormFor === line.id;
+
+            return `
+            <div class="border rounded-lg p-3 ${line.needs_review ? 'bg-amber-50 border-amber-200' : 'bg-gray-50'}">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <p class="font-mono text-sm font-semibold text-gray-800">${esc(line.sku)}</p>
+                        <p class="text-xs text-gray-500">Quantity ${line.quantity} ${esc(line.unit)}</p>
+                    </div>
+                    <button onclick="ktDeleteLine('${line.id}')" class="text-xs text-gray-400 hover:text-red-600">Remove line</button>
+                </div>
+                ${altChips ? `<div class="mt-2 flex flex-wrap gap-2">${altChips}</div>` : ''}
+                ${!altChips && suggestions ? `<div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">${suggestions}</div>` : ''}
+                ${!altChips && !suggestions ? '<p class="mt-2 text-xs text-gray-500">Nothing in the crossover reference sheet looks like this part number yet.</p>' : ''}
+                <button onclick="ktToggleAltForm('${line.id}')" class="mt-2 text-xs text-blue-600 hover:text-blue-800 font-semibold">
+                    <i class="fas fa-plus mr-1"></i>Add a brand alternative manually
+                </button>
+                <div class="${altFormOpen ? '' : 'hidden'} mt-2 bg-white border rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+                    <input id="kt-alt-brand-${line.id}" placeholder="Brand (Norton, 3M...)" class="border rounded-lg px-2 py-1.5 text-sm">
+                    <input id="kt-alt-part-${line.id}" placeholder="Part number" class="border rounded-lg px-2 py-1.5 text-sm">
+                    <input id="kt-alt-name-${line.id}" placeholder="Name (optional)" class="border rounded-lg px-2 py-1.5 text-sm">
+                    <input id="kt-alt-speed-${line.id}" placeholder="Speed (optional)" class="border rounded-lg px-2 py-1.5 text-sm">
+                    <input id="kt-alt-size-${line.id}" placeholder="Size (optional)" class="border rounded-lg px-2 py-1.5 text-sm">
+                    <button onclick="ktAddAlternative('${line.id}')" class="bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold">Attach</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function ktToggleAltForm(lineId) {
+        ktState.openAltFormFor = ktState.openAltFormFor === lineId ? null : lineId;
+        ktRenderLines();
+    }
+
+    async function ktAttachSuggestion(lineId, s) {
+        await ktPostAlternative(lineId, {
+            brand: s.alt_brand, brand_part_number: s.alt_part_number, brand_name: s.alt_name,
+            speed: s.alt_speed, size: s.alt_size, crossover_reference_id: s.id
+        });
+    }
+
+    async function ktAddAlternative(lineId) {
+        const brand = document.getElementById(`kt-alt-brand-${lineId}`).value.trim();
+        const part = document.getElementById(`kt-alt-part-${lineId}`).value.trim();
+        if (!brand || !part) { alert('A brand and part number are required.'); return; }
+        await ktPostAlternative(lineId, {
+            brand, brand_part_number: part,
+            brand_name: document.getElementById(`kt-alt-name-${lineId}`).value.trim(),
+            speed: document.getElementById(`kt-alt-speed-${lineId}`).value.trim(),
+            size: document.getElementById(`kt-alt-size-${lineId}`).value.trim()
+        });
+    }
+
+    async function ktPostAlternative(lineId, body) {
+        try {
+            const resp = await adminFetch(`/kits/${ktState.selectedKitId}/lines/${lineId}/alternatives`, {
+                method: 'POST', body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to attach that alternative.'); return; }
+            ktState.openAltFormFor = null;
+            await ktSelectKit(ktState.selectedKitId);
+        } catch (err) {
+            alert('Failed to attach that alternative.');
+        }
+    }
+
+    async function ktRemoveAlternative(altId) {
+        if (!confirm('Remove this brand alternative? Any customer currently showing it will fall back to Fusor.')) return;
+        try {
+            const resp = await adminFetch(`/kits/alternatives/${altId}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to remove that alternative.'); return; }
+            await ktSelectKit(ktState.selectedKitId);
+        } catch (err) {
+            alert('Failed to remove that alternative.');
+        }
+    }
+
+    function ktToggleAddLine() {
+        document.getElementById('kt-add-line-form').classList.toggle('hidden');
+    }
+
+    async function ktAddLine() {
+        const sku = document.getElementById('kt-add-line-sku').value.trim();
+        const quantity = document.getElementById('kt-add-line-qty').value;
+        const unit = document.getElementById('kt-add-line-unit').value.trim() || 'each';
+        if (!sku) { alert('A SKU is required.'); return; }
+        try {
+            const resp = await adminFetch(`/kits/${ktState.selectedKitId}/lines`, {
+                method: 'POST', body: JSON.stringify({ sku, quantity, unit })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to add that line.'); return; }
+            document.getElementById('kt-add-line-sku').value = '';
+            document.getElementById('kt-add-line-qty').value = '1';
+            document.getElementById('kt-add-line-unit').value = 'each';
+            ktToggleAddLine();
+            await ktSelectKit(ktState.selectedKitId);
+            await ktLoadKits();
+        } catch (err) {
+            alert('Failed to add that line.');
+        }
+    }
+
+    async function ktDeleteLine(lineId) {
+        if (!confirm('Remove this line from the kit? This does not affect kits already mapped by customers, apart from removing the line itself.')) return;
+        try {
+            const resp = await adminFetch(`/kits/${ktState.selectedKitId}/lines/${lineId}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to remove that line.'); return; }
+            await ktSelectKit(ktState.selectedKitId);
+            await ktLoadKits();
+        } catch (err) {
+            alert('Failed to remove that line.');
+        }
+    }
+
+    function ktToggleEditKit() {
+        const form = document.getElementById('kt-edit-kit-form');
+        form.classList.toggle('hidden');
+        if (!form.classList.contains('hidden')) {
+            const kit = ktState.detail.kit;
+            document.getElementById('kt-edit-name').value = kit.name || '';
+            document.getElementById('kt-edit-description').value = kit.description || '';
+            document.getElementById('kt-edit-active').checked = kit.is_active !== false;
+        }
+    }
+
+    async function ktSaveKit() {
+        const name = document.getElementById('kt-edit-name').value.trim();
+        if (!name) { alert('A kit name is required.'); return; }
+        try {
+            const resp = await adminFetch(`/kits/${ktState.selectedKitId}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    name,
+                    description: document.getElementById('kt-edit-description').value.trim(),
+                    is_active: document.getElementById('kt-edit-active').checked
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to save that kit.'); return; }
+            ktToggleEditKit();
+            await ktLoadKits();
+            await ktSelectKit(ktState.selectedKitId);
+        } catch (err) {
+            alert('Failed to save that kit.');
+        }
+    }
+
+    async function ktDeleteKit() {
+        const kit = ktState.detail?.kit;
+        if (!kit) return;
+        if (!confirm(`Delete "${kit.name}"? Past jobs keep their history, but this removes the kit and its lines everywhere.`)) return;
+        try {
+            const resp = await adminFetch(`/kits/${ktState.selectedKitId}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to delete that kit.'); return; }
+            ktState.selectedKitId = null;
+            ktState.detail = null;
+            document.getElementById('kt-detail').classList.add('hidden');
+            document.getElementById('kt-detail-empty').classList.remove('hidden');
+            await ktLoadKits();
+        } catch (err) {
+            alert('Failed to delete that kit.');
+        }
+    }
+
+    async function ktLoadAccess(kitId) {
+        const host = document.getElementById('kt-access-list');
+        host.innerHTML = '<p class="text-gray-400 py-3">Loading...</p>';
+        try {
+            const resp = await adminFetch(`/kits/${kitId}/access`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load customer access.');
+            ktState.access = data.companies || [];
+            ktRenderAccess();
+        } catch (err) {
+            host.innerHTML = `<p class="text-red-600 py-3">${esc(err.message)}</p>`;
+        }
+    }
+
+    function ktRenderAccess() {
+        const host = document.getElementById('kt-access-list');
+        const rows = ktState.access || [];
+        if (rows.length === 0) { host.innerHTML = '<p class="text-gray-400 py-3">No customers yet.</p>'; return; }
+
+        host.innerHTML = rows.map(c => `
+            <label class="flex items-center justify-between gap-3 py-2 px-1 hover:bg-gray-50 cursor-pointer">
+                <span class="flex items-center gap-2">
+                    <input type="checkbox" class="kt-access-check w-4 h-4 rounded border-gray-300" value="${c.company_id}">
+                    <span class="text-sm text-gray-800">${esc(c.company_name)}</span>
+                    ${!c.is_active ? '<span class="text-xs text-gray-400">(inactive)</span>' : ''}
+                </span>
+                <span class="text-xs ${c.enabled ? 'text-green-700' : 'text-gray-400'}">
+                    ${c.enabled ? `On &middot; ${c.lines_resolved}/${c.line_count} mapped` : 'Off'}
+                </span>
+            </label>
+        `).join('');
+    }
+
+    async function ktBulkAccess(enable) {
+        const ids = Array.from(document.querySelectorAll('.kt-access-check:checked')).map(el => el.value);
+        if (ids.length === 0) { alert('Select at least one customer first.'); return; }
+        try {
+            const resp = await adminFetch(`/kits/${ktState.selectedKitId}/access/bulk`, {
+                method: 'PUT',
+                body: JSON.stringify({ company_ids: ids, enabled: enable })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to update customer access.'); return; }
+            await ktLoadAccess(ktState.selectedKitId);
+            await ktLoadKits();
+        } catch (err) {
+            alert('Failed to update customer access.');
+        }
+    }
+
+    // ---------- brand crossover reference sheet ----------
+
+    async function ktLoadBrandFilter() {
+        try {
+            const resp = await adminFetch('/crossover/brands');
+            const data = await resp.json();
+            if (!resp.ok) return;
+            const sel = document.getElementById('kt-xref-brand');
+            sel.innerHTML = '<option value="">All brands</option>' +
+                (data.brands || []).map(b => `<option value="${esc(b.brand)}">${esc(b.brand)} (${b.count})</option>`).join('');
+        } catch (err) { /* the search box still works without the filter populated */ }
+    }
+
+    async function ktImportCrossover() {
+        const input = document.getElementById('kt-xref-file');
+        const resultEl = document.getElementById('kt-xref-import-result');
+        if (!input.files || !input.files[0]) { alert('Choose a crossover sheet first.'); return; }
+        resultEl.textContent = 'Importing...';
+        resultEl.className = 'text-sm text-gray-500';
+        try {
+            const body = new FormData();
+            body.append('file', input.files[0]);
+            const resp = await adminFetchRaw('/crossover/import', { method: 'POST', body });
+            const data = await resp.json();
+            if (!resp.ok) { resultEl.textContent = data.error || 'Import failed.'; resultEl.className = 'text-sm text-red-600'; return; }
+            resultEl.textContent = data.message;
+            resultEl.className = 'text-sm text-green-700';
+            input.value = '';
+            ktLoadBrandFilter();
+            if (ktState.selectedKitId) ktSelectKit(ktState.selectedKitId);
+        } catch (err) {
+            resultEl.textContent = 'Import failed.';
+            resultEl.className = 'text-sm text-red-600';
+        }
+    }
+
+    async function ktSearchCrossover() {
+        const q = document.getElementById('kt-xref-q').value.trim();
+        const brand = document.getElementById('kt-xref-brand').value;
+        const host = document.getElementById('kt-xref-results');
+        host.innerHTML = '<p class="text-gray-400 py-3">Searching...</p>';
+        try {
+            const params = new URLSearchParams();
+            if (q) params.set('q', q);
+            if (brand) params.set('brand', brand);
+            const resp = await adminFetch(`/crossover/search?${params.toString()}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Search failed.');
+
+            const rows = data.results || [];
+            if (rows.length === 0) { host.innerHTML = '<p class="text-gray-400 py-3">No matches.</p>'; return; }
+
+            host.innerHTML = `
+            <table class="w-full text-sm">
+                <thead><tr class="border-b text-left text-xs font-semibold text-gray-500 uppercase">
+                    <th class="py-2 pr-3">Fusor part</th><th class="py-2 pr-3">Fusor name</th>
+                    <th class="py-2 pr-3">Brand</th><th class="py-2 pr-3">Alt part</th><th class="py-2 pr-3">Alt name</th><th></th>
+                </tr></thead>
+                <tbody>
+                ${rows.map(r => `
+                    <tr class="border-b">
+                        <td class="py-2 pr-3 font-mono text-xs">${esc(r.base_part_number || '')}</td>
+                        <td class="py-2 pr-3 text-xs text-gray-600">${esc(r.base_name || '')}</td>
+                        <td class="py-2 pr-3 text-xs font-semibold">${esc(r.alt_brand || '')}</td>
+                        <td class="py-2 pr-3 font-mono text-xs">${esc(r.alt_part_number || '')}</td>
+                        <td class="py-2 pr-3 text-xs text-gray-600">${esc(r.alt_name || '')}</td>
+                        <td class="py-2 text-right"><button onclick="ktDeleteCrossoverRow('${r.id}')" class="text-xs text-gray-400 hover:text-red-600">Remove</button></td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>`;
+        } catch (err) {
+            host.innerHTML = `<p class="text-red-600 py-3">${esc(err.message)}</p>`;
+        }
+    }
+
+    async function ktDeleteCrossoverRow(id) {
+        if (!confirm('Remove this row from the reference sheet?')) return;
+        try {
+            const resp = await adminFetch(`/crossover/${id}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to remove that row.'); return; }
+            ktSearchCrossover();
+            ktLoadBrandFilter();
+        } catch (err) {
+            alert('Failed to remove that row.');
         }
     }
 

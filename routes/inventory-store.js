@@ -124,6 +124,21 @@ router.use('/kits', (req, res, next) => {
     next();
 }, require('./inventory-kits'));
 
+/**
+ * Receiving against a specific CHC order, rather than a plain stock-in with
+ * no paper trail behind it. Reuses this file's location resolution and the
+ * exact movement path /movements/bulk uses, so a receipt is a real, auditable
+ * stock_movements row like any other — just one that also remembers which
+ * order it came off.
+ */
+router.use('/receiving', (req, res, next) => {
+    req.resolveLocation = resolveLocation;
+    req.postOneMovement = postOneMovement;
+    req.text = text;
+    req.actorLabel = () => actorLabel(req);
+    next();
+}, require('./inventory-receiving'));
+
 // ============================================================
 // READ: STOCK LEVELS
 // ============================================================
@@ -504,8 +519,15 @@ router.post('/movements/bulk', async (req, res) => {
     }
 });
 
-/** Shared single-movement path used by the bulk endpoint. */
-async function postOneMovement({ companyId, location, actor, settings, line }) {
+/**
+ * Shared single-movement path used by the bulk endpoint, and by order
+ * receiving (routes/inventory-receiving.js) so a receipt is written through
+ * the exact same validation — category lock, active check, negative-stock
+ * guard, auto-draft — rather than a second copy of it that could drift.
+ * sourceDocType/sourceDocId default to the plain scan-batch shape; receiving
+ * passes 'order_receive' and the order's id instead.
+ */
+async function postOneMovement({ companyId, location, actor, settings, line, sourceDocType, sourceDocId }) {
     const movementType = String(line?.movement_type || '').trim();
     if (!STORE_MOVEMENT_TYPES.includes(movementType)) {
         return { ok: false, error: `Unsupported movement type "${movementType}"` };
@@ -549,7 +571,8 @@ async function postOneMovement({ companyId, location, actor, settings, line }) {
             scanned_barcode: line.scanned_barcode ? canonicalBarcode(line.scanned_barcode) : null,
             actor_type: 'store',
             actor_label: actor,
-            source_doc_type: 'store_scan_batch'
+            source_doc_type: sourceDocType || 'store_scan_batch',
+            source_doc_id: sourceDocId || null
         })
         .select('id, on_hand_after')
         .single();

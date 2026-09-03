@@ -5,6 +5,7 @@ const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
 const { sendOrderNotification } = require('../utils/email');
 const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
+const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
 
 const router = express.Router();
 
@@ -140,6 +141,101 @@ router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
         res.status(500).json({ error: 'Failed to load products.' });
     }
 });
+
+/**
+ * GET /api/store/:slug/products/lookup?code=&location_id=
+ *
+ * Scan a barcode (or type a part number) straight into the cart, the same way
+ * refinishAI Inventory looks a code up against a shelf — but this is ordering,
+ * not stock, so it exists whether or not that module is on. A UPC/EAN checks
+ * against product_barcodes first; failing that, the code is tried as a SKU, so
+ * a keyboard-wedge scan of a shelf label works the same as scanning the item
+ * itself. The same location category-lock that narrows browsing narrows a scan
+ * too — a Nova Scotia branch cannot order paint by scanning it any more than it
+ * can order it by clicking it.
+ */
+router.get('/:slug/products/lookup', requireCompanyAuth, async (req, res) => {
+    try {
+        const companyId = req.company.id;
+
+        let restrictCategory = null;
+        if (req.query.location_id && isValidUUID(req.query.location_id)) {
+            const { data: loc } = await supabaseAdmin
+                .from('company_locations')
+                .select('restrict_to_category')
+                .eq('id', req.query.location_id).eq('company_id', companyId).maybeSingle();
+            if (loc && loc.restrict_to_category) restrictCategory = loc.restrict_to_category;
+        }
+
+        const raw = String(req.query.code || '').trim().slice(0, 128);
+        if (!raw) return res.status(400).json({ error: 'No code supplied.' });
+
+        const variants = barcodeVariants(raw);
+        let products = [];
+        let matchedBy = 'barcode';
+
+        if (variants.length) {
+            const { data, error } = await supabaseAdmin
+                .from('product_barcodes')
+                .select('barcode, symbology, products!inner(*)')
+                .in('barcode', variants)
+                .eq('products.company_id', companyId)
+                .eq('products.is_active', true)
+                .limit(20);
+            if (error) throw error;
+            products = dedupeStoreProducts((data || []).map(r => r.products));
+        }
+
+        if (products.length === 0) {
+            matchedBy = 'sku';
+            const { data } = await supabaseAdmin
+                .from('products')
+                .select('*')
+                .eq('company_id', companyId)
+                .eq('is_active', true)
+                .ilike('sku', raw)
+                .limit(20);
+            products = dedupeStoreProducts(data || []);
+        }
+
+        if (restrictCategory) {
+            products = products.filter(p => (p.category || '') === restrictCategory);
+        }
+
+        if (products.length === 0) {
+            return res.status(404).json({
+                error: restrictCategory
+                    ? `No product matches that code in ${restrictCategory}.`
+                    : 'No product matches that code.',
+                code: raw,
+                canonical: canonicalBarcode(raw)
+            });
+        }
+
+        if (products.length > 1) {
+            return res.status(300).json({
+                ambiguous: true,
+                message: 'More than one item shares this code — choose the one you are holding.',
+                code: raw,
+                matched_by: matchedBy,
+                candidates: products
+            });
+        }
+
+        res.json({ code: raw, matched_by: matchedBy, product: products[0] });
+    } catch (err) {
+        console.error('Storefront lookup error:', err);
+        res.status(500).json({ error: 'Failed to look up that code.' });
+    }
+});
+
+function dedupeStoreProducts(list) {
+    const seen = new Map();
+    for (const p of list) {
+        if (p && p.id && !seen.has(p.id)) seen.set(p.id, p);
+    }
+    return [...seen.values()];
+}
 
 /**
  * GET /api/store/:slug/promotions
