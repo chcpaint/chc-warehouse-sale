@@ -452,6 +452,19 @@
         "                                    <i class=\"fas fa-camera\"></i>",
         "                                </button>",
         "                            </div>",
+        "",
+        "                            <!-- Camera viewport -- this view's own; the Scan tab's camera lives in a",
+        "                                 different, hidden section while Count is open, so it cannot be reused here. -->",
+        "                            <div id=\"inv-count-camera-wrap\" class=\"hidden mt-4\">",
+        "                                <div class=\"relative bg-black rounded-lg overflow-hidden max-w-md mx-auto\">",
+        "                                    <video id=\"inv-count-video\" playsinline muted class=\"w-full\"></video>",
+        "                                    <div id=\"inv-count-camera-box\" class=\"absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-green-400/80 rounded-lg pointer-events-none\"></div>",
+        "                                    <div id=\"inv-count-camera-flash\" class=\"absolute inset-0 bg-white opacity-0 pointer-events-none\"></div>",
+        "                                </div>",
+        "                                <p id=\"inv-count-camera-hint\" class=\"text-center text-xs text-gray-500 mt-2\">",
+        "                                    Enter the counted quantity above, then hold the barcode inside the green box.",
+        "                                </p>",
+        "                            </div>",
         "                            <div id=\"inv-count-feedback\" class=\"mt-3\"></div>",
         "                        </div>",
         "",
@@ -763,7 +776,11 @@
             b.classList.toggle('font-semibold', on);
         });
 
-        if (view !== 'scan' && view !== 'count' && inv.camera.on) RAI.stopCamera();
+        // Each of Scan and Count has its own camera viewport (see the CAMERA
+        // SCANNING section below) -- leaving the tab that actually opened the
+        // camera has to stop it, even when moving to the *other* one of the
+        // two, or the stream keeps running against a now-hidden video.
+        if (inv.camera.on && view !== inv.camera.target) RAI.stopCamera();
         if (view === 'stock') RAI.loadInvStock();
         if (view === 'replen') RAI.loadReplenishment();
         if (view === 'history') RAI.loadInvHistory();
@@ -872,10 +889,28 @@
 
     // ------------------------------------------------------------
     // CAMERA SCANNING
+    //
+    // Two buttons share this engine -- the Scan tab's own camera, and the
+    // Count tab's -- and each has its OWN viewport (inv-camera-wrap / video /
+    // hint / flash vs. inv-count-camera-wrap / ...): the two tabs are never
+    // both visible at once, and a decode means something different in each
+    // (a use/receive movement vs. a count line), so the elements and the
+    // destination function both have to track which button was actually
+    // pressed. inv.camera.target holds that for the lifetime of one camera
+    // session; RAI.cameraIds() is the one place that turns it into element
+    // ids, so every other function below stays target-agnostic.
     // ------------------------------------------------------------
     const CAMERA_FORMATS = ['upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'itf'];
 
-    RAI.toggleCamera = async function () {
+    RAI.cameraIds = function (target) {
+        return target === 'count'
+            ? { wrap: 'inv-count-camera-wrap', hint: 'inv-count-camera-hint', video: 'inv-count-video',
+                flash: 'inv-count-camera-flash', label: 'inv-count-camera-label', host: 'inv-count-html5-host' }
+            : { wrap: 'inv-camera-wrap', hint: 'inv-camera-hint', video: 'inv-video',
+                flash: 'inv-camera-flash', label: 'inv-camera-label', host: 'inv-html5-host' };
+    }
+
+    RAI.toggleCamera = async function (target) {
         // This is a direct tap, so it's the only moment iOS Safari will
         // cooperate on two things that only ever bite on a phone: a text
         // input's on-screen keyboard eating the whole camera view, and
@@ -888,13 +923,15 @@
         }
         RAI.unlockAudio();
         if (inv.camera.on) { RAI.stopCamera(); return; }
+        inv.camera.target = target === 'count' ? 'count' : 'scan';
         await RAI.startCamera();
     }
 
     RAI.startCamera = async function () {
-        const wrap = document.getElementById('inv-camera-wrap');
-        const hint = document.getElementById('inv-camera-hint');
-        const video = document.getElementById('inv-video');
+        const ids = RAI.cameraIds(inv.camera.target);
+        const wrap = document.getElementById(ids.wrap);
+        const hint = document.getElementById(ids.hint);
+        const video = document.getElementById(ids.video);
         if (!wrap || !video) return;
 
         if (!window.isSecureContext) {
@@ -952,13 +989,16 @@
     }
 
     RAI.detectLoop = async function () {
-        const video = document.getElementById('inv-video');
+        const video = document.getElementById(RAI.cameraIds(inv.camera.target).video);
         if (!inv.camera.on || !inv.camera.detector || !video) return;
         try {
             const found = await inv.camera.detector.detect(video);
+            // Re-check after the await: a frame decoded just as Stop was
+            // tapped must not be submitted, and must not schedule another.
+            if (!inv.camera.on) return;
             if (found && found.length) RAI.onCameraCode(found[0].rawValue);
         } catch (e) { /* a dropped frame is not an error worth surfacing */ }
-        inv.camera.raf = requestAnimationFrame(RAI.detectLoop);
+        if (inv.camera.on) inv.camera.raf = requestAnimationFrame(RAI.detectLoop);
     }
 
     RAI.startHtml5Fallback = async function (hint) {
@@ -972,17 +1012,18 @@
         // The library manages its own video element, so hand the stream back.
         RAI.stopStreamOnly();
 
-        let host = document.getElementById('inv-html5-host');
+        const ids = RAI.cameraIds(inv.camera.target);
+        let host = document.getElementById(ids.host);
         if (!host) {
             host = document.createElement('div');
-            host.id = 'inv-html5-host';
+            host.id = ids.host;
             host.className = 'max-w-md mx-auto';
-            document.getElementById('inv-camera-wrap').prepend(host);
+            document.getElementById(ids.wrap).prepend(host);
         }
         host.classList.remove('hidden');
-        document.getElementById('inv-video').classList.add('hidden');
+        document.getElementById(ids.video).classList.add('hidden');
 
-        inv.camera.html5 = new window.Html5Qrcode('inv-html5-host', { verbose: false });
+        inv.camera.html5 = new window.Html5Qrcode(ids.host, { verbose: false });
         // A UPC/EAN barcode is thin bars, not a QR code's error-corrected
         // blocks -- the decoder needs real pixel detail on those bars to
         // read them, and a browser's default (often 640x480-ish) camera
@@ -1045,7 +1086,10 @@
         });
     }
 
-    /** Debounce repeated frames of the same barcode into one scan. */
+    /** Debounce repeated frames of the same barcode into one scan, then hand
+     *  it to whichever screen's own scan handler opened this camera --
+     *  countScan's "enter the quantity first" flow if it was the Count tab,
+     *  submitScan's use/receive basket otherwise. */
     RAI.onCameraCode = function (code) {
         const now = Date.now();
         if (code === inv.camera.lastCode && now - inv.camera.lastAt < 2500) return;
@@ -1058,12 +1102,12 @@
         // around), so an iPhone gets no haptic buzz here whatever this
         // does — the beep and the flash are what carry "got it" there.
         if (navigator.vibrate) navigator.vibrate(40);
-        RAI.submitScan(code);
+        if (inv.camera.target === 'count') RAI.countScan(code); else RAI.submitScan(code);
     }
 
     /** A quick white flash over the video, so a capture is obvious even with the sound off. */
     RAI.flashCameraBox = function () {
-        const flash = document.getElementById('inv-camera-flash');
+        const flash = document.getElementById(RAI.cameraIds(inv.camera.target).flash);
         if (!flash) return;
         flash.classList.remove('inv-capture-flash');
         void flash.offsetWidth; // restart the animation on back-to-back scans
@@ -1076,7 +1120,7 @@
             inv.camera.stream.getTracks().forEach(t => t.stop());
             inv.camera.stream = null;
         }
-        const video = document.getElementById('inv-video');
+        const video = document.getElementById(RAI.cameraIds(inv.camera.target).video);
         if (video) video.srcObject = null;
     }
 
@@ -1089,18 +1133,19 @@
                 inv.camera.html5 = null;
             });
         }
-        const host = document.getElementById('inv-html5-host');
+        const ids = RAI.cameraIds(inv.camera.target);
+        const host = document.getElementById(ids.host);
         if (host) host.classList.add('hidden');
-        const video = document.getElementById('inv-video');
+        const video = document.getElementById(ids.video);
         if (video) video.classList.remove('hidden');
-        const wrap = document.getElementById('inv-camera-wrap');
+        const wrap = document.getElementById(ids.wrap);
         if (wrap) wrap.classList.add('hidden');
         inv.camera.on = false;
         RAI.setCameraLabel('Camera');
     }
 
     RAI.setCameraLabel = function (text) {
-        const el = document.getElementById('inv-camera-label');
+        const el = document.getElementById(RAI.cameraIds(inv.camera.target).label);
         if (el) el.textContent = text;
     }
 
