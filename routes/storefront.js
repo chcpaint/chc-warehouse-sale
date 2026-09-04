@@ -4,6 +4,7 @@ const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
 const { sendOrderNotification } = require('../utils/email');
 const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
+const { taxSettings, computeTax } = require('../utils/tax');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
 
@@ -486,7 +487,14 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         // a separate count would be a second source of truth able to disagree
         // with the lines beneath it. Derived where it is needed instead.
         const quotedItems = verifiedItems.filter(i => i.price_on_request);
-        const total = subtotal; // Tax can be added here if needed
+
+        // Tax is computed on the priced subtotal only — a price-on-request line
+        // has no price yet, so it cannot be taxed yet either. poCompany.settings
+        // was already fetched above for the PO decision; reusing it here avoids
+        // a second read of the same row for the same request.
+        const resolvedTax = taxSettings(poCompany?.settings);
+        const tax = computeTax(subtotal, resolvedTax.rate);
+        const total = subtotal + tax;
 
         // ------------------------------------------------------------------
         // Allocate the PO number LAST, immediately before the insert.
@@ -542,6 +550,8 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 placed_by_user_id: req.companyUser ? req.companyUser.id : null,
                 items: verifiedItems,
                 subtotal,
+                tax,
+                tax_rate: resolvedTax.rate,
                 total,
                 notes: stripHtml(notes || ''),
                 status: 'pending',
@@ -638,6 +648,9 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 // accounts department will be asked for it later.
                 po_number: order.po_number,
                 po_source: order.po_source,
+                subtotal: order.subtotal,
+                tax: order.tax,
+                tax_rate: order.tax_rate,
                 total: order.total,
                 status: order.status,
                 created_at: order.created_at
@@ -658,7 +671,7 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const { data: orders, error } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, contact_email, total, status, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
+            .select('id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, total, status, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -686,7 +699,7 @@ router.get('/:slug/reports/orders', requireCompanyAuth, async (req, res) => {
         const { location_id, from, to } = req.query;
         let q = supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, po_number, status, total, location, location_id, created_at, items')
+            .select('id, order_number, contact_name, po_number, status, subtotal, tax, tax_rate, total, location, location_id, created_at, items')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(5000);
@@ -856,6 +869,27 @@ router.get('/:slug/po/config', requireCompanyAuth, async (req, res) => {
     } catch (err) {
         console.error('PO config error:', err);
         res.status(500).json({ error: 'Failed to load purchase order settings.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/tax/config
+ *
+ * The rate the cart should preview before checkout. The order route always
+ * recomputes this itself at submit time from the same company settings — this
+ * endpoint exists only so the cart total on screen doesn't disagree with what
+ * the order will actually be charged.
+ */
+router.get('/:slug/tax/config', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: company } = await supabaseAdmin
+            .from('companies').select('settings').eq('id', req.company.id).maybeSingle();
+
+        const settings = taxSettings(company?.settings);
+        res.json(settings);
+    } catch (err) {
+        console.error('Tax config error:', err);
+        res.status(500).json({ error: 'Failed to load tax settings.' });
     }
 });
 

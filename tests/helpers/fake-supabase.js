@@ -35,7 +35,7 @@ const KNOWN_COLUMNS = {
     // migration adds a column, add it here in the same change.
     orders: new Set([
         'id', 'company_id', 'order_number', 'contact_name', 'contact_email', 'contact_phone',
-        'company_name', 'location', 'items', 'subtotal', 'tax', 'total',
+        'company_name', 'location', 'items', 'subtotal', 'tax', 'tax_rate', 'total',
         'notes', 'status', 'status_history', 'created_at', 'updated_at',
         'po_number', 'location_id',
         'payment_status', 'payment_provider', 'payment_intent_id', 'amount_paid', 'paid_at',
