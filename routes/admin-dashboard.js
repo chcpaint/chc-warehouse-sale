@@ -196,11 +196,60 @@ router.get('/', async (req, res) => {
         // that owns the number, not only in the query.
         const saleOrders = orders.filter(o => !NON_SALE_STATUSES.includes(String(o.status)));
 
-        const products = new Map();   // sku -> { sku, name, units, dollars, companies:Set }
+        // Parse every order's line array once, up front, so the same parsed
+        // lines are used both to look up master identities below and to fold
+        // the totals afterwards — parsing twice risked the two disagreeing on
+        // a malformed row.
+        const parsedLines = saleOrders.map(o => {
+            let lines = o.items;
+            if (typeof lines === 'string') { try { lines = JSON.parse(lines); } catch { lines = []; } }
+            if (!Array.isArray(lines)) lines = [];
+            return { order: o, lines };
+        });
+
+        // ---------------------------------------------------------------
+        // Master identity for cross-shop product ranking.
+        //
+        // Two shops can sell the same part under different SKUs — their own
+        // catalogue's number, not CHC's — so grouping "top products" by the
+        // SKU on the order line, as this used to, quietly split one part
+        // into several rows. v_product_master resolves each shop's product
+        // to CHC's item_library entry by exact SKU or an approved alias;
+        // where that resolution is confident, group by the master SKU
+        // instead so the same part groups across customers. Anything not
+        // confidently resolved keeps grouping by the shop's own SKU exactly
+        // as before — reported under its own name rather than merged into
+        // a master identity we are not sure of.
+        // ---------------------------------------------------------------
+        const lineProductIds = new Set();
+        for (const { lines } of parsedLines) {
+            for (const line of lines) {
+                if (isValidUUID(line.product_id)) lineProductIds.add(line.product_id);
+            }
+        }
+
+        const masterByProductId = new Map(); // product_id -> { sku, name }
+        if (lineProductIds.size) {
+            const ids = [...lineProductIds];
+            const CHUNK = 500; // stay well under a PostgREST .in() URL length limit
+            for (let i = 0; i < ids.length; i += CHUNK) {
+                const { rows } = await readAll(() => supabaseAdmin
+                    .from('v_product_master')
+                    .select('product_id, master_sku, master_name, match_type')
+                    .in('product_id', ids.slice(i, i + CHUNK)));
+                for (const r of rows) {
+                    if ((r.match_type === 'exact' || r.match_type === 'alias') && r.master_sku) {
+                        masterByProductId.set(r.product_id, { sku: r.master_sku, name: r.master_name });
+                    }
+                }
+            }
+        }
+
+        const products = new Map();   // grouping key -> { sku, name, units, dollars, companies:Set, is_master }
         const monthly = new Map();    // YYYY-MM -> { month, sales, orders }
         let salesTotal = 0, unpricedLines = 0, unitsOrdered = 0;
 
-        for (const o of saleOrders) {
+        for (const { order: o, lines } of parsedLines) {
             const b = forCompany(o.company_id);
             const total = num(o.total);
             b.sales_total += total;
@@ -215,15 +264,17 @@ router.get('/', async (req, res) => {
                 monthly.set(monthKey, mrow);
             }
 
-            // items is JSONB. It has been text in older rows, so parse
-            // defensively rather than trusting the column's type.
-            let lines = o.items;
-            if (typeof lines === 'string') { try { lines = JSON.parse(lines); } catch { lines = []; } }
-            if (!Array.isArray(lines)) lines = [];
-
             for (const line of lines) {
                 const qty = num(line.quantity);
-                const sku = String(line.sku || line.product_id || '').trim() || '(no sku)';
+                const ownSku = String(line.sku || line.product_id || '').trim() || '(no sku)';
+                // Group by CHC's master SKU when this line resolves to one
+                // with confidence; otherwise fall back to the shop's own SKU,
+                // exactly as before master resolution existed.
+                const master = masterByProductId.get(line.product_id);
+                const key = master ? `master:${master.sku}` : `shop:${ownSku}`;
+                const displaySku = master ? master.sku : ownSku;
+                const displayName = master ? (master.name || line.name || ownSku) : (line.name || ownSku);
+
                 // A quoted line carries a null unit price on purpose. It has
                 // real units and no dollars, and it is counted as such.
                 const priced = line.unit_price !== null && line.unit_price !== undefined && !line.price_on_request;
@@ -233,12 +284,12 @@ router.get('/', async (req, res) => {
                 unitsOrdered += qty;
                 b.units_ordered += qty;
 
-                const p = products.get(sku) || { sku, name: line.name || sku, units: 0, dollars: 0, companies: new Set() };
+                const p = products.get(key)
+                    || { sku: displaySku, name: displayName, units: 0, dollars: 0, companies: new Set(), is_master: !!master };
                 p.units += qty;
                 p.dollars += dollars;
                 p.companies.add(o.company_id);
-                if (!p.name && line.name) p.name = line.name;
-                products.set(sku, p);
+                products.set(key, p);
             }
         }
 
@@ -338,7 +389,12 @@ router.get('/', async (req, res) => {
         const productRows = [...products.values()].map(p => ({
             sku: p.sku, name: p.name,
             units: round2(p.units), dollars: round2(p.dollars),
-            company_count: p.companies.size
+            company_count: p.companies.size,
+            // True when this row is CHC's master item and may represent more
+            // than one shop's own SKU for the same part; false means it is
+            // one shop's SKU, reported as-is because it did not confidently
+            // resolve to a master item.
+            grouped_by_master: p.is_master
         }));
 
         const inventoryValue = companyRows.reduce((s, c) => s + c.inventory_value, 0);

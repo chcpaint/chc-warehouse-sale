@@ -347,10 +347,26 @@ router.get('/:kitId/mapping', async (req, res) => {
 
         const unmapped = lines.filter(l => !l.mapped_product && !l.is_excluded).length;
 
+        // What this company would actually be billed for the kit, using each
+        // line's effective_unit_price (its override when set, else its own
+        // catalogue price — see resolveKitLines in routes/inventory-kits.js,
+        // which this mirrors). Excluded lines never contribute. Mirroring the
+        // reference-total convention elsewhere in these kit screens: a total
+        // that leaves out an unresolved or unpriced line is worse than no
+        // total at all, so it is null rather than quietly partial.
+        const billable = lines.filter(l => !l.is_excluded);
+        const unpricedCount = billable.filter(l => l.mapped_product && !(Number(l.effective_unit_price) > 0)).length;
+        const complete = unmapped === 0 && unpricedCount === 0 && billable.length > 0;
+        const total = complete
+            ? Number(billable.reduce((s, l) => s + l.effective_unit_price * l.effective_quantity, 0).toFixed(4))
+            : null;
+
         res.json({
             kit: { id: kit.id, name: kit.name, description: kit.description, source: kit.source, is_master: kit.company_id === null },
             lines,
             unmapped,
+            unpriced_count: unpricedCount,
+            total,
             ready: unmapped === 0 && lines.some(l => l.mapped_product)
         });
     } catch (err) {

@@ -604,10 +604,11 @@
                                 </div>
 
                                 <div class="bg-white rounded-xl shadow-sm border p-5">
-                                    <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center justify-between mb-1">
                                         <h3 class="font-semibold text-gray-800">Lines</h3>
                                         <button onclick="ktToggleAddLine()" class="text-sm text-blue-600 hover:text-blue-800 font-semibold"><i class="fas fa-plus mr-1"></i>Add line</button>
                                     </div>
+                                    <p id="kt-lines-total" class="text-xs text-gray-500 mb-3"></p>
                                     <div id="kt-add-line-form" class="hidden bg-gray-50 border rounded-lg p-3 mb-3 flex flex-wrap items-end gap-3">
                                         <div>
                                             <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">SKU</label>
@@ -620,6 +621,10 @@
                                         <div>
                                             <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Unit</label>
                                             <input id="kt-add-line-unit" value="each" class="border rounded-lg px-3 py-2 text-sm w-24">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Reference price</label>
+                                            <input id="kt-add-line-price" type="number" step="0.01" min="0" placeholder="optional" class="border rounded-lg px-3 py-2 text-sm w-28">
                                         </div>
                                         <button onclick="ktAddLine()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Add</button>
                                     </div>
@@ -1371,6 +1376,7 @@
                     Suggestions are ranked, never applied on their own — matching a line to the wrong
                     product would expense the wrong material and mis-cost every job that uses the kit.
                 </p>
+                <p id="kit-mapping-total" class="text-sm font-semibold text-gray-700 mb-3"></p>
                 <div id="kit-mapping-lines" class="space-y-2"></div>
             </div>
         </div>
@@ -3306,7 +3312,7 @@
     // ============================================================
 
     let kitsCompanyId = null;
-    let kitMappingState = { kitId: null, lines: [] };
+    let kitMappingState = { kitId: null, lines: [], total: null, unpriced_count: 0 };
 
     async function openKitsModal(companyId, companyName) {
         kitsCompanyId = companyId;
@@ -3378,7 +3384,7 @@
     }
 
     function closeKitMapping() {
-        kitMappingState = { kitId: null, lines: [] };
+        kitMappingState = { kitId: null, lines: [], total: null, unpriced_count: 0 };
         document.getElementById('kit-mapping')?.classList.add('hidden');
     }
 
@@ -3394,6 +3400,8 @@
             if (!resp.ok) throw new Error(data.error || 'Failed to load the mapping.');
 
             kitMappingState.lines = data.lines || [];
+            kitMappingState.total = data.total !== undefined ? data.total : null;
+            kitMappingState.unpriced_count = data.unpriced_count || 0;
             renderKitMapping();
             document.getElementById('kit-mapping').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } catch (err) {
@@ -3403,6 +3411,16 @@
     }
 
     function renderKitMapping() {
+        const totalEl = document.getElementById('kit-mapping-total');
+        if (totalEl) {
+            if (kitMappingState.total !== null && kitMappingState.total !== undefined) {
+                totalEl.textContent = `Kit total for this shop: $${Number(kitMappingState.total).toFixed(2)}`;
+            } else if (kitMappingState.unpriced_count > 0) {
+                totalEl.textContent = `${kitMappingState.unpriced_count} line${kitMappingState.unpriced_count === 1 ? '' : 's'} still unmapped or unpriced — total will show once every line bills at a price.`;
+            } else {
+                totalEl.textContent = '';
+            }
+        }
         const host = document.getElementById('kit-mapping-lines');
         host.innerHTML = kitMappingState.lines.map(line => {
             const resolved = !!line.mapped_product;
@@ -3457,26 +3475,25 @@
      * recorded, per the "configure per customer, add pricing" ask.
      */
     function renderKitLineAltPrice(line) {
-        if (!line.alternatives || line.alternatives.length === 0) {
-            return line.mapped_product
-                ? `<p class="mt-2 text-xs text-gray-400">No brand alternatives curated for this line yet — see the Kits tab.</p>`
-                : '';
-        }
+        if (!line.mapped_product) return '';
+
+        const hasAlternatives = line.alternatives && line.alternatives.length > 0;
         const chosenId = line.chosen_alternative?.id || '';
-        const options = line.alternatives.map(a => {
+        const options = hasAlternatives ? line.alternatives.map(a => {
             const label = `${a.brand} ${a.brand_part_number}${a.brand_name ? ' — ' + a.brand_name : ''}`;
             return `<option value="${a.id}" ${a.id === chosenId ? 'selected' : ''}>${esc(label)}</option>`;
-        }).join('');
+        }).join('') : '';
 
         return `
         <div class="mt-3 pt-3 border-t flex flex-wrap items-end gap-3">
+            ${hasAlternatives ? `
             <div>
                 <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Brand this shop uses</label>
                 <select id="kit-alt-select-${line.kit_item_id}" class="border rounded-lg px-3 py-2 text-sm bg-white min-w-[220px]">
                     <option value="">Fusor (as listed)</option>
                     ${options}
                 </select>
-            </div>
+            </div>` : '<p class="text-xs text-gray-400">No brand alternatives curated for this line yet — see the Kits tab.</p>'}
             <div>
                 <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Price they pay</label>
                 <input id="kit-price-input-${line.kit_item_id}" type="number" step="0.01" min="0"
@@ -3492,7 +3509,8 @@
     async function saveKitAltPrice(kitItemId) {
         const line = kitMappingState.lines.find(l => l.kit_item_id === kitItemId);
         if (!line) return;
-        const altVal = document.getElementById(`kit-alt-select-${kitItemId}`).value;
+        const altSelect = document.getElementById(`kit-alt-select-${kitItemId}`);
+        const altVal = altSelect ? altSelect.value : (line.chosen_alternative?.id || '');
         const priceVal = document.getElementById(`kit-price-input-${kitItemId}`).value;
 
         // Send the line's existing product/quantity along with the new fields —
@@ -3724,7 +3742,23 @@
         }
     }
 
+    /** Reference-price total for the whole kit, shown above the line list. */
+    function ktRenderLinesTotal() {
+        const el = document.getElementById('kt-lines-total');
+        const d = ktState.detail;
+        if (!el || !d) return;
+        if (!d.lines || d.lines.length === 0) { el.textContent = ''; return; }
+        if (d.reference_total !== null && d.reference_total !== undefined) {
+            el.textContent = `Reference total: $${Number(d.reference_total).toFixed(2)} — a second opinion, never billed from.`;
+        } else if (d.unpriced_line_count > 0) {
+            el.textContent = `${d.unpriced_line_count} of ${d.lines.length} line${d.lines.length === 1 ? '' : 's'} still need a reference price for a total.`;
+        } else {
+            el.textContent = '';
+        }
+    }
+
     function ktRenderLines() {
+        ktRenderLinesTotal();
         const host = document.getElementById('kt-lines');
         const lines = ktState.detail?.lines || [];
         if (lines.length === 0) { host.innerHTML = '<p class="text-gray-400 py-3">No lines yet.</p>'; return; }
@@ -3753,8 +3787,16 @@
                         <p class="font-mono text-sm font-semibold text-gray-800">${esc(line.sku)}</p>
                         <p class="text-xs text-gray-500">Quantity ${line.quantity} ${esc(line.unit)}</p>
                     </div>
-                    <button onclick="ktDeleteLine('${line.id}')" class="text-xs text-gray-400 hover:text-red-600">Remove line</button>
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-gray-500">Ref price</label>
+                        <input id="kt-line-price-${line.id}" type="number" step="0.01" min="0"
+                            value="${line.ref_unit_price !== null && line.ref_unit_price !== undefined ? line.ref_unit_price : ''}"
+                            placeholder="none" class="border rounded-lg px-2 py-1 text-sm w-24">
+                        <button onclick="ktSaveLinePrice('${line.id}')" class="text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-2 py-1 font-semibold">Save</button>
+                        <button onclick="ktDeleteLine('${line.id}')" class="text-xs text-gray-400 hover:text-red-600">Remove line</button>
+                    </div>
                 </div>
+                ${line.ref_line_total !== null && line.ref_line_total !== undefined ? `<p class="mt-1 text-xs text-gray-500">Line total: ${Number(line.ref_line_total).toFixed(2)}</p>` : ''}
                 ${altChips ? `<div class="mt-2 flex flex-wrap gap-2">${altChips}</div>` : ''}
                 ${!altChips && suggestions ? `<div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">${suggestions}</div>` : ''}
                 ${!altChips && !suggestions ? '<p class="mt-2 text-xs text-gray-500">Nothing in the crossover reference sheet looks like this part number yet.</p>' : ''}
@@ -3831,21 +3873,41 @@
         const sku = document.getElementById('kt-add-line-sku').value.trim();
         const quantity = document.getElementById('kt-add-line-qty').value;
         const unit = document.getElementById('kt-add-line-unit').value.trim() || 'each';
+        const priceRaw = document.getElementById('kt-add-line-price').value;
         if (!sku) { alert('A SKU is required.'); return; }
+        const body = { sku, quantity, unit };
+        if (priceRaw !== '') body.ref_unit_price = priceRaw;
         try {
             const resp = await adminFetch(`/kits/${ktState.selectedKitId}/lines`, {
-                method: 'POST', body: JSON.stringify({ sku, quantity, unit })
+                method: 'POST', body: JSON.stringify(body)
             });
             const data = await resp.json();
             if (!resp.ok) { alert(data.error || 'Failed to add that line.'); return; }
             document.getElementById('kt-add-line-sku').value = '';
             document.getElementById('kt-add-line-qty').value = '1';
             document.getElementById('kt-add-line-unit').value = 'each';
+            document.getElementById('kt-add-line-price').value = '';
             ktToggleAddLine();
             await ktSelectKit(ktState.selectedKitId);
             await ktLoadKits();
         } catch (err) {
             alert('Failed to add that line.');
+        }
+    }
+
+    async function ktSaveLinePrice(lineId) {
+        const input = document.getElementById(`kt-line-price-${lineId}`);
+        const raw = input.value.trim();
+        try {
+            const resp = await adminFetch(`/kits/${ktState.selectedKitId}/lines/${lineId}`, {
+                method: 'PUT', body: JSON.stringify({ ref_unit_price: raw === '' ? null : raw })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to save that price.'); return; }
+            await ktSelectKit(ktState.selectedKitId);
+            await ktLoadKits();
+        } catch (err) {
+            alert('Failed to save that price.');
         }
     }
 

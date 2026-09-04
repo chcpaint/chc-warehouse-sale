@@ -581,6 +581,133 @@ test('the consumption summary shapes an empty period without failing', async () 
     assert.deepEqual(res.body.series, []);
 });
 
+// ---------- benchmark (anonymous cross-shop usage & pricing) ----------
+
+const ME       = COMPANY_ID;
+const PEER_A   = 'cccccca1-1111-4111-8111-111111111111';
+const PEER_B   = 'cccccca2-2222-4222-8222-222222222222';
+const PEER_C   = 'cccccca3-3333-4333-8333-333333333333';
+const PEER_D   = 'cccccca4-4444-4444-8444-444444444444'; // inactive company
+const PROD_ME  = 'ddddddd0-0000-4000-8000-000000000000';
+const PROD_A   = 'ddddddd1-1111-4111-8111-111111111111';
+const PROD_B   = 'ddddddd2-2222-4222-8222-222222222222';
+const PROD_C   = 'ddddddd3-3333-4333-8333-333333333333';
+const PROD_D   = 'ddddddd4-4444-4444-8444-444444444444';
+
+/**
+ * Seeds ME plus a configurable set of peer companies, each holding the same
+ * physical part under its own SKU (resolved to one master identity via
+ * v_product_master), each with its own consumption row for the period.
+ */
+function seedBenchmark({ peers = [], myUsage = null } = {}) {
+    const companies = [
+        { id: ME, name: 'Assured Collision', slug: 'assured', is_active: true, settings: { inventory: { enabled: true } } },
+        ...peers.map(p => ({ id: p.id, name: `Peer ${p.id}`, slug: p.id, is_active: p.is_active !== false, settings: {} }))
+    ];
+    const consumption = [];
+    if (myUsage) consumption.push({ company_id: ME, product_id: PROD_ME, units_used: myUsage.units, value_used: myUsage.value, day: RECENT_DAY });
+    for (const p of peers) {
+        consumption.push({ company_id: p.id, product_id: p.product_id, units_used: p.units, value_used: p.value, day: RECENT_DAY });
+    }
+    const master = [
+        { product_id: PROD_ME, master_sku: 'CHC-8001', master_name: 'Test Basecoat', match_type: 'exact' },
+        ...peers.map(p => ({ product_id: p.product_id, master_sku: 'CHC-8001', master_name: 'Test Basecoat', match_type: 'alias' }))
+    ];
+    fake = createFakeSupabase({
+        companies,
+        company_locations: [{ id: LOC_A, company_id: ME, name: 'Burlington', is_active: true }],
+        inventory_consumption_daily: consumption,
+        v_product_master: master
+    });
+    authCompany = { id: ME, name: 'Assured Collision', slug: 'assured' };
+}
+const RECENT_DAY = new Date().toISOString().slice(0, 10);
+
+test('a part bought by fewer than three other shops is never benchmarked', async () => {
+    seedBenchmark({
+        myUsage: { units: 10, value: 1000 },
+        peers: [
+            { id: PEER_A, product_id: PROD_A, units: 20, value: 1800 },
+            { id: PEER_B, product_id: PROD_B, units: 30, value: 2700 }
+        ]
+    });
+    const res = await request(app()).get(`${S}/analytics/benchmark?period=all`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.items.length, 0, 'two peers is below the floor — nothing should be reported');
+});
+
+test('a part bought by at least three other shops reports an anonymous average', async () => {
+    seedBenchmark({
+        myUsage: { units: 10, value: 1000 },   // $100/unit
+        peers: [
+            { id: PEER_A, product_id: PROD_A, units: 20, value: 1800 },  // $90/unit
+            { id: PEER_B, product_id: PROD_B, units: 30, value: 2700 },  // $90/unit
+            { id: PEER_C, product_id: PROD_C, units: 10, value: 1200 }   // $120/unit
+        ]
+    });
+    const res = await request(app()).get(`${S}/analytics/benchmark?period=all`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.min_peer_companies, 3);
+
+    const item = res.body.items.find(i => i.sku === 'CHC-8001');
+    assert.ok(item, 'three shops sharing one master part must be reported');
+    assert.equal(item.peer_company_count, 3);
+    assert.equal(item.your_units, 10);
+    assert.equal(item.your_avg_price, 100);
+    // Average of each peer's own average price: (90 + 90 + 120) / 3 = 100.
+    assert.equal(item.peer_avg_price, 100);
+    // Average of peer units: (20 + 30 + 10) / 3 = 20.
+    assert.equal(item.peer_avg_units, 20);
+    assert.equal(item.price_vs_peer_pct, 0);
+
+    // Nothing identifying any one peer should ever reach the response.
+    const raw = JSON.stringify(res.body);
+    assert.ok(!raw.includes(PEER_A) && !raw.includes(PEER_B) && !raw.includes(PEER_C),
+        'no peer company id may appear in a benchmark response');
+});
+
+test('a shop that has never bought the part still sees the peer benchmark', async () => {
+    seedBenchmark({
+        myUsage: null,
+        peers: [
+            { id: PEER_A, product_id: PROD_A, units: 20, value: 1800 },
+            { id: PEER_B, product_id: PROD_B, units: 30, value: 2700 },
+            { id: PEER_C, product_id: PROD_C, units: 10, value: 1200 }
+        ]
+    });
+    const res = await request(app()).get(`${S}/analytics/benchmark?period=all`);
+    const item = res.body.items.find(i => i.sku === 'CHC-8001');
+    assert.ok(item);
+    assert.equal(item.your_units, 0);
+    assert.equal(item.your_avg_price, null, 'no purchase history means no price of our own to compare');
+    assert.equal(item.peer_avg_price, 100);
+});
+
+test('an inactive peer counts toward neither the floor nor the average', async () => {
+    seedBenchmark({
+        myUsage: { units: 10, value: 1000 },
+        peers: [
+            { id: PEER_A, product_id: PROD_A, units: 20, value: 1800 },
+            { id: PEER_B, product_id: PROD_B, units: 30, value: 2700 },
+            { id: PEER_D, product_id: PROD_D, units: 999, value: 1, is_active: false } // wild outlier, but closed
+        ]
+    });
+    const res = await request(app()).get(`${S}/analytics/benchmark?period=all`);
+    // Only two ACTIVE peers remain, which is below the floor.
+    assert.equal(res.body.items.length, 0);
+});
+
+test('benchmark is behind the same feature gate as the rest of inventory', async () => {
+    seedBenchmark({ myUsage: { units: 1, value: 100 }, peers: [
+        { id: PEER_A, product_id: PROD_A, units: 1, value: 100 },
+        { id: PEER_B, product_id: PROD_B, units: 1, value: 100 },
+        { id: PEER_C, product_id: PROD_C, units: 1, value: 100 }
+    ] });
+    fake.db.companies.find(c => c.id === ME).settings = {}; // inventory not enabled
+    const res = await request(app()).get(`${S}/analytics/benchmark?period=all`);
+    assert.equal(res.status, 403);
+});
+
 // ==================================================================
 // INTERNAL LABEL CODES
 // ==================================================================

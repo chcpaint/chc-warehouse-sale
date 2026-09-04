@@ -172,7 +172,7 @@ router.get('/:kitId', async (req, res) => {
 
         const { data: items } = await supabaseAdmin
             .from('kit_items')
-            .select('id, sku, product_id, quantity, unit, sort_order, needs_review')
+            .select('id, sku, product_id, quantity, unit, sort_order, needs_review, ref_unit_price, ref_line_total, ref_source')
             .eq('kit_id', kit.id)
             .order('sort_order', { ascending: true });
 
@@ -199,21 +199,48 @@ router.get('/:kitId', async (req, res) => {
             referenceRows = data || [];
         }
 
-        const lines = kitItems.map(item => ({
-            id: item.id,
-            sku: item.sku,
-            product_id: item.product_id,
-            quantity: Number(item.quantity),
-            unit: item.unit || 'each',
-            sort_order: item.sort_order,
-            needs_review: item.needs_review === true,
-            alternatives: altByItem.get(item.id) || [],
-            suggested_alternatives: (altByItem.get(item.id) || []).length === 0
-                ? suggestCrossoverAlternatives(item.sku, referenceRows)
-                : []
-        }));
+        const lines = kitItems.map(item => {
+            const refUnitPrice = item.ref_unit_price === null || item.ref_unit_price === undefined
+                ? null : Number(item.ref_unit_price);
+            // ref_line_total is stored as its own column (Skyline shows a
+            // separate extended price per line, and the two can legitimately
+            // round differently), but a manually-entered reference price has
+            // no independent extended figure — quantity x price is exactly
+            // what that column would say, so fall back to computing it.
+            const refLineTotal = item.ref_line_total !== null && item.ref_line_total !== undefined
+                ? Number(item.ref_line_total)
+                : (refUnitPrice !== null ? Number((Number(item.quantity) * refUnitPrice).toFixed(4)) : null);
 
-        res.json({ kit: { ...kit, is_master: kit.company_id === null }, lines });
+            return {
+                id: item.id,
+                sku: item.sku,
+                product_id: item.product_id,
+                quantity: Number(item.quantity),
+                unit: item.unit || 'each',
+                sort_order: item.sort_order,
+                needs_review: item.needs_review === true,
+                alternatives: altByItem.get(item.id) || [],
+                suggested_alternatives: (altByItem.get(item.id) || []).length === 0
+                    ? suggestCrossoverAlternatives(item.sku, referenceRows)
+                    : [],
+                // Reference-only figures — see migration 027. Never used to bill;
+                // a second opinion so a total that has drifted is visible here,
+                // at the source, rather than only downstream on a job.
+                ref_unit_price: refUnitPrice,
+                ref_line_total: refLineTotal,
+                ref_source: item.ref_source || null
+            };
+        });
+
+        const pricedLines = lines.filter(l => l.ref_line_total !== null);
+        res.json({
+            kit: { ...kit, is_master: kit.company_id === null },
+            lines,
+            reference_total: pricedLines.length === lines.length && lines.length > 0
+                ? Number(pricedLines.reduce((s, l) => s + l.ref_line_total, 0).toFixed(4))
+                : null,
+            unpriced_line_count: lines.length - pricedLines.length
+        });
     } catch (err) {
         console.error('Master kit detail error:', err);
         res.status(500).json({ error: 'Failed to load that kit.' });
@@ -302,10 +329,21 @@ router.post('/:kitId/lines', async (req, res) => {
             .order('sort_order', { ascending: false }).limit(1);
         const nextSort = ((existing || [])[0]?.sort_order || 0) + 1;
 
+        const insert = { kit_id: kit.id, sku, quantity, unit: text(req.body?.unit, 20) || 'each', sort_order: nextSort, needs_review: false };
+        if (req.body?.ref_unit_price !== undefined && req.body?.ref_unit_price !== null && req.body?.ref_unit_price !== '') {
+            const refPrice = Number(req.body.ref_unit_price);
+            if (!Number.isFinite(refPrice) || refPrice < 0) {
+                return res.status(400).json({ error: 'Reference price must be zero or a positive number.' });
+            }
+            insert.ref_unit_price = refPrice;
+            insert.ref_line_total = Number((quantity * refPrice).toFixed(4));
+            insert.ref_source = 'manual';
+        }
+
         const { data: line, error } = await supabaseAdmin
             .from('kit_items')
-            .insert({ kit_id: kit.id, sku, quantity, unit: text(req.body?.unit, 20) || 'each', sort_order: nextSort, needs_review: false })
-            .select('id, sku, quantity, unit, sort_order').single();
+            .insert(insert)
+            .select('id, sku, quantity, unit, sort_order, ref_unit_price, ref_line_total, ref_source').single();
         if (error) throw error;
 
         await logAction(req.admin.id, 'master_kit_line_added', 'kit', kit.id, { kit: kit.name, sku }, req.ip);
@@ -316,14 +354,14 @@ router.post('/:kitId/lines', async (req, res) => {
     }
 });
 
-/** PUT /kits/:kitId/lines/:lineId   Body: { sku, quantity, unit, needs_review } */
+/** PUT /kits/:kitId/lines/:lineId   Body: { sku, quantity, unit, needs_review, ref_unit_price } */
 router.put('/:kitId/lines/:lineId', async (req, res) => {
     try {
         const { kitId, lineId } = req.params;
         if (!isValidUUID(lineId)) return res.status(400).json({ error: 'Invalid line id.' });
 
         const { data: existingLine } = await supabaseAdmin
-            .from('kit_items').select('id, kit_id').eq('id', lineId).eq('kit_id', kitId).maybeSingle();
+            .from('kit_items').select('id, kit_id, quantity').eq('id', lineId).eq('kit_id', kitId).maybeSingle();
         if (!existingLine) return res.status(404).json({ error: 'Kit line not found.' });
 
         const patch = {};
@@ -346,9 +384,32 @@ router.put('/:kitId/lines/:lineId', async (req, res) => {
             if (Number.isFinite(sort)) patch.sort_order = sort;
         }
 
+        // A reference price entered here by hand, alongside (or instead of)
+        // whatever Skyline originally supplied. Sending an explicit null
+        // clears it, the same way clearing a mapping's product_id does
+        // elsewhere in these kit screens. quantity x price is recomputed from
+        // whichever quantity is in force after this same patch, so the two
+        // numbers can never disagree.
+        if (req.body?.ref_unit_price !== undefined) {
+            if (req.body.ref_unit_price === null || req.body.ref_unit_price === '') {
+                patch.ref_unit_price = null;
+                patch.ref_line_total = null;
+                patch.ref_source = null;
+            } else {
+                const refPrice = Number(req.body.ref_unit_price);
+                if (!Number.isFinite(refPrice) || refPrice < 0) {
+                    return res.status(400).json({ error: 'Reference price must be zero or a positive number.' });
+                }
+                const effectiveQty = patch.quantity !== undefined ? patch.quantity : Number(existingLine.quantity);
+                patch.ref_unit_price = refPrice;
+                patch.ref_line_total = Number((effectiveQty * refPrice).toFixed(4));
+                patch.ref_source = 'manual';
+            }
+        }
+
         const { data: line, error } = await supabaseAdmin
             .from('kit_items').update(patch).eq('id', lineId)
-            .select('id, sku, quantity, unit, sort_order, needs_review').single();
+            .select('id, sku, quantity, unit, sort_order, needs_review, ref_unit_price, ref_line_total, ref_source').single();
         if (error) throw error;
 
         res.json({ message: 'Line saved.', line });

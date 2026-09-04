@@ -225,6 +225,52 @@ test('a product bought by two customers reports both', async () => {
     assert.equal(clear.company_count, 2);
 });
 
+test('a part sold under different SKUs by two shops collapses into one master row', async () => {
+    // Real order lines carry a genuine products-table UUID as product_id
+    // (see routes/storefront.js), not the SKU string the line() fixture
+    // helper uses above — so this test builds its own orders by hand to
+    // exercise the v_product_master lookup at all.
+    const MASTER_A = 'bbbbbbb1-1111-4111-8111-111111111111';   // Assured's own catalogue entry
+    const MASTER_B = 'bbbbbbb2-2222-4222-8222-222222222222';   // Bayview's own entry, different SKU, same part
+    const UNMATCHED = 'bbbbbbb3-3333-4333-8333-333333333333';  // no confident resolution
+
+    reset({
+        v_product_master: [
+            { product_id: MASTER_A, master_sku: 'CHC-9000', master_name: 'Premium Base Coat', match_type: 'exact' },
+            { product_id: MASTER_B, master_sku: 'CHC-9000', master_name: 'Premium Base Coat', match_type: 'alias' },
+            { product_id: UNMATCHED, master_sku: null, master_name: null, match_type: 'unmatched' }
+        ],
+        orders: [
+            { id: 'mo1', company_id: CO_A, order_number: 'A-MASTER-1', status: 'closed', total: 500, created_at: RECENT,
+              items: [{ product_id: MASTER_A, sku: 'PRF-BASE-A', name: "Assured's Base Coat", quantity: 5, unit_price: 100 }] },
+            { id: 'mo2', company_id: CO_B, order_number: 'B-MASTER-1', status: 'closed', total: 300, created_at: RECENT,
+              items: [{ product_id: MASTER_B, sku: 'BAY-0091', name: "Bayview's Base Coat", quantity: 3, unit_price: 100 }] },
+            { id: 'mo3', company_id: CO_A, order_number: 'A-UNMATCHED-1', status: 'closed', total: 60, created_at: RECENT,
+              items: [{ product_id: UNMATCHED, sku: 'A-HOUSE-1', name: 'Shop-only widget', quantity: 6, unit_price: 10 }] }
+        ]
+    });
+
+    const res = await get('/dashboard?period=this_year');
+    assert.equal(res.status, 200);
+
+    const master = res.body.top_products_by_units.find(p => p.sku === 'CHC-9000');
+    assert.ok(master, "the two shops' lines must collapse into one master-SKU row");
+    assert.equal(master.name, 'Premium Base Coat');
+    assert.equal(master.units, 8, '5 from Assured + 3 from Bayview');
+    assert.equal(master.dollars, 800);
+    assert.equal(master.company_count, 2);
+    assert.equal(master.grouped_by_master, true);
+
+    // Neither shop's own SKU should survive as a separate row once resolved.
+    assert.ok(!res.body.top_products_by_units.find(p => p.sku === 'PRF-BASE-A'));
+    assert.ok(!res.body.top_products_by_units.find(p => p.sku === 'BAY-0091'));
+
+    const unmatched = res.body.top_products_by_units.find(p => p.sku === 'A-HOUSE-1');
+    assert.ok(unmatched, "a line with no confident master match keeps grouping by the shop's own SKU");
+    assert.equal(unmatched.grouped_by_master, false);
+    assert.equal(unmatched.company_count, 1);
+});
+
 // ==================================================================
 // Period handling
 // ==================================================================

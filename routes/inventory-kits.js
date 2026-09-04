@@ -99,7 +99,7 @@ async function resolveKitLines(companyId, kitId) {
 
     const { data: maps } = await supabaseAdmin
         .from('kit_product_map')
-        .select('kit_item_id, product_id, quantity, is_excluded, note')
+        .select('kit_item_id, product_id, quantity, is_excluded, note, unit_price_override')
         .eq('company_id', companyId)
         .in('kit_item_id', kitItems.map(i => i.id));
 
@@ -168,6 +168,15 @@ async function resolveKitLines(companyId, kitId) {
             continue;
         }
 
+        // A company can set what it actually pays for this line
+        // (kit_product_map.unit_price_override) when that differs from its own
+        // catalogue price — e.g. a negotiated rate on a brand alternative. This
+        // is what the "price they pay" field on the admin console's per-company
+        // kit screen saves; missing it here would let an admin believe they had
+        // set a price that silently never affected what got billed.
+        const priceOverride = map?.unit_price_override !== null && map?.unit_price_override !== undefined
+            ? Number(map.unit_price_override) : null;
+
         lines.push({
             kit_item_id: item.id,
             kit_sku: item.sku,
@@ -177,7 +186,9 @@ async function resolveKitLines(companyId, kitId) {
             category: product.category || null,
             unit: item.unit || 'each',
             quantity,
-            unit_price: Number(product.price ?? 0),
+            unit_price: priceOverride !== null ? priceOverride : Number(product.price ?? 0),
+            catalogue_unit_price: Number(product.price ?? 0),
+            price_overridden: priceOverride !== null,
             // The price the source system carries for this line, when one is
             // known. Shown beside the live figure so a total that has drifted is
             // visible before the job is invoiced. Never billed from.
