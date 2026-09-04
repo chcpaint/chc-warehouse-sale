@@ -351,6 +351,65 @@ test('one line without a reference nulls the whole comparison', async () => {
         'a partial reference compared against a full total is worse than none');
 });
 
+test('a per-company price override is billed, not the catalogue price', async () => {
+    // The admin console's per-company kit screen lets a shop record what it
+    // actually pays for a line when that differs from its own catalogue price
+    // (kit_product_map.unit_price_override). This is the number that made
+    // that override actually reach a bill — previously resolveKitLines never
+    // read it at all, so it saved cleanly and then silently did nothing.
+    reset();
+    mapKit();
+    fake.db.kit_product_map.find(m => m.kit_item_id === LINE_CLEAR).unit_price_override = 150;
+
+    const res = await request(storeApp()).get(`${S}/${KIT}/preview?location_id=${LOC}`);
+    assert.equal(res.body.blocked, false);
+    const clear = res.body.lines.find(l => l.product_id === CLEAR);
+    assert.equal(clear.unit_price, 150, 'the override, not the catalogue price of 200');
+    assert.equal(clear.catalogue_unit_price, 200, 'the catalogue price is still reported for comparison');
+    assert.equal(clear.price_overridden, true);
+    // 0.02 x 150 + 0.3 x 10 = 3 + 3
+    assert.equal(res.body.total_cost, 6);
+});
+
+test('a line with no override still bills at the catalogue price', async () => {
+    reset();
+    mapKit();
+    const res = await request(storeApp()).get(`${S}/${KIT}/preview?location_id=${LOC}`);
+    const tape = res.body.lines.find(l => l.product_id === TAPE);
+    assert.equal(tape.unit_price, 10);
+    assert.equal(tape.price_overridden, false);
+});
+
+test('consuming a kit actually bills the overridden price, not the catalogue one', async () => {
+    reset();
+    mapKit();
+    fake.db.kit_product_map.find(m => m.kit_item_id === LINE_CLEAR).unit_price_override = 150;
+
+    const res = await request(storeApp())
+        .post(`${S}/${KIT}/consume`)
+        .send({ location_id: LOC, job_ref: 'RO-9002', actor_label: 'Sam' });
+
+    assert.equal(res.status, 201);
+    // 0.02 x 150 + 0.3 x 10 = 6, not 7 — proving the header total actually
+    // reflects the override rather than recomputing from the catalogue.
+    assert.equal(res.body.consumption.total_cost, 6);
+    assert.equal(fake.db.kit_consumptions.at(-1).total_cost, 6);
+});
+
+test('a zero price override still counts as unpriced and blocks the kit', async () => {
+    // Zero is a real, deliberately-entered override elsewhere in this file
+    // (see the products.price = 0 tests) — the same must hold for an override,
+    // or "enter $0 to mean free" would silently become "this line is unbilled".
+    reset();
+    mapKit();
+    fake.db.kit_product_map.find(m => m.kit_item_id === LINE_CLEAR).unit_price_override = 0;
+
+    const res = await request(storeApp()).get(`${S}/${KIT}/preview?location_id=${LOC}`);
+    assert.equal(res.body.blocked, true);
+    const clear = res.body.lines.find(l => l.product_id === CLEAR);
+    assert.equal(clear.unpriced, true);
+});
+
 test('a category-locked location blocks a kit containing other categories', async () => {
     reset();
     mapKit();
@@ -651,6 +710,58 @@ test('a negative or zero override is refused', async () => {
         const res = await request(adminApp()).put(`${A}/mapping/${LINE_CLEAR}`).send({ product_id: CLEAR, quantity });
         assert.equal(res.status, 400);
     }
+});
+
+// ------------------------------------------------------------------
+// The kit total on the per-company mapping screen — what this ask ("enter
+// or adjust prices per item in kits and the total") is actually about.
+// ------------------------------------------------------------------
+
+test('the mapping total is null while any line is unmapped or unpriced', async () => {
+    reset();
+    // Nothing mapped yet at all.
+    const res = await request(adminApp()).get(`${A}/${KIT}/mapping`);
+    assert.equal(res.body.total, null);
+    assert.equal(res.body.unpriced_count, 0, 'unmapped and unpriced are counted separately');
+});
+
+test('the mapping total sums every resolved line once the kit is fully priced', async () => {
+    reset();
+    await request(adminApp()).put(`${A}/mapping/${LINE_CLEAR}`).send({ product_id: CLEAR });
+    await request(adminApp()).put(`${A}/mapping/${LINE_TAPE}`).send({ product_id: TAPE });
+    await request(adminApp()).put(`${A}/mapping/${LINE_GHOST}`).send({ is_excluded: true });
+
+    const res = await request(adminApp()).get(`${A}/${KIT}/mapping`);
+    assert.equal(res.body.unmapped, 0);
+    assert.equal(res.body.unpriced_count, 0);
+    // 0.02 x 200 + 0.3 x 10 = 4 + 3
+    assert.equal(res.body.total, 7);
+});
+
+test('a per-line price override changes the mapping total', async () => {
+    reset();
+    await request(adminApp()).put(`${A}/mapping/${LINE_CLEAR}`).send({ product_id: CLEAR, unit_price_override: 150 });
+    await request(adminApp()).put(`${A}/mapping/${LINE_TAPE}`).send({ product_id: TAPE });
+    await request(adminApp()).put(`${A}/mapping/${LINE_GHOST}`).send({ is_excluded: true });
+
+    const res = await request(adminApp()).get(`${A}/${KIT}/mapping`);
+    const clear = res.body.lines.find(l => l.kit_sku === 'PRF611N');
+    assert.equal(clear.effective_unit_price, 150);
+    // 0.02 x 150 + 0.3 x 10 = 3 + 3
+    assert.equal(res.body.total, 6);
+});
+
+test('a resolved line whose product has no price counts as unpriced, not unmapped', async () => {
+    reset();
+    fake.db.products.find(p => p.id === CLEAR).price = 0;
+    await request(adminApp()).put(`${A}/mapping/${LINE_CLEAR}`).send({ product_id: CLEAR });
+    await request(adminApp()).put(`${A}/mapping/${LINE_TAPE}`).send({ product_id: TAPE });
+    await request(adminApp()).put(`${A}/mapping/${LINE_GHOST}`).send({ is_excluded: true });
+
+    const res = await request(adminApp()).get(`${A}/${KIT}/mapping`);
+    assert.equal(res.body.unmapped, 0);
+    assert.equal(res.body.unpriced_count, 1);
+    assert.equal(res.body.total, null, 'an unpriced line must not be silently skipped in the sum');
 });
 
 test('bulk mapping saves the good rows and reports the bad ones', async () => {

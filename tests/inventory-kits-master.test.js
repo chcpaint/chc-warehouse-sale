@@ -183,6 +183,92 @@ test('a line quantity must be a positive number', async () => {
 });
 
 // ==================================================================
+// REFERENCE PRICES AND THE KIT TOTAL
+// ==================================================================
+
+test('a reference price can be entered on a line and the extended total is computed', async () => {
+    reset();
+    const created = await request(app()).post('/api/admin/kits').send({ name: 'Kit', lines: [{ sku: 'A', quantity: 2 }] });
+    const lineId = (await request(app()).get(`/api/admin/kits/${created.body.kit.id}`)).body.lines[0].id;
+
+    const edited = await request(app())
+        .put(`/api/admin/kits/${created.body.kit.id}/lines/${lineId}`)
+        .send({ ref_unit_price: 12.5 });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.line.ref_unit_price, 12.5);
+    assert.equal(edited.body.line.ref_line_total, 25, '2 x 12.5');
+    assert.equal(edited.body.line.ref_source, 'manual');
+});
+
+test('editing quantity after a reference price keeps the extended total in sync', async () => {
+    reset();
+    const created = await request(app()).post('/api/admin/kits').send({ name: 'Kit', lines: [{ sku: 'A', quantity: 2 }] });
+    const lineId = (await request(app()).get(`/api/admin/kits/${created.body.kit.id}`)).body.lines[0].id;
+
+    await request(app()).put(`/api/admin/kits/${created.body.kit.id}/lines/${lineId}`).send({ ref_unit_price: 10 });
+    const requantified = await request(app())
+        .put(`/api/admin/kits/${created.body.kit.id}/lines/${lineId}`)
+        .send({ quantity: 4, ref_unit_price: 10 });
+    assert.equal(requantified.body.line.ref_line_total, 40, 'must recompute against the NEW quantity, not the old one');
+});
+
+test('sending an explicit null clears a reference price', async () => {
+    reset();
+    const created = await request(app()).post('/api/admin/kits').send({ name: 'Kit', lines: [{ sku: 'A', quantity: 1 }] });
+    const lineId = (await request(app()).get(`/api/admin/kits/${created.body.kit.id}`)).body.lines[0].id;
+
+    await request(app()).put(`/api/admin/kits/${created.body.kit.id}/lines/${lineId}`).send({ ref_unit_price: 10 });
+    const cleared = await request(app())
+        .put(`/api/admin/kits/${created.body.kit.id}/lines/${lineId}`)
+        .send({ ref_unit_price: null });
+    assert.equal(cleared.body.line.ref_unit_price, null);
+    assert.equal(cleared.body.line.ref_line_total, null);
+    assert.equal(cleared.body.line.ref_source, null);
+});
+
+test('a negative reference price is refused', async () => {
+    reset();
+    const created = await request(app()).post('/api/admin/kits').send({ name: 'Kit', lines: [{ sku: 'A', quantity: 1 }] });
+    const lineId = (await request(app()).get(`/api/admin/kits/${created.body.kit.id}`)).body.lines[0].id;
+    const res = await request(app()).put(`/api/admin/kits/${created.body.kit.id}/lines/${lineId}`).send({ ref_unit_price: -5 });
+    assert.equal(res.status, 400);
+});
+
+test('the kit detail totals every priced line and counts what is still missing', async () => {
+    reset();
+    const created = await request(app()).post('/api/admin/kits').send({
+        name: 'Kit', lines: [{ sku: 'A', quantity: 2 }, { sku: 'B', quantity: 3 }]
+    });
+    const kitId = created.body.kit.id;
+    const lines = (await request(app()).get(`/api/admin/kits/${kitId}`)).body.lines;
+
+    await request(app()).put(`/api/admin/kits/${kitId}/lines/${lines[0].id}`).send({ ref_unit_price: 10 });
+    // B deliberately left unpriced.
+
+    const detail = await request(app()).get(`/api/admin/kits/${kitId}`);
+    assert.equal(detail.body.reference_total, null, 'a partial total must not be reported as if it were complete');
+    assert.equal(detail.body.unpriced_line_count, 1);
+
+    await request(app()).put(`/api/admin/kits/${kitId}/lines/${lines[1].id}`).send({ ref_unit_price: 4 });
+    const complete = await request(app()).get(`/api/admin/kits/${kitId}`);
+    // 2 x 10 + 3 x 4 = 32
+    assert.equal(complete.body.reference_total, 32);
+    assert.equal(complete.body.unpriced_line_count, 0);
+});
+
+test('a reference price can be set when a line is first created', async () => {
+    reset();
+    const created = await request(app()).post('/api/admin/kits').send({ name: 'Kit', lines: [{ sku: 'A', quantity: 1 }] });
+    const added = await request(app())
+        .post(`/api/admin/kits/${created.body.kit.id}/lines`)
+        .send({ sku: 'B', quantity: 5, ref_unit_price: 3 });
+    assert.equal(added.status, 201);
+    assert.equal(added.body.line.ref_unit_price, 3);
+    assert.equal(added.body.line.ref_line_total, 15);
+    assert.equal(added.body.line.ref_source, 'manual');
+});
+
+// ==================================================================
 // BRAND ALTERNATIVES
 // ==================================================================
 
