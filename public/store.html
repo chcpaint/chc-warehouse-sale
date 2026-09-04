@@ -315,14 +315,32 @@
                      another, and the quantity on any line can still be typed directly
                      once it's in the cart. -->
                 <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
-                    <div class="relative">
-                        <i class="fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-                        <input type="text" id="scan-to-cart-input" autocomplete="off"
-                            placeholder="Scan a barcode or type a part number to add it to the cart"
-                            class="w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-2.5 focus:border-blue-500 focus:outline-none"
-                            onkeydown="if(event.key==='Enter'){event.preventDefault();scanToCart(this.value);}">
+                    <div class="flex flex-wrap gap-2">
+                        <div class="relative flex-1 min-w-[16rem]">
+                            <i class="fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            <input type="text" id="scan-to-cart-input" autocomplete="off"
+                                placeholder="Scan a barcode or type a part number to add it to the cart"
+                                class="w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-2.5 focus:border-blue-500 focus:outline-none"
+                                onkeydown="if(event.key==='Enter'){event.preventDefault();scanToCart(this.value);}">
+                        </div>
+                        <button onclick="cartToggleCamera()" id="cart-camera-btn" type="button"
+                            class="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
+                            <i class="fas fa-camera mr-1"></i> <span id="cart-camera-label">Camera</span>
+                        </button>
                     </div>
                     <div id="scan-to-cart-result" class="mt-2"></div>
+
+                    <!-- Camera viewport: hidden until the button above starts it -->
+                    <div id="cart-camera-wrap" class="hidden mt-3">
+                        <div class="relative bg-black rounded-lg overflow-hidden max-w-md mx-auto">
+                            <video id="cart-video" playsinline muted class="w-full"></video>
+                            <div id="cart-camera-box" class="absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-green-400/80 rounded-lg pointer-events-none"></div>
+                            <div id="cart-camera-flash" class="absolute inset-0 bg-white opacity-0 pointer-events-none"></div>
+                        </div>
+                        <p id="cart-camera-hint" class="text-center text-xs text-gray-500 mt-2">
+                            Hold the barcode inside the green box.
+                        </p>
+                    </div>
                 </div>
 
                 <!-- Filters -->
@@ -1370,6 +1388,10 @@
         if (tab === 'inventory') { if (window.RAI) window.RAI.show(); }
         else if (window.RAI) window.RAI.teardown();
 
+        // Leaving Products with the cart's own camera scanner running would
+        // otherwise leave the phone's camera light on in the background.
+        if (tab !== 'products' && cartCamera.on) cartStopCamera();
+
         document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.add('hidden'));
 
         // Guarded on purpose. This used to be an unchecked .classList on the
@@ -1786,6 +1808,269 @@
             });
         }
         saveCart();
+    }
+
+    // ------------------------------------------------------------
+    // SCAN TO CART — CAMERA
+    //
+    // This is the same camera-scanning engine refinishAI Inventory uses
+    // (native BarcodeDetector, with html5-qrcode as the mandatory fallback on
+    // iOS/iPadOS Safari, which has no BarcodeDetector at all), ported here
+    // rather than shared, because the Inventory module is an optional
+    // per-company add-on (RefinishAI Inventory) that most customers -- this
+    // screen's whole audience -- do not have turned on. Every customer gets a
+    // camera scanner on their order screen regardless of whether they also
+    // bought Inventory. On a decode this calls scanToCart(code), the same
+    // path a USB scanner or typed part number already uses, so there is only
+    // ever one place that knows how to turn a code into a cart line.
+    // ------------------------------------------------------------
+    const cartCamera = { on: false, stream: null, detector: null, html5: null, raf: null, lastCode: null, lastAt: 0 };
+    const CART_CAMERA_FORMATS = ['upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'itf'];
+
+    async function cartToggleCamera() {
+        // A direct tap is the only moment iOS Safari will cooperate on two
+        // things that only ever bite on a phone: a text input's on-screen
+        // keyboard eating the whole camera view, and WebAudio staying silent
+        // because it was never unlocked inside a real user gesture. Both need
+        // handling here, before the camera itself starts (after an await --
+        // too late for iOS).
+        if (document.activeElement && document.activeElement !== document.body
+            && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
+        cartUnlockAudio();
+        if (cartCamera.on) { cartStopCamera(); return; }
+        await cartStartCamera();
+    }
+
+    async function cartStartCamera() {
+        const wrap = document.getElementById('cart-camera-wrap');
+        const hint = document.getElementById('cart-camera-hint');
+        const video = document.getElementById('cart-video');
+        if (!wrap || !video) return;
+
+        if (!window.isSecureContext) {
+            hint.textContent = 'Camera scanning needs a secure (https) connection.';
+            wrap.classList.remove('hidden');
+            return;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            hint.textContent = 'This browser cannot use the camera. Use a USB scanner or type the part number.';
+            wrap.classList.remove('hidden');
+            return;
+        }
+
+        wrap.classList.remove('hidden');
+        hint.textContent = 'Starting camera…';
+        cartSetCameraLabel('Stop');
+        if (typeof wrap.scrollIntoView === 'function') {
+            wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        try {
+            cartCamera.stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: false
+            });
+            video.srcObject = cartCamera.stream;
+            await video.play();
+            cartCamera.on = true;
+
+            if ('BarcodeDetector' in window) {
+                const supported = await window.BarcodeDetector.getSupportedFormats();
+                const formats = CART_CAMERA_FORMATS.filter(f => supported.includes(f));
+                if (formats.length) {
+                    cartCamera.detector = new window.BarcodeDetector({ formats });
+                    hint.textContent = 'Hold the barcode inside the green box.';
+                    cartDetectLoop();
+                    return;
+                }
+            }
+
+            // Safari on iOS and iPadOS has no BarcodeDetector, so fall back to
+            // the WASM decoder. This path is mandatory for iPhones and iPads.
+            hint.textContent = 'Loading scanner…';
+            await cartStartHtml5Fallback(hint);
+        } catch (err) {
+            console.error('[Scan] camera error:', err);
+            hint.textContent = err && err.name === 'NotAllowedError'
+                ? 'Camera permission was declined. Allow camera access, or use a USB scanner.'
+                : 'Could not start the camera. Use a USB scanner or type the part number.';
+            cartStopCamera();
+        }
+    }
+
+    async function cartDetectLoop() {
+        const video = document.getElementById('cart-video');
+        if (!cartCamera.on || !cartCamera.detector || !video) return;
+        try {
+            const found = await cartCamera.detector.detect(video);
+            if (found && found.length) cartOnCameraCode(found[0].rawValue);
+        } catch (e) { /* a dropped frame is not an error worth surfacing */ }
+        cartCamera.raf = requestAnimationFrame(cartDetectLoop);
+    }
+
+    async function cartStartHtml5Fallback(hint) {
+        try {
+            await cartLoadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js');
+        } catch (e) {
+            hint.textContent = 'Scanner could not load. Use a USB scanner or type the part number.';
+            cartStopCamera();
+            return;
+        }
+        // The library manages its own video element, so hand the stream back.
+        cartStopStreamOnly();
+
+        let host = document.getElementById('cart-html5-host');
+        if (!host) {
+            host = document.createElement('div');
+            host.id = 'cart-html5-host';
+            host.className = 'max-w-md mx-auto';
+            document.getElementById('cart-camera-wrap').prepend(host);
+        }
+        host.classList.remove('hidden');
+        document.getElementById('cart-video').classList.add('hidden');
+
+        cartCamera.html5 = new window.Html5Qrcode('cart-html5-host', { verbose: false });
+        // A UPC/EAN barcode is thin bars, not a QR code's error-corrected
+        // blocks -- the decoder needs real pixel detail on those bars to read
+        // them, and a browser's default (often 640x480-ish) camera resolution
+        // frequently isn't enough. Ask for the camera's best available
+        // resolution explicitly; `ideal` degrades gracefully on a camera that
+        // can't do 1080p rather than failing to start.
+        const highRes = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+        const scanConfig = {
+            fps: 12,
+            qrbox: { width: 300, height: 150 },
+            // Restricting to the symbologies this shop actually scans (vs.
+            // the decoder's full default list) means every frame is spent
+            // trying to read a barcode, not a QR/Aztec/PDF417/etc. code
+            // nobody is holding up to the camera.
+            formatsToSupport: window.Html5QrcodeSupportedFormats ? [
+                window.Html5QrcodeSupportedFormats.UPC_A,
+                window.Html5QrcodeSupportedFormats.UPC_E,
+                window.Html5QrcodeSupportedFormats.EAN_13,
+                window.Html5QrcodeSupportedFormats.EAN_8,
+                window.Html5QrcodeSupportedFormats.CODE_128,
+                window.Html5QrcodeSupportedFormats.CODE_39,
+                window.Html5QrcodeSupportedFormats.QR_CODE,
+                window.Html5QrcodeSupportedFormats.ITF
+            ] : undefined
+        };
+        const onDecoded = (decoded) => cartOnCameraCode(decoded);
+        const onMiss = () => { /* per-frame miss; ignore */ };
+
+        // 'environment' (the rear camera) is what a phone or tablet should
+        // use, but it is a hard requirement here -- a laptop with only a
+        // front camera fails outright rather than falling back, exactly the
+        // case that made this look "broken" on a MacBook. Try it, then fall
+        // back to the front camera as any device is guaranteed to have one.
+        // The resolution ask has to travel with the facing mode inside
+        // `videoConstraints` -- passing both separately, the library uses one
+        // or the other, not a merge of the two.
+        try {
+            await cartCamera.html5.start(
+                { facingMode: 'environment' },
+                { ...scanConfig, videoConstraints: { ...highRes, facingMode: 'environment' } },
+                onDecoded, onMiss);
+        } catch (envErr) {
+            await cartCamera.html5.start(
+                { facingMode: 'user' },
+                { ...scanConfig, videoConstraints: { ...highRes, facingMode: 'user' } },
+                onDecoded, onMiss);
+        }
+        cartCamera.on = true;
+        hint.textContent = 'Hold the barcode inside the frame, filling as much of it as you can.';
+    }
+
+    function cartLoadScriptOnce(src) {
+        return new Promise((resolve, reject) => {
+            if (document.querySelector(`script[src="${src}"]`)) return resolve();
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('script failed'));
+            document.head.appendChild(s);
+        });
+    }
+
+    /** Debounce repeated frames of the same barcode into one scan. scanToCart
+     *  already beeps and shows feedback on its own, so this only adds the
+     *  flash + vibrate a camera capture needs on top of that. */
+    function cartOnCameraCode(code) {
+        const now = Date.now();
+        if (code === cartCamera.lastCode && now - cartCamera.lastAt < 2500) return;
+        cartCamera.lastCode = code;
+        cartCamera.lastAt = now;
+        cartFlashCameraBox();
+        // iOS Safari has never implemented the Vibration API (a WebKit/Apple
+        // limitation, not something a web page can work around), so an
+        // iPhone gets no haptic buzz here whatever this does -- the flash and
+        // scanToCart's own beep are what carry "got it" there.
+        if (navigator.vibrate) navigator.vibrate(40);
+        scanToCart(code);
+    }
+
+    /** A quick white flash over the video, so a capture is obvious even with the sound off. */
+    function cartFlashCameraBox() {
+        const flash = document.getElementById('cart-camera-flash');
+        if (!flash) return;
+        flash.classList.remove('inv-capture-flash');
+        void flash.offsetWidth; // restart the animation on back-to-back scans
+        flash.classList.add('inv-capture-flash');
+    }
+
+    function cartStopStreamOnly() {
+        if (cartCamera.raf) { cancelAnimationFrame(cartCamera.raf); cartCamera.raf = null; }
+        if (cartCamera.stream) {
+            cartCamera.stream.getTracks().forEach(t => t.stop());
+            cartCamera.stream = null;
+        }
+        const video = document.getElementById('cart-video');
+        if (video) video.srcObject = null;
+    }
+
+    function cartStopCamera() {
+        cartStopStreamOnly();
+        cartCamera.detector = null;
+        if (cartCamera.html5) {
+            cartCamera.html5.stop().catch(() => {}).then(() => {
+                try { cartCamera.html5.clear(); } catch (e) {}
+                cartCamera.html5 = null;
+            });
+        }
+        const host = document.getElementById('cart-html5-host');
+        if (host) host.classList.add('hidden');
+        const video = document.getElementById('cart-video');
+        if (video) video.classList.remove('hidden');
+        const wrap = document.getElementById('cart-camera-wrap');
+        if (wrap) wrap.classList.add('hidden');
+        cartCamera.on = false;
+        cartSetCameraLabel('Camera');
+    }
+
+    function cartSetCameraLabel(text) {
+        const el = document.getElementById('cart-camera-label');
+        if (el) el.textContent = text;
+    }
+
+    /**
+     * iOS Safari mutes any sound that wasn't started inside the JS call stack
+     * of a real tap -- by the time a barcode is decoded (async, off a video
+     * frame callback) it's too late to ask. Call this from the tap that
+     * opens the camera instead, so scanToCart's beep on an actual capture,
+     * moments later, is allowed to play.
+     */
+    function cartUnlockAudio() {
+        try {
+            scanAudioCtx = scanAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (scanAudioCtx.state === 'suspended') scanAudioCtx.resume();
+            const osc = scanAudioCtx.createOscillator();
+            const gain = scanAudioCtx.createGain();
+            gain.gain.value = 0; // silent -- this tick just unlocks the context
+            osc.connect(gain); gain.connect(scanAudioCtx.destination);
+            osc.start(); osc.stop(scanAudioCtx.currentTime + 0.01);
+        } catch (e) { /* audio is a nicety, never a blocker */ }
     }
 
     // ------------------------------------------------------------
