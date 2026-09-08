@@ -1237,6 +1237,34 @@
     <!-- ============================================================ -->
 
     <!-- Locations Modal -->
+    <!-- Access Code Modal -->
+    <div id="access-code-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-key text-red-500 mr-2"></i> Reset Access Code</h3>
+                <button onclick="hideModal('access-code-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-600 mb-1">
+                <span id="access-code-company-name" class="font-semibold text-gray-800"></span>
+            </p>
+            <p class="text-sm text-gray-500 mb-4">
+                This is the shared code the whole company uses to log in to their storefront. Setting a new one
+                here takes effect the moment you click Reset — the old code stops working immediately, so anyone
+                still using it will need to be given the new one.
+            </p>
+            <div class="flex gap-2">
+                <input type="text" id="access-code-new" placeholder="New access code" autocomplete="off"
+                    class="flex-1 px-3 py-2 border rounded-lg font-mono"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();resetAccessCode();}">
+                <button onclick="resetAccessCode()"
+                    class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">
+                    <i class="fas fa-key mr-1"></i> Reset
+                </button>
+            </div>
+            <p id="access-code-note" class="text-xs text-gray-400 mt-3"></p>
+        </div>
+    </div>
+
     <div id="locations-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
             <div class="flex justify-between items-center mb-4">
@@ -3152,6 +3180,7 @@
                     <button onclick="openKitsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.inventory?.enabled ? 'text-indigo-500 hover:text-indigo-700' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Repair kits"><i class="fas fa-boxes-packing"></i></button>
                     <button onclick="openCompanyUsers('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.users?.enabled ? 'text-amber-600 hover:text-amber-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Customer users (who can order)"><i class="fas fa-users"></i></button>
                     <button onclick="openLocationsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-blue-500 hover:text-blue-700 text-sm mr-3" title="Manage locations"><i class="fas fa-map-marker-alt"></i></button>
+                    <button onclick="openAccessCodeModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-red-500 hover:text-red-700 text-sm mr-3" title="Reset access code"><i class="fas fa-key"></i></button>
                     <a href="/store/${esc(c.slug)}" target="_blank" class="text-blue-600 hover:underline text-sm mr-3"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="uploadLogoFor('${c.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Upload logo"><i class="fas fa-image"></i></button>
                 </td>
@@ -4469,6 +4498,49 @@
     // ============================================================
     // LOCATIONS
     // ============================================================
+    // ============================================================
+    // ACCESS CODE
+    //
+    // Every company logs into the storefront with one shared code (not a
+    // per-user password) — see routes/auth.js. Resetting it here is the same
+    // PUT the company's own admin screen would use to change it themselves;
+    // this just gives CHC staff a way to do it for a customer who forgot
+    // theirs or needs it changed, without needing their login first.
+    // ============================================================
+    let accessCodeCompanyId = null;
+
+    function openAccessCodeModal(companyId, companyName) {
+        accessCodeCompanyId = companyId;
+        document.getElementById('access-code-company-name').textContent = companyName;
+        document.getElementById('access-code-new').value = '';
+        document.getElementById('access-code-note').textContent = '';
+        showModal('access-code-modal');
+        document.getElementById('access-code-new').focus();
+    }
+
+    async function resetAccessCode() {
+        const input = document.getElementById('access-code-new');
+        const note = document.getElementById('access-code-note');
+        const code = input.value.trim();
+        if (!code) { note.textContent = 'Enter a code first.'; note.className = 'text-xs text-red-500 mt-3'; return; }
+
+        note.textContent = 'Saving…';
+        note.className = 'text-xs text-gray-400 mt-3';
+        try {
+            const resp = await adminFetch(`/companies/${accessCodeCompanyId}`, {
+                method: 'PUT', body: JSON.stringify({ access_code: code })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { note.textContent = data.error || 'Failed to reset the access code.'; note.className = 'text-xs text-red-500 mt-3'; return; }
+
+            note.textContent = `Done — the new code is now "${code}". Share it with the customer.`;
+            note.className = 'text-xs text-green-600 mt-3';
+        } catch (err) {
+            note.textContent = 'Failed to reset the access code.';
+            note.className = 'text-xs text-red-500 mt-3';
+        }
+    }
+
     let locationsCompanyId = null;
     let currentLocations = [];
 
