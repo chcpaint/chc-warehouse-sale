@@ -323,7 +323,7 @@
                                 class="w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-2.5 focus:border-blue-500 focus:outline-none"
                                 onkeydown="if(event.key==='Enter'){event.preventDefault();scanToCart(this.value);}">
                         </div>
-                        <button onclick="cartToggleCamera()" id="cart-camera-btn" type="button"
+                        <button onclick="cartToggleCamera()" id="cart-camera-btn" type="button" hidden
                             class="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
                             <i class="fas fa-camera mr-1"></i> <span id="cart-camera-label">Camera</span>
                         </button>
@@ -1827,7 +1827,20 @@
     const cartCamera = { on: false, stream: null, detector: null, html5: null, raf: null, lastCode: null, lastAt: 0 };
     const CART_CAMERA_FORMATS = ['upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'itf'];
 
+    // Turned off for now (Sept 2026): too few products carry a barcode yet
+    // for camera scanning to be worth the confusion it caused in testing, so
+    // the order screen falls back to the USB/Bluetooth scanner and typed
+    // part numbers only. The engine below is untouched -- re-enable by
+    // flipping this back to true and un-hiding #cart-camera-btn once the
+    // barcode gap is closed. Before flipping it back on, also give a scan a
+    // visible "scanned -- show the next item" moment (today the only
+    // feedback is a quick white flash over the video and a toast under the
+    // search box), since that read as "it just sits there" in testing even
+    // when a scan had, in fact, gone through.
+    const CART_CAMERA_ENABLED = false;
+
     async function cartToggleCamera() {
+        if (!CART_CAMERA_ENABLED) return;
         // A direct tap is the only moment iOS Safari will cooperate on two
         // things that only ever bite on a phone: a text input's on-screen
         // keyboard eating the whole camera view, and WebAudio staying silent
