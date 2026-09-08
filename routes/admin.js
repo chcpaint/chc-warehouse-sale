@@ -10,6 +10,7 @@ const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = 
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed } = require('../utils/email');
 const { orderScopeIds, applyOrderScope, orderInScope } = require('../utils/order-scope');
+const { redactSecrets } = require('../utils/audit');
 
 const router = express.Router();
 
@@ -267,7 +268,12 @@ router.put('/companies/:companyId', requireCompanyAccess, async (req, res) => {
 
         if (error) throw error;
 
-        await logAction(req.admin.id, 'company_updated', 'company', companyId, filtered, req.ip);
+        // The audit trail should show THAT the code changed, never the hash
+        // itself -- a bcrypt hash isn't the plaintext code, but it still has
+        // no business sitting in a JSONB column read by anyone with audit-log
+        // access.
+        await logAction(req.admin.id, 'company_updated', 'company', companyId,
+            redactSecrets(filtered, ['access_code'], '(reset)'), req.ip);
 
         res.json({ company: data });
 
