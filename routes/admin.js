@@ -1550,7 +1550,7 @@ router.get('/reports/orders', async (req, res) => {
 router.put('/orders/:orderId/status', async (req, res) => {
     try {
         const { status, note } = req.body;
-        const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'closed', 'cancelled'];
+        const validStatuses = ['pending', 'processing', 'out_on_delivery', 'closed', 'cancelled'];
 
         if (!validStatuses.includes(status)) {
             return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
