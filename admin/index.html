@@ -960,6 +960,18 @@
                                 <option value="closed">Closed</option>
                                 <option value="cancelled">Cancelled</option>
                             </select>
+                            <!-- Only meaningful for one company at a time -- hidden on "All
+                                 Companies". Reachable (read-only if not permitted) by everyone
+                                 who can see Orders, not only full admins -- see
+                                 routes/delivery-fee-admin.js for who can actually change it. -->
+                            <div id="delivery-fee-control" class="hidden items-center gap-1.5 text-sm bg-white border rounded-lg px-3 py-1.5">
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                                    <input type="checkbox" id="delivery-fee-checkbox" onchange="onDeliveryFeeToggle(this)"
+                                           class="w-4 h-4 rounded border-gray-300 text-blue-600">
+                                    <i class="fas fa-truck text-gray-400"></i>
+                                    <span class="text-gray-600">$10 fee under $300</span>
+                                </label>
+                            </div>
                         </div>
                         <div class="flex gap-2 items-center">
                             <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
@@ -5299,8 +5311,98 @@
             const resp = await adminFetch(`/orders?${params}`);
             const data = await resp.json();
             currentAdminOrders = data.orders || [];
+            ensureOrderCompanyOptions(currentAdminOrders);
             renderAdminOrders();
+            loadDeliveryFeeControl();
         } catch (err) { console.error('Orders load failed:', err); }
+    }
+
+    /**
+     * An order-desk or order-manager account never runs loadCompanies() (see
+     * showAdminApp) -- full admins get the company filter populated at login,
+     * but an order-only account would otherwise be stuck on "All Companies"
+     * forever, with no way to pick one and no way to see the per-company
+     * delivery-fee control below. Filling it in from whatever orders just
+     * came back is enough: it only ever ADDS options already implied by what
+     * this account can already see, and does nothing once loadCompanies()
+     * has already populated the full list.
+     */
+    function ensureOrderCompanyOptions(orders) {
+        const sel = document.getElementById('admin-order-company');
+        if (!sel) return;
+        const existing = new Set(Array.from(sel.options).map(o => o.value));
+        let added = false;
+        (orders || []).forEach(o => {
+            const id = o.company_id;
+            const name = (o.companies && o.companies.name) || o.company_name;
+            if (!id || !name || existing.has(id)) return;
+            existing.add(id);
+            added = true;
+            const opt = document.createElement('option');
+            opt.value = id; opt.textContent = name;
+            sel.appendChild(opt);
+        });
+        if (added) {
+            const placeholder = sel.options[0];
+            const rest = Array.from(sel.options).slice(1)
+                .sort((a, b) => a.textContent.localeCompare(b.textContent));
+            sel.innerHTML = '';
+            sel.appendChild(placeholder);
+            rest.forEach(o => sel.appendChild(o));
+        }
+    }
+
+    /**
+     * Show/refresh the delivery-fee control for whichever company is
+     * currently selected in the Orders filter. Hidden on "All Companies" --
+     * the setting is per company, so there is nothing coherent to show or
+     * change without one selected.
+     */
+    async function loadDeliveryFeeControl() {
+        const wrap = document.getElementById('delivery-fee-control');
+        if (!wrap) return;
+        const companyId = document.getElementById('admin-order-company').value;
+        if (!companyId) { wrap.classList.add('hidden'); wrap.classList.remove('flex'); return; }
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/delivery-fee`);
+            if (!resp.ok) { wrap.classList.add('hidden'); wrap.classList.remove('flex'); return; }
+            const d = await resp.json();
+            const cb = document.getElementById('delivery-fee-checkbox');
+            cb.checked = !!d.enabled;
+            cb.disabled = !d.can_manage;
+            cb.dataset.companyId = companyId;
+            wrap.title = d.can_manage
+                ? `Orders under $${Number(d.threshold).toFixed(2)} add a $${Number(d.fee).toFixed(2)} delivery fee for ${d.company?.name || 'this account'} unless turned off here.`
+                : `Only a branch manager or admin can change this. Orders under $${Number(d.threshold).toFixed(2)} add a $${Number(d.fee).toFixed(2)} delivery fee.`;
+            wrap.classList.toggle('opacity-60', !d.can_manage);
+            wrap.classList.remove('hidden');
+            wrap.classList.add('flex');
+        } catch (err) {
+            console.error('Delivery fee control load failed:', err);
+            wrap.classList.add('hidden');
+            wrap.classList.remove('flex');
+        }
+    }
+
+    async function onDeliveryFeeToggle(checkbox) {
+        const companyId = checkbox.dataset.companyId;
+        const enabled = checkbox.checked;
+        checkbox.disabled = true;
+        try {
+            const resp = await adminFetch(`/companies/${companyId}/delivery-fee`, {
+                method: 'PUT', body: JSON.stringify({ enabled })
+            });
+            const d = await resp.json();
+            if (!resp.ok) {
+                alert(d.error || 'Failed to update the delivery fee setting.');
+                checkbox.checked = !enabled;
+            }
+        } catch (err) {
+            alert('Failed to update the delivery fee setting.');
+            checkbox.checked = !enabled;
+        } finally {
+            checkbox.disabled = false;
+        }
     }
 
     // Derive the workflow stage for an order.
@@ -5376,6 +5478,7 @@
                 <td class="px-4 py-3 text-right font-semibold align-top">
                     $${parseFloat(o.total).toFixed(2)}
                     ${Number(o.tax) > 0 ? `<div class="text-xs font-normal text-gray-400" title="Subtotal $${parseFloat(o.subtotal).toFixed(2)} + tax">+ $${parseFloat(o.tax).toFixed(2)} tax${o.tax_rate ? ` (${(Number(o.tax_rate) * 100).toFixed(0)}%)` : ''}</div>` : ''}
+                    ${Number(o.delivery_fee) > 0 ? `<div class="text-xs font-normal text-gray-400" title="Order was under $300 when placed">+ $${parseFloat(o.delivery_fee).toFixed(2)} delivery</div>` : ''}
                 </td>
                 <td class="px-4 py-3 align-top">
                     <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold border ${st.color}">${st.label}</span>
@@ -5620,7 +5723,16 @@
                 <tr class="border-b hover:bg-gray-50">
                     <td class="px-4 py-3 font-medium">${esc(a.name)}${isSelf ? ' <span class="text-xs text-gray-400">(you)</span>' : ''}</td>
                     <td class="px-4 py-3 text-sm text-gray-500">${esc(a.email)}</td>
-                    <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${a.role === 'super_admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">${ROLE_LABEL[a.role] || a.role}</span></td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-1 rounded text-xs font-semibold ${a.role === 'super_admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">${ROLE_LABEL[a.role] || a.role}</span>
+                        ${a.role === 'order_desk' ? `<button onclick="toggleBranchManager('${a.id}', ${!a.is_branch_manager})"
+                                class="ml-1.5 px-1.5 py-0.5 rounded text-xs font-semibold border ${a.is_branch_manager ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-gray-50 text-gray-400 border-gray-200'}"
+                                title="${a.is_branch_manager
+                                    ? 'Branch manager — can change account-level settings like a company’s delivery fee. Click to remove.'
+                                    : 'Not a branch manager. Click to grant it (e.g. so they can toggle a company’s delivery fee).'}">
+                                ${a.is_branch_manager ? '<i class="fas fa-star mr-1"></i>Manager' : 'Manager?'}
+                            </button>` : ''}
+                    </td>
                     <td class="px-4 py-3 text-sm text-gray-500">${esc(a.branch_name || '—')}</td>
                     <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${STATUS_BADGE[a.status] || ''}">${a.status}</span></td>
                     <td class="px-4 py-3 text-sm text-gray-400 space-x-3">${actions.join('') || '—'}</td>
@@ -5651,6 +5763,15 @@
                 alert(d.email_sent ? `Invite sent to ${document.getElementById('new-admin-email').value}.` : 'User created, but the invite email could not be sent — use the resend button.');
             } else { alert(d.error); }
         } catch (err) { alert('Failed to invite staff.'); }
+    }
+
+    async function toggleBranchManager(id, makeManager) {
+        try {
+            const resp = await adminFetch(`/users/${id}`, { method: 'PUT', body: JSON.stringify({ is_branch_manager: makeManager }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to update.'); return; }
+            loadAdminUsers();
+        } catch (err) { alert('Failed to update.'); }
     }
 
     async function resendAdminInvite(id) {

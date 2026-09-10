@@ -39,7 +39,8 @@ router.use('/companies/:companyId/users', require('./company-users-admin'));
 router.get('/whoami', (req, res) => {
     res.json({
         id: req.admin.id, name: req.admin.name, email: req.admin.email,
-        role: req.admin.role, company_id: req.admin.company_id, branch_id: req.admin.branch_id
+        role: req.admin.role, company_id: req.admin.company_id, branch_id: req.admin.branch_id,
+        is_branch_manager: req.admin.is_branch_manager === true
     });
 });
 
@@ -54,6 +55,7 @@ router.use('/companies/:companyId/inventory', require('./inventory-admin'));
 router.use('/companies/:companyId/modules', require('./modules-admin'));
 router.use('/companies/:companyId/po', require('./po-admin'));
 router.use('/companies/:companyId/tax', require('./tax-admin'));
+router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));
 router.use('/companies/:companyId/library', require('./item-library'));
 
 // ============================================================
@@ -1441,7 +1443,7 @@ router.get('/orders/export', async (req, res) => {
         const { company_id, status, from_date, to_date, location_id } = req.query;
         let query = supabaseAdmin
             .from('orders')
-            .select('order_number, created_at, company_name, location, po_number, contact_name, contact_email, contact_phone, status, subtotal, tax, tax_rate, total, items, companies(name), company_locations(name)')
+            .select('order_number, created_at, company_name, location, po_number, contact_name, contact_email, contact_phone, status, subtotal, tax, tax_rate, delivery_fee, total, items, companies(name), company_locations(name)')
             .order('created_at', { ascending: false });
 
         const _scopeIds = await orderScopeIds(req);
@@ -1459,13 +1461,13 @@ router.get('/orders/export', async (req, res) => {
             v = String(v);
             return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
         };
-        const headers = ['Order #', 'Date', 'Company', 'Location', 'PO Number', 'Contact', 'Email', 'Phone', 'Status', 'Item Count', 'Subtotal', 'Tax', 'Tax Rate', 'Total'];
+        const headers = ['Order #', 'Date', 'Company', 'Location', 'PO Number', 'Contact', 'Email', 'Phone', 'Status', 'Item Count', 'Subtotal', 'Tax', 'Tax Rate', 'Delivery Fee', 'Total'];
         const rows = (data || []).map(o => {
             const itemCount = Array.isArray(o.items) ? o.items.reduce((n, i) => n + (parseInt(i.quantity) || 0), 0) : '';
             const locName = (o.company_locations && o.company_locations.name) || o.location || '';
             const compName = (o.companies && o.companies.name) || o.company_name || '';
             const taxRatePct = (o.tax_rate === null || o.tax_rate === undefined) ? '' : `${(Number(o.tax_rate) * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
-            return [o.order_number, o.created_at, compName, locName, o.po_number, o.contact_name, o.contact_email, o.contact_phone, o.status, itemCount, o.subtotal, o.tax, taxRatePct, o.total].map(esc).join(',');
+            return [o.order_number, o.created_at, compName, locName, o.po_number, o.contact_name, o.contact_email, o.contact_phone, o.status, itemCount, o.subtotal, o.tax, taxRatePct, o.delivery_fee, o.total].map(esc).join(',');
         });
         const csvText = [headers.map(esc).join(','), ...rows].join('\n');
 

@@ -1,4 +1,5 @@
 const sgMail = require('@sendgrid/mail');
+const { THRESHOLD: DELIVERY_FEE_THRESHOLD } = require('./delivery-fee');
 
 /**
  * Initialize SendGrid with API key.
@@ -122,6 +123,10 @@ async function sendOrderNotification(options) {
                         <td colspan="4" style="padding: 6px 8px; text-align: right; color: #6b7280;">Tax${order.tax_rate ? ` (${(Number(order.tax_rate) * 100).toFixed(0)}%)` : ''}:</td>
                         <td style="padding: 6px 8px; text-align: right; color: #6b7280;">$${Number(order.tax).toFixed(2)}</td>
                     </tr>` : ''}
+                    ${order.delivery_fee ? `<tr>
+                        <td colspan="4" style="padding: 6px 8px; text-align: right; color: #6b7280;">Delivery fee (order under $${DELIVERY_FEE_THRESHOLD}):</td>
+                        <td style="padding: 6px 8px; text-align: right; color: #6b7280;">$${Number(order.delivery_fee).toFixed(2)}</td>
+                    </tr>` : ''}
                     <tr>
                         <td colspan="4" style="padding: 10px 8px; text-align: right; font-weight: bold;">Total:</td>
                         <td style="padding: 10px 8px; text-align: right; font-weight: bold; font-size: 16px; color: #1e40af;">$${Number(order.total).toFixed(2)}</td>
@@ -138,7 +143,7 @@ async function sendOrderNotification(options) {
     const textItems = (order.items || []).map(i => i.price_on_request
         ? `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = ** TO PRICE **`
         : `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = $${Number(i.subtotal).toFixed(2)}`).join('\n');
-    const totalsText = `Subtotal: $${Number(order.subtotal).toFixed(2)}${order.tax ? `\nTax${order.tax_rate ? ` (${(Number(order.tax_rate) * 100).toFixed(0)}%)` : ''}: $${Number(order.tax).toFixed(2)}` : ''}\nTotal: $${Number(order.total).toFixed(2)}`;
+    const totalsText = `Subtotal: $${Number(order.subtotal).toFixed(2)}${order.tax ? `\nTax${order.tax_rate ? ` (${(Number(order.tax_rate) * 100).toFixed(0)}%)` : ''}: $${Number(order.tax).toFixed(2)}` : ''}${order.delivery_fee ? `\nDelivery fee (order under $${DELIVERY_FEE_THRESHOLD}): $${Number(order.delivery_fee).toFixed(2)}` : ''}\nTotal: $${Number(order.total).toFixed(2)}`;
     const text = `New Order #${order.order_number || order.id}${quotedCount ? `\n\n*** ${quotedCount} ITEM(S) NEED PRICING — see "TO PRICE" below. The total excludes them. ***` : ''}\nCompany: ${companyName}${poNumber ? `\nPO #: ${poNumber}` : ''}\nOrdered by: ${contactName} (${contactEmail})${location ? `\nLocation: ${location}` : ''}\n\nItems:\n${textItems}\n\n${totalsText}${notes ? `\n\nNotes: ${notes}` : ''}`;
 
     try {

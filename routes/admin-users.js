@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('admin_users')
-            .select('id, email, name, role, branch_id, is_active, last_login, password_hash, invite_expires_at, supplier_branches:branch_id (id, name)')
+            .select('id, email, name, role, branch_id, is_active, is_branch_manager, last_login, password_hash, invite_expires_at, supplier_branches:branch_id (id, name)')
             .order('created_at', { ascending: true });
         if (error) throw error;
 
@@ -74,6 +74,10 @@ router.get('/', async (req, res) => {
             branch_id: u.branch_id,
             branch_name: u.supplier_branches?.name || null,
             is_active: u.is_active,
+            // Meaningful for order_desk only — super_admin and order_manager
+            // already qualify for manager-level settings (like the delivery
+            // fee toggle) by role. See routes/delivery-fee-admin.js.
+            is_branch_manager: u.is_branch_manager === true,
             last_login: u.last_login,
             // Never leak the hash; just whether they've activated.
             status: u.password_hash ? (u.is_active ? 'active' : 'disabled') : 'invited'
@@ -165,6 +169,16 @@ router.put('/:id', async (req, res) => {
             if (b && !isValidUUID(b)) return res.status(400).json({ error: 'Invalid branch id.' });
             patch.branch_id = b;
         }
+        // A branch manager: an order-desk account also trusted with certain
+        // account-level settings (see routes/delivery-fee-admin.js) without
+        // promoting them to order_manager or super_admin, which would also
+        // widen their console access beyond Orders. Meaningless for any
+        // other role, which already qualifies by role — clear it there so
+        // the flag can't outlive a later promotion and mislead someone
+        // reading this account's row.
+        if (req.body.is_branch_manager !== undefined) {
+            patch.is_branch_manager = req.body.is_branch_manager === true;
+        }
         // Order-desk must keep a branch.
         const effectiveRole = patch.role || (await supabaseAdmin.from('admin_users').select('role').eq('id', id).maybeSingle()).data?.role;
         if (effectiveRole === 'order_desk') {
@@ -172,12 +186,13 @@ router.put('/:id', async (req, res) => {
             if (branch === null) return res.status(400).json({ error: 'Order-desk staff must be assigned to a branch.' });
         } else if (patch.role === 'super_admin') {
             patch.branch_id = null;
+            patch.is_branch_manager = false;
         }
 
         patch.updated_at = new Date().toISOString();
         const { data, error } = await supabaseAdmin
             .from('admin_users').update(patch).eq('id', id)
-            .select('id, email, name, role, branch_id, is_active').single();
+            .select('id, email, name, role, branch_id, is_active, is_branch_manager').single();
         if (error) throw error;
 
         await logAction(req.admin.id, 'admin_user_updated', id, patch, req.ip);

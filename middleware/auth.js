@@ -79,7 +79,7 @@ async function requireAdminAuth(req, res, next) {
         // effect immediately, not only at next login.
         const { data: admin, error } = await supabaseAdmin
             .from('admin_users')
-            .select('id, email, name, role, company_id, branch_id, is_active, must_change_password')
+            .select('id, email, name, role, company_id, branch_id, is_active, must_change_password, is_branch_manager')
             .eq('id', decoded.admin_id)
             .single();
 
@@ -150,6 +150,13 @@ const ORDER_DESK_ALLOW = [
     ['POST', /^\/companies\/[^/]+\/orders\/[^/]+\/invoice$/],
     ['GET', /^\/companies\/[^/]+\/orders\/[^/]+\/invoice$/],
     ['PUT', /^\/companies\/[^/]+\/orders\/[^/]+\/close$/],
+    // The Orders screen shows this account's own delivery-fee toggle
+    // (read-only unless canManageDeliveryFee() says otherwise) for whichever
+    // company is selected in the filter. Reachability here is not the
+    // permission check — routes/delivery-fee-admin.js still refuses the PUT
+    // to any order_desk account that isn't flagged is_branch_manager.
+    ['GET', /^\/companies\/[^/]+\/delivery-fee$/],
+    ['PUT', /^\/companies\/[^/]+\/delivery-fee$/],
     ['GET', /^\/whoami$/],
     ['PUT', /^\/me\/password$/]
 ];

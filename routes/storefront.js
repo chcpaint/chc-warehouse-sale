@@ -5,6 +5,7 @@ const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
 const { sendOrderNotification } = require('../utils/email');
 const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
 const { taxSettings, computeTax } = require('../utils/tax');
+const { deliveryFeeSettings, computeDeliveryFee, THRESHOLD, FEE } = require('../utils/delivery-fee');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
 
@@ -494,7 +495,12 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         // a second read of the same row for the same request.
         const resolvedTax = taxSettings(poCompany?.settings);
         const tax = computeTax(subtotal, resolvedTax.rate);
-        const total = subtotal + tax;
+
+        // Same priced subtotal, same reasoning as tax: a price-on-request
+        // line can't push an order over the $300 threshold any more than it
+        // can be taxed, because nobody knows its price yet.
+        const deliveryFee = computeDeliveryFee(subtotal, deliveryFeeSettings(poCompany?.settings).enabled);
+        const total = subtotal + tax + deliveryFee;
 
         // ------------------------------------------------------------------
         // Allocate the PO number LAST, immediately before the insert.
@@ -552,6 +558,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 subtotal,
                 tax,
                 tax_rate: resolvedTax.rate,
+                delivery_fee: deliveryFee,
                 total,
                 notes: stripHtml(notes || ''),
                 status: 'pending',
@@ -651,6 +658,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 subtotal: order.subtotal,
                 tax: order.tax,
                 tax_rate: order.tax_rate,
+                delivery_fee: order.delivery_fee,
                 total: order.total,
                 status: order.status,
                 created_at: order.created_at
@@ -671,7 +679,7 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const { data: orders, error } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, total, status, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
+            .select('id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -890,6 +898,27 @@ router.get('/:slug/tax/config', requireCompanyAuth, async (req, res) => {
     } catch (err) {
         console.error('Tax config error:', err);
         res.status(500).json({ error: 'Failed to load tax settings.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/delivery-fee/config
+ *
+ * What the cart should preview before checkout. The order route always
+ * recomputes this itself at submit time from the same company settings and
+ * the actual priced subtotal — this endpoint exists only so the cart total
+ * on screen doesn't disagree with what the order will actually be charged.
+ */
+router.get('/:slug/delivery-fee/config', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: company } = await supabaseAdmin
+            .from('companies').select('settings').eq('id', req.company.id).maybeSingle();
+
+        const settings = deliveryFeeSettings(company?.settings);
+        res.json({ enabled: settings.enabled, threshold: THRESHOLD, fee: FEE });
+    } catch (err) {
+        console.error('Delivery fee config error:', err);
+        res.status(500).json({ error: 'Failed to load delivery fee settings.' });
     }
 });
 

@@ -46,7 +46,9 @@ const KNOWN_COLUMNS = {
         // until a demo run hit PUT /orders/:id/status and the guard refused the
         // write — which is the guard doing its job, but it should have been
         // caught by a test instead of by a demo.
-        'handled_by', 'handled_by_name', 'handled_at'
+        'handled_by', 'handled_by_name', 'handled_at',
+        // The flat delivery fee on an order under $300 — see utils/delivery-fee.js.
+        'delivery_fee'
     ]),
     company_po_sequences: new Set([
         'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',

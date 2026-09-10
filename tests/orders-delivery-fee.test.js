@@ -1,10 +1,10 @@
 /**
- * tests/orders-tax.test.js
+ * tests/orders-delivery-fee.test.js
  *
- * Tax on the order route, exercised through HTTP — the order route always
- * recomputes tax itself at submit time (utils/tax.js has the pure logic
- * tests); this file is where that wiring is checked end to end, the same way
- * tests/orders-po.test.js checks the PO wiring.
+ * The delivery fee on the order route, exercised through HTTP — the order
+ * route always recomputes this itself at submit time (utils/delivery-fee.js
+ * has the pure logic tests); this file is where that wiring is checked end
+ * to end, the same way tests/orders-tax.test.js checks the tax wiring.
  *
  *   node --test tests/
  */
@@ -93,14 +93,16 @@ const LOC      = '33333333-3333-4333-8333-333333333333';
 const PRODUCT  = '55555555-5555-4555-8555-555555555555';
 const PRODUCT2 = '66666666-6666-4666-8666-666666666666';
 
-function seed(taxBlock) {
+function seed(deliveryFeeBlock) {
     return createFakeSupabase({
         companies: [{
             id: CO, name: 'Test Shop', slug: 'test', is_active: true,
             contact_email: 'shop@example.invalid', email_config: {},
-            // Delivery fee is a separate concern (see orders-delivery-fee.test.js)
-            // and defaults to on — turned off here so these totals stay pure tax.
-            settings: { purchase_orders: { mode: 'off' }, delivery_fee: { enabled: false }, ...(taxBlock ? { tax: taxBlock } : {}) }
+            settings: {
+                purchase_orders: { mode: 'off' },
+                tax: { exempt: true }, // keep totals simple to reason about
+                ...(deliveryFeeBlock ? { delivery_fee: deliveryFeeBlock } : {})
+            }
         }],
         company_locations: [{ id: LOC, company_id: CO, name: 'Main', is_active: true, restrict_to_category: null }],
         products: [
@@ -110,8 +112,8 @@ function seed(taxBlock) {
     });
 }
 
-function reset(taxBlock) {
-    fake = seed(taxBlock);
+function reset(deliveryFeeBlock) {
+    fake = seed(deliveryFeeBlock);
     authCompany = { id: CO, name: 'Test Shop', slug: 'test' };
     sent.orders = [];
 }
@@ -126,52 +128,42 @@ function app() {
 const body = (items) => ({
     contact_name: 'Sam', contact_email: 'sam@example.invalid', contact_phone: '000',
     location_id: LOC, location: 'Main',
-    items: items || [{ product_id: PRODUCT, quantity: 2 }]
+    items: items || [{ product_id: PRODUCT, quantity: 1 }]
 });
 
 // ==================================================================
-// DEFAULT — every company is charged 13% Ontario HST unless configured
+// DEFAULT — every company is charged the fee on a small order unless
+// configured otherwise
 // ==================================================================
 
-test('a company with no tax settings is charged 13% HST by default', async () => {
+test('a $100 order (under $300) with no delivery-fee settings is charged the $10 fee by default', async () => {
     reset(undefined);
     const res = await request(app()).post('/api/store/test/orders').send(body());
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    assert.equal(res.body.order.subtotal, 200);
-    assert.equal(res.body.order.tax, 26);
-    assert.equal(res.body.order.tax_rate, 0.13);
-    assert.equal(res.body.order.total, 226);
+    assert.equal(res.body.order.subtotal, 100);
+    assert.equal(res.body.order.delivery_fee, 10);
+    assert.equal(res.body.order.total, 110);
 });
 
-test('the stored total is the priced subtotal plus tax, not the subtotal alone', () => {
-    // Guards the regression this feature exists to fix: before this, total
-    // was literally `= subtotal`.
-    assert.notEqual(226, 200, 'sanity: the two numbers really do differ');
+test('an order at $300 or more is not charged the fee', async () => {
+    reset(undefined);
+    const res = await request(app()).post('/api/store/test/orders')
+        .send(body([{ product_id: PRODUCT, quantity: 3 }])); // $300 subtotal
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.order.subtotal, 300);
+    assert.equal(res.body.order.delivery_fee, 0);
+    assert.equal(res.body.order.total, 300);
 });
 
 // ==================================================================
-// CUSTOM RATE
+// TURNED OFF FOR THE ACCOUNT
 // ==================================================================
 
-test('a company with a configured rate is charged that rate instead', async () => {
-    reset({ rate: 0.15 });
+test('a company with the fee turned off is never charged it, even on a $1 order', async () => {
+    reset({ enabled: false });
     const res = await request(app()).post('/api/store/test/orders').send(body());
-    assert.equal(res.status, 201);
-    assert.equal(res.body.order.tax, 30);
-    assert.equal(res.body.order.tax_rate, 0.15);
-    assert.equal(res.body.order.total, 230);
-});
-
-// ==================================================================
-// EXEMPT
-// ==================================================================
-
-test('an exempt company is charged no tax at all', async () => {
-    reset({ exempt: true, rate: 0.15 });
-    const res = await request(app()).post('/api/store/test/orders').send(body());
-    assert.equal(res.status, 201);
-    assert.equal(res.body.order.tax, 0);
-    assert.equal(res.body.order.tax_rate, 0);
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.order.delivery_fee, 0);
     assert.equal(res.body.order.total, res.body.order.subtotal);
 });
 
@@ -179,41 +171,38 @@ test('an exempt company is charged no tax at all', async () => {
 // PRICE-ON-REQUEST INTERACTION
 // ==================================================================
 
-test('a price-on-request line is not taxed — it has no price to tax yet', async () => {
+test('a price-on-request line does not count toward the $300 threshold — same reasoning as tax', async () => {
     reset(undefined);
     const res = await request(app()).post('/api/store/test/orders')
-        .send(body([{ product_id: PRODUCT, quantity: 1 }, { product_id: PRODUCT2, quantity: 1 }]));
+        .send(body([{ product_id: PRODUCT2, quantity: 1 }])); // $50 listed, but priced at $0 (quoted)
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    // Only the $100 widget is priced; the $50-listed gadget is price_on_request.
-    assert.equal(res.body.order.subtotal, 100);
-    assert.equal(res.body.order.tax, 13);
-    assert.equal(res.body.order.total, 113);
+    assert.equal(res.body.order.subtotal, 0);
+    assert.equal(res.body.order.delivery_fee, 10);
 });
 
 // ==================================================================
 // THE CART-PREVIEW CONFIG ENDPOINT
 // ==================================================================
 
-test('GET tax/config reports the default for a company with nothing configured', async () => {
+test('GET delivery-fee/config reports the default (on) for a company with nothing configured', async () => {
     reset(undefined);
-    const res = await request(app()).get('/api/store/test/tax/config');
+    const res = await request(app()).get('/api/store/test/delivery-fee/config');
     assert.equal(res.status, 200);
-    assert.equal(res.body.rate, 0.13);
-    assert.equal(res.body.exempt, false);
-    assert.equal(res.body.is_default, true);
+    assert.equal(res.body.enabled, true);
+    assert.equal(res.body.threshold, 300);
+    assert.equal(res.body.fee, 10);
 });
 
-test('GET tax/config reflects an exemption', async () => {
-    reset({ exempt: true });
-    const res = await request(app()).get('/api/store/test/tax/config');
+test('GET delivery-fee/config reflects the account being turned off', async () => {
+    reset({ enabled: false });
+    const res = await request(app()).get('/api/store/test/delivery-fee/config');
     assert.equal(res.status, 200);
-    assert.equal(res.body.exempt, true);
-    assert.equal(res.body.rate, 0);
+    assert.equal(res.body.enabled, false);
 });
 
-test('GET tax/config requires the same company auth every other storefront route does', async () => {
+test('GET delivery-fee/config requires the same company auth every other storefront route does', async () => {
     reset(undefined);
     authCompany = null;
-    const res = await request(app()).get('/api/store/test/tax/config');
+    const res = await request(app()).get('/api/store/test/delivery-fee/config');
     assert.equal(res.status, 401);
 });
