@@ -85,7 +85,7 @@ router.post('/admin-login', async (req, res) => {
         // Look up admin
         const { data: admin, error } = await supabaseAdmin
             .from('admin_users')
-            .select('id, email, name, role, company_id, branch_id, password_hash, is_active, must_change_password')
+            .select('id, email, name, role, company_id, branch_id, password_hash, is_active, must_change_password, is_branch_manager')
             .eq('email', email)
             .single();
 
@@ -136,7 +136,8 @@ router.post('/admin-login', async (req, res) => {
                 role: admin.role,
                 company_id: admin.company_id,
                 branch_id: admin.branch_id,
-                must_change_password: admin.must_change_password === true
+                must_change_password: admin.must_change_password === true,
+                is_branch_manager: admin.is_branch_manager === true
             }
         });
 

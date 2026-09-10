@@ -21,6 +21,7 @@ const { stripHtml, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendOrderNotification } = require('../utils/email');
 const { notifyReorderRaised } = require('../utils/inventory-alerts');
+const { deliveryFeeSettings, computeDeliveryFee } = require('../utils/delivery-fee');
 const {
     STORE_MOVEMENT_TYPES,
     MOVEMENT_TYPES,
@@ -1004,6 +1005,14 @@ router.post('/replenishment/:id/approve', async (req, res) => {
         });
         subtotal = Math.round(subtotal * 100) / 100;
 
+        // This becomes a real CHC order through the same path as one placed by
+        // hand (see the doc comment above), so it is subject to the same
+        // delivery fee on a small order. Doesn't touch tax here — this route
+        // has never charged it (a pre-existing gap, not this feature's to fix).
+        const { data: feeCompany } = await supabaseAdmin
+            .from('companies').select('settings').eq('id', companyId).maybeSingle();
+        const deliveryFee = computeDeliveryFee(subtotal, deliveryFeeSettings(feeCompany?.settings).enabled);
+
         const notes = text(req.body?.notes, 500);
         const orderNotes = [`refinishAI Inventory replenishment, approved by ${actor}`, notes].filter(Boolean).join(' — ');
 
@@ -1020,7 +1029,8 @@ router.post('/replenishment/:id/approve', async (req, res) => {
                 location_id: location.id,
                 items,
                 subtotal,
-                total: subtotal,
+                delivery_fee: deliveryFee,
+                total: subtotal + deliveryFee,
                 notes: orderNotes,
                 status: 'pending',
                 status_history: [{

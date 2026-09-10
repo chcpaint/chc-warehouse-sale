@@ -411,10 +411,15 @@
                             <span id="cart-tax-label">Tax:</span>
                             <span id="cart-tax">$0.00</span>
                         </div>
+                        <div id="cart-delivery-fee-row" class="hidden flex justify-between text-sm text-gray-500 mb-1">
+                            <span id="cart-delivery-fee-label">Delivery fee:</span>
+                            <span id="cart-delivery-fee">$0.00</span>
+                        </div>
                         <div class="flex justify-between text-xl font-bold mb-4 pt-2 border-t">
                             <span>Total:</span>
                             <span id="cart-total">$0.00</span>
                         </div>
+                        <p id="cart-delivery-fee-note" class="hidden text-xs text-blue-700 -mt-3 mb-4"></p>
                         <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-800">
                             <b>Step 1 &mdash; Get it approved.</b> Download this as a quote to send for approval and to get your PO number. Nothing is ordered yet.
                         </div>
@@ -1047,6 +1052,7 @@
         loadProducts();
         loadPromotions();
         loadTaxConfig();
+        loadDeliveryFeeConfig();
         // Reflect the location chosen at login in the checkout form
         if (state.location && document.getElementById('checkout-location-name')) {
             document.getElementById('checkout-location-name').textContent = state.location.name;
@@ -2332,7 +2338,13 @@
         // Tax is a preview here — computed from the same rate the order route
         // will apply, but the order route is the one that actually charges it.
         const tax = taxConfig.exempt ? 0 : Math.round((total * taxConfig.rate + Number.EPSILON) * 100) / 100;
-        const grandTotal = total + tax;
+
+        // Same story as tax: a preview of what the order route will charge,
+        // computed on the same priced subtotal (a quoted line can't push an
+        // order past the threshold any more than it can be taxed).
+        const deliveryFeeApplies = deliveryFeeConfig.enabled && total < deliveryFeeConfig.threshold;
+        const deliveryFee = deliveryFeeApplies ? deliveryFeeConfig.fee : 0;
+        const grandTotal = total + tax + deliveryFee;
 
         document.getElementById('cart-subtotal').textContent = `$${total.toFixed(2)}`;
         const taxRow = document.getElementById('cart-tax-row');
@@ -2341,6 +2353,24 @@
         if (taxLabel) taxLabel.textContent = `Tax (${(taxConfig.rate * 100).toFixed(0)}%):`;
         document.getElementById('cart-tax').textContent = `$${tax.toFixed(2)}`;
         document.getElementById('cart-total').textContent = `$${grandTotal.toFixed(2)}`;
+
+        const feeRow = document.getElementById('cart-delivery-fee-row');
+        if (feeRow) feeRow.classList.toggle('hidden', !deliveryFeeApplies);
+        document.getElementById('cart-delivery-fee').textContent = `$${deliveryFee.toFixed(2)}`;
+
+        // A quiet nudge, not a warning — telling a shop that $23 more clears
+        // the fee is more useful than just showing them a surprise charge at
+        // the total.
+        const feeNote = document.getElementById('cart-delivery-fee-note');
+        if (feeNote) {
+            if (deliveryFeeApplies) {
+                const toGo = deliveryFeeConfig.threshold - total;
+                feeNote.textContent = `Add $${toGo.toFixed(2)} more to clear the $${deliveryFeeConfig.threshold.toFixed(2)} order minimum and avoid the $${deliveryFeeConfig.fee.toFixed(2)} delivery fee.`;
+                feeNote.classList.remove('hidden');
+            } else {
+                feeNote.classList.add('hidden');
+            }
+        }
 
         // Say plainly that the total is not the whole bill. A customer who is
         // not told will read the figure as final and be surprised by the invoice.
@@ -2400,6 +2430,28 @@
         } catch (e) {
             // Leave the default (13%) — the worst case is the cart preview
             // guessing at a rate the order itself will still get right.
+        }
+        renderCart();
+    }
+
+    // ------------------------------------------------------------
+    // Delivery fee
+    //
+    // Same preview-only relationship to the order route as tax above: a
+    // stale or failed fetch here can make the cart's preview wrong but can
+    // never make an order wrong, because the order route always recomputes
+    // this itself from the same company settings and the real priced
+    // subtotal at submit time.
+    // ------------------------------------------------------------
+    let deliveryFeeConfig = { enabled: true, threshold: 300, fee: 10 };
+
+    async function loadDeliveryFeeConfig() {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/delivery-fee/config`);
+            if (resp.ok) deliveryFeeConfig = await resp.json();
+        } catch (e) {
+            // Leave the default (on, $10 under $300) — the worst case is the
+            // cart preview showing a fee the order itself will still get right.
         }
         renderCart();
     }
@@ -2501,6 +2553,7 @@
             columnStyles: { 2:{halign:'center'}, 3:{halign:'right'}, 4:{halign:'right'} }
         });
         const tax = taxConfig.exempt ? 0 : Math.round((total * taxConfig.rate + Number.EPSILON) * 100) / 100;
+        const deliveryFee = (deliveryFeeConfig.enabled && total < deliveryFeeConfig.threshold) ? deliveryFeeConfig.fee : 0;
         let y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 60) + 8;
         doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(90,90,90);
         doc.text('Subtotal: $' + total.toFixed(2), 140, y);
@@ -2508,9 +2561,13 @@
             y += 6;
             doc.text(`Tax (${(taxConfig.rate * 100).toFixed(0)}%): $` + tax.toFixed(2), 140, y);
         }
+        if (deliveryFee > 0) {
+            y += 6;
+            doc.text(`Delivery fee (order under $${deliveryFeeConfig.threshold.toFixed(2)}): $` + deliveryFee.toFixed(2), 140, y);
+        }
         y += 8;
         doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(20,20,20);
-        doc.text('Total: $' + (total + tax).toFixed(2), 140, y);
+        doc.text('Total: $' + (total + tax + deliveryFee).toFixed(2), 140, y);
         doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(120,120,120);
         doc.text('This is a quote, not an invoice. Prices, and tax, are subject to change and final confirmation. To place the order, return to the store, click "Convert to Order", and enter your PO number.', 14, y + 12, { maxWidth: 182 });
         doc.save(qnum + '.pdf');
@@ -2569,8 +2626,11 @@
             document.getElementById('order-confirmation-number').textContent = data.order.order_number;
             const totalLine = document.getElementById('order-confirmation-total');
             if (totalLine) {
-                totalLine.textContent = Number(data.order.tax) > 0
-                    ? `Subtotal $${Number(data.order.subtotal).toFixed(2)} + tax $${Number(data.order.tax).toFixed(2)} = $${Number(data.order.total).toFixed(2)}`
+                const parts = [`Subtotal $${Number(data.order.subtotal).toFixed(2)}`];
+                if (Number(data.order.tax) > 0) parts.push(`tax $${Number(data.order.tax).toFixed(2)}`);
+                if (Number(data.order.delivery_fee) > 0) parts.push(`delivery fee $${Number(data.order.delivery_fee).toFixed(2)}`);
+                totalLine.textContent = parts.length > 1
+                    ? `${parts.join(' + ')} = $${Number(data.order.total).toFixed(2)}`
                     : `Total: $${Number(data.order.total).toFixed(2)}`;
             }
 
@@ -2652,6 +2712,7 @@
             <div style="margin-top:15px;text-align:right">
                 <p class="meta" style="margin:2px 0">Subtotal: $${parseFloat(o.subtotal).toFixed(2)}</p>
                 ${Number(o.tax) > 0 ? `<p class="meta" style="margin:2px 0">Tax${o.tax_rate ? ` (${(Number(o.tax_rate) * 100).toFixed(0)}%)` : ''}: $${parseFloat(o.tax).toFixed(2)}</p>` : ''}
+                ${Number(o.delivery_fee) > 0 ? `<p class="meta" style="margin:2px 0">Delivery fee: $${parseFloat(o.delivery_fee).toFixed(2)}</p>` : ''}
                 <p class="total" style="margin-top:6px">Total: $${parseFloat(o.total).toFixed(2)}</p>
             </div>
             <scr` + `ipt>window.onload=function(){window.print();}</scr` + `ipt>
@@ -2672,6 +2733,7 @@
         );
         rows.push(`"${o.order_number}","","","SUBTOTAL","","","${parseFloat(o.subtotal).toFixed(2)}"`);
         if (Number(o.tax) > 0) rows.push(`"${o.order_number}","","","TAX${o.tax_rate ? ` (${(Number(o.tax_rate) * 100).toFixed(0)}%)` : ''}","","","${parseFloat(o.tax).toFixed(2)}"`);
+        if (Number(o.delivery_fee) > 0) rows.push(`"${o.order_number}","","","DELIVERY FEE","","","${parseFloat(o.delivery_fee).toFixed(2)}"`);
         rows.push(`"${o.order_number}","","","TOTAL","","","${parseFloat(o.total).toFixed(2)}"`);
         const csv = [header, ...rows].join('\n');
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -2775,6 +2837,10 @@
                                     ${Number(o.tax) > 0 ? `<tr>
                                         <td colspan="4" class="px-3 py-2 text-right text-gray-500">Tax${o.tax_rate ? ` (${(Number(o.tax_rate) * 100).toFixed(0)}%)` : ''}:</td>
                                         <td class="px-3 py-2 text-right text-gray-500">$${parseFloat(o.tax).toFixed(2)}</td>
+                                    </tr>` : ''}
+                                    ${Number(o.delivery_fee) > 0 ? `<tr>
+                                        <td colspan="4" class="px-3 py-2 text-right text-gray-500">Delivery fee:</td>
+                                        <td class="px-3 py-2 text-right text-gray-500">$${parseFloat(o.delivery_fee).toFixed(2)}</td>
                                     </tr>` : ''}
                                     <tr>
                                         <td colspan="4" class="px-3 py-2 text-right font-bold">Total:</td>
