@@ -916,7 +916,7 @@ test('changing an order status records who did it', async () => {
     // Poking fake.db directly would skip that check and prove nothing.
     await fake.from('orders')
         .update({
-            status: 'confirmed',
+            status: 'processing',
             handled_by: 'admin-1',
             handled_by_name: 'Frank G',
             handled_at: new Date().toISOString()

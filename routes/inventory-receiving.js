@@ -26,10 +26,10 @@ const { isValidUUID } = require('../utils/sanitize');
 const router = express.Router({ mergeParams: true });
 
 // Orders in these states are things a truck could plausibly be delivering.
-// 'pending' is excluded -- CHC has not even confirmed it yet, so there is
+// 'pending' is excluded -- CHC has not even started on it yet, so there is
 // nothing to receive against. 'cancelled' and 'closed' are excluded below,
 // per-order, with a clearer message than just leaving them off a list.
-const RECEIVABLE_STATUSES = ['confirmed', 'processing', 'shipped', 'delivered'];
+const RECEIVABLE_STATUSES = ['processing', 'out_on_delivery'];
 
 /** Every receipt logged against an order, summed by product_id, plus the unexpected ones on their own. */
 async function receivedSoFar(orderId) {

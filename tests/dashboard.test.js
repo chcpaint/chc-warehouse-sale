@@ -110,7 +110,7 @@ function seed(extra = {}) {
             { id: 'o2', company_id: CO_A, order_number: 'A-2', status: 'pending', total: 400, created_at: RECENT,
               items: [line('MMM06334', 'Masking Tape', 40, 10)] },
             // B: one real order plus one cancelled one that must not count.
-            { id: 'o3', company_id: CO_B, order_number: 'B-1', status: 'delivered', total: 600, created_at: RECENT,
+            { id: 'o3', company_id: CO_B, order_number: 'B-1', status: 'out_on_delivery', total: 600, created_at: RECENT,
               items: [line('PRF611N', 'ProForm Clear', 3, 200)] },
             { id: 'o4', company_id: CO_B, order_number: 'B-2', status: 'cancelled', total: 99999, created_at: RECENT,
               items: [line('PRF611N', 'ProForm Clear', 500, 200)] },

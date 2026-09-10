@@ -327,10 +327,8 @@
                             <select id="admin-order-status" onchange="loadAdminOrders()" class="px-3 py-1 border rounded-lg text-sm bg-white">
                                 <option value="">All Statuses</option>
                                 <option value="pending">Pending</option>
-                                <option value="confirmed">Confirmed</option>
                                 <option value="processing">Processing</option>
-                                <option value="shipped">Shipped</option>
-                                <option value="delivered">Delivered</option>
+                                <option value="out_on_delivery">Out on Delivery</option>
                                 <option value="closed">Closed</option>
                                 <option value="cancelled">Cancelled</option>
                             </select>
@@ -2025,6 +2023,11 @@
     // ============================================================
     // ORDERS
     // ============================================================
+    const ORDER_STATUS_LABEL = {
+        pending: 'Pending', processing: 'Processing', out_on_delivery: 'Out on Delivery',
+        closed: 'Closed', cancelled: 'Cancelled'
+    };
+
     let orderLocationFilterLoaded = false;
     let currentAdminOrders = [];
     let orderStageFilter = 'all';
@@ -2089,7 +2092,7 @@
     function renderOrderRow(o) {
         const st = orderStage(o);
         const hasInvoice = !!o.invoice_filename;
-        const statusOpts = ['pending','confirmed','processing','shipped','delivered','closed','cancelled'];
+        const statusOpts = ['pending','processing','out_on_delivery','closed','cancelled'];
         const invMeta = hasInvoice ? `<div class="text-xs text-gray-400 mt-1" title="${esc(o.invoice_filename)}"><i class="fas fa-file-invoice-dollar text-emerald-500 mr-1"></i>${o.invoice_uploaded_at ? new Date(o.invoice_uploaded_at).toLocaleDateString() : 'uploaded'}</div>` : '';
 
         // Context-aware action buttons per stage.
@@ -2122,7 +2125,7 @@
                     <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold border ${st.color}">${st.label}</span>
                     ${stageBar(st)}
                     <select onchange="updateOrderStatus('${o.id}', this.value)" class="mt-1.5 text-xs px-1.5 py-0.5 rounded border text-gray-500 bg-white" title="Set a granular status">
-                        ${statusOpts.map(sv => `<option value="${sv}" ${sv === o.status ? 'selected' : ''}>${sv.charAt(0).toUpperCase() + sv.slice(1)}</option>`).join('')}
+                        ${statusOpts.map(sv => `<option value="${sv}" ${sv === o.status ? 'selected' : ''}>${ORDER_STATUS_LABEL[sv] || sv}</option>`).join('')}
                     </select>
                     ${invMeta}
                 </td>

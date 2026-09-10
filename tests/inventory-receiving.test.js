@@ -144,7 +144,7 @@ async function seedOrder(overrides = {}) {
             { product_id: TAPE,  sku: 'MMM06334', name: '3M Masking Tape', quantity: 10, unit_price: 10 }
         ],
         subtotal: 900, tax: 117, total: 1017,
-        status: 'confirmed',
+        status: 'processing',
         ...overrides
     }).select().single();
     return order;
