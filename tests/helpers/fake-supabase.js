@@ -140,6 +140,19 @@ const KNOWN_COLUMNS = {
         'id', 'base_brand', 'base_category', 'base_name', 'base_part_number', 'base_speed', 'base_size',
         'alt_brand', 'alt_product_line', 'alt_name', 'alt_part_number', 'alt_speed', 'alt_size',
         'sheet_name', 'source_file', 'imported_at', 'imported_by'
+    ]),
+    // Added by migration 036 for the ship/receive transfer lifecycle. Kept
+    // guarded from here on — the columns above this comment predate that
+    // migration and were never checked, which is exactly the kind of gap the
+    // comment at the top of this list warns about.
+    inventory_transfers: new Set([
+        'id', 'company_id', 'from_location_id', 'to_location_id', 'product_id', 'quantity',
+        'reason', 'actor_label', 'out_movement_id', 'in_movement_id', 'created_at',
+        'status', 'driver_id', 'driver_name', 'received_at', 'received_by',
+        'quantity_received', 'cancelled_at', 'cancelled_by'
+    ]),
+    inventory_drivers: new Set([
+        'id', 'company_id', 'name', 'phone', 'is_active', 'created_at'
     ])
 };
 
@@ -327,9 +340,14 @@ class Query {
             }
             const hit = this.rows();
             hit.forEach(r => Object.assign(r, this.payload));
+            // .single() errors on zero rows; .maybeSingle() just returns null --
+            // same distinction the select path already makes below. Both were
+            // collapsed into one `_single` check until a driver-deactivate update
+            // chained with .maybeSingle() got an array back instead of an object.
             if (this._single && hit.length === 0) {
                 return { data: null, error: { message: 'no rows updated' } };
             }
+            if (this._maybe) return { data: hit[0] ? clone(hit[0]) : null, error: null };
             return { data: this._single ? clone(hit[0]) : clone(hit), error: null };
         }
 
@@ -366,6 +384,7 @@ function createFakeSupabase(seed = {}) {
         product_barcodes: [], inventory_levels: [], stock_movements: [],
         replenishment_orders: [], replenishment_order_lines: [], inventory_uploads: [],
         inventory_count_sessions: [], inventory_count_lines: [], inventory_transfers: [],
+        inventory_drivers: [],
         inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
         repair_kits: [], kit_items: [], company_kit_access: [],
         kit_product_map: [], kit_consumptions: [], order_receipts: [],

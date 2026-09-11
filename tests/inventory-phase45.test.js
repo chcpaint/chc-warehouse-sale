@@ -360,34 +360,106 @@ test('a committed count cannot be committed again', async () => {
     assert.equal(fake.db.stock_movements.filter(m => m.movement_type === 'count').length, 1);
 });
 
-// ---------- transfers ----------
+// ---------- transfers: drivers ----------
 
-test('a transfer writes both legs and reconciles', async () => {
+function addDriver(name = 'Chris', locationless = true) {
+    const driver = {
+        id: `dddddddd-dddd-4ddd-8ddd-${String(fake.db.inventory_drivers.length + 1).padStart(12, '0')}`,
+        company_id: COMPANY_ID, name, phone: null, is_active: true, created_at: new Date().toISOString()
+    };
+    fake.db.inventory_drivers.push(driver);
+    return driver;
+}
+
+test('a driver can be added to the roster and listed', async () => {
     reset();
+    const created = await request(app()).post(`${S}/transfers/drivers`).send({ name: 'Chris', phone: '555-1010' });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.driver.name, 'Chris');
+
+    const list = await request(app()).get(`${S}/transfers/drivers`);
+    assert.equal(list.body.drivers.length, 1);
+    assert.equal(list.body.drivers[0].phone, '555-1010');
+});
+
+test('adding a driver needs a name', async () => {
+    reset();
+    const res = await request(app()).post(`${S}/transfers/drivers`).send({ phone: '555-1010' });
+    assert.equal(res.status, 400);
+});
+
+test('a deactivated driver drops out of the default list but stays with all=1', async () => {
+    reset();
+    const driver = addDriver('Retiring Ray');
+    const off = await request(app()).put(`${S}/transfers/drivers/${driver.id}`).send({ is_active: false });
+    assert.equal(off.status, 200);
+    assert.equal(off.body.driver.is_active, false);
+
+    const active = await request(app()).get(`${S}/transfers/drivers`);
+    assert.equal(active.body.drivers.length, 0);
+    const all = await request(app()).get(`${S}/transfers/drivers?all=1`);
+    assert.equal(all.body.drivers.length, 1);
+});
+
+// ---------- transfers: shipping (phase one -- in transit) ----------
+
+test('shipping a transfer removes stock from the source and parks it in transit -- the destination is untouched', async () => {
+    reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 10, LOC_A);
 
     const res = await request(app()).post(`${S}/transfers`).send({
-        from_location_id: LOC_A, to_location_id: LOC_B,
+        from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id,
         product_id: PRODUCT_ID, quantity: 4, actor_label: 'Sam'
     });
 
     assert.equal(res.status, 201);
     assert.equal(res.body.from_on_hand, 6);
-    assert.equal(res.body.to_on_hand, 4);
+    assert.equal(res.body.transfer.status, 'in_transit');
+    assert.equal(res.body.transfer.driver_name, 'Chris');
 
     const out = fake.db.stock_movements.find(m => m.movement_type === 'transfer_out');
-    const inn = fake.db.stock_movements.find(m => m.movement_type === 'transfer_in');
     assert.equal(Number(out.qty_change), -4);
-    assert.equal(Number(inn.qty_change), 4);
-    assert.equal(Number(out.qty_change) + Number(inn.qty_change), 0, 'the pair must net to zero');
+    assert.equal(fake.db.stock_movements.filter(m => m.movement_type === 'transfer_in').length, 0,
+        'no inbound leg until someone receives it');
+    assert.equal(fake.db.inventory_levels.find(l => l.location_id === LOC_B), undefined,
+        'the destination has no ledger row at all yet -- nothing has arrived');
     assert.equal(fake.db.inventory_transfers.length, 1);
+    assert.ok(!fake.db.inventory_transfers[0].in_movement_id,
+        'the inbound leg is not written at ship time');
+});
+
+test('shipping requires a driver', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const res = await request(app()).post(`${S}/transfers`).send({
+        from_location_id: LOC_A, to_location_id: LOC_B,
+        product_id: PRODUCT_ID, quantity: 1, actor_label: 'Sam'
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /driver/i);
+});
+
+test('an inactive or another company\'s driver is refused, not silently ignored', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const other = addDriver('Someone Else');
+    other.company_id = '99999999-9999-4999-8999-999999999999';
+
+    const res = await request(app()).post(`${S}/transfers`).send({
+        from_location_id: LOC_A, to_location_id: LOC_B, driver_id: other.id,
+        product_id: PRODUCT_ID, quantity: 1, actor_label: 'Sam'
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /driver/i);
 });
 
 test('a transfer cannot exceed what the source holds', async () => {
     reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 2, LOC_A);
     const res = await request(app()).post(`${S}/transfers`).send({
-        from_location_id: LOC_A, to_location_id: LOC_B,
+        from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id,
         product_id: PRODUCT_ID, quantity: 5, actor_label: 'Sam'
     });
     assert.equal(res.status, 409);
@@ -396,9 +468,10 @@ test('a transfer cannot exceed what the source holds', async () => {
 
 test('a transfer to the same location is refused', async () => {
     reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 10, LOC_A);
     const res = await request(app()).post(`${S}/transfers`).send({
-        from_location_id: LOC_A, to_location_id: LOC_A,
+        from_location_id: LOC_A, to_location_id: LOC_A, driver_id: driver.id,
         product_id: PRODUCT_ID, quantity: 1, actor_label: 'Sam'
     });
     assert.equal(res.status, 400);
@@ -406,10 +479,11 @@ test('a transfer to the same location is refused', async () => {
 
 test('a transfer respects the destination category lock', async () => {
     reset();
+    const driver = addDriver();
     fake.db.company_locations[1].restrict_to_category = 'Equip/Filter/Booth';
     await receive(PRODUCT_ID, 10, LOC_A);
     const res = await request(app()).post(`${S}/transfers`).send({
-        from_location_id: LOC_A, to_location_id: LOC_B,
+        from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id,
         product_id: PRODUCT_ID, quantity: 1, actor_label: 'Sam'
     });
     assert.equal(res.status, 400);
@@ -418,8 +492,9 @@ test('a transfer respects the destination category lock', async () => {
 
 test('a transfer needs a name and a positive quantity', async () => {
     reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 10, LOC_A);
-    const base = { from_location_id: LOC_A, to_location_id: LOC_B, product_id: PRODUCT_ID };
+    const base = { from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id, product_id: PRODUCT_ID };
 
     assert.equal((await request(app()).post(`${S}/transfers`).send({ ...base, quantity: 1 })).status, 400);
     assert.equal((await request(app()).post(`${S}/transfers`).send({ ...base, quantity: 0, actor_label: 'Sam' })).status, 400);
@@ -428,6 +503,7 @@ test('a transfer needs a name and a positive quantity', async () => {
 
 test('another company cannot transfer using this company\'s locations', async () => {
     reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 10, LOC_A);
     authCompany = { id: '99999999-9999-4999-8999-999999999999', name: 'Someone else', slug: 'other' };
     fake.db.companies.push({
@@ -436,7 +512,7 @@ test('another company cannot transfer using this company\'s locations', async ()
     });
 
     const res = await request(app()).post('/api/store/other/inventory/transfers').send({
-        from_location_id: LOC_A, to_location_id: LOC_B,
+        from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id,
         product_id: PRODUCT_ID, quantity: 1, actor_label: 'Mallory'
     });
     assert.equal(res.status, 400);
@@ -445,13 +521,14 @@ test('another company cannot transfer using this company\'s locations', async ()
 
 // ---------- transfers: the scan basket posts here ----------
 
-test('a batch of staged transfers writes a two-legged transfer per line', async () => {
+test('a batch of staged transfers ships every line and puts each one in transit', async () => {
     reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 10, LOC_A);
     await receive(PRODUCT_2, 5, LOC_A);
 
     const res = await request(app()).post(`${S}/transfers/bulk`).send({
-        from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam',
+        from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id, actor_label: 'Sam',
         transfers: [
             { product_id: PRODUCT_ID, quantity: 3, scanned_barcode: '0051131020474' },
             { product_id: PRODUCT_2, quantity: 2 }
@@ -462,33 +539,22 @@ test('a batch of staged transfers writes a two-legged transfer per line', async 
     assert.equal(res.body.applied, 2);
     assert.equal(res.body.failed, 0);
     assert.equal(res.body.results[0].ok, true);
-    assert.equal(res.body.results[0].to_on_hand, 3);
-    assert.equal(res.body.results[1].to_on_hand, 2);
+    assert.equal(res.body.results[0].from_on_hand, 7);
+    assert.equal(res.body.results[1].from_on_hand, 3);
     assert.equal(fake.db.inventory_transfers.length, 2);
+    assert.ok(fake.db.inventory_transfers.every(t => t.status === 'in_transit'));
     assert.equal(fake.db.stock_movements.filter(m => m.movement_type === 'transfer_out').length, 2);
+    assert.equal(fake.db.stock_movements.filter(m => m.movement_type === 'transfer_in').length, 0);
 });
 
-test('scanning the same item twice into one batch stages it as one line client-side, but the batch endpoint itself just sums whatever it is sent', async () => {
+test('one shortfall in a batch fails only that line and leaves the rest shipped', async () => {
     reset();
-    await receive(PRODUCT_ID, 10, LOC_A);
-
-    // The basket UI collapses repeat scans into a single incremented line
-    // before posting; the endpoint has no opinion about that and simply
-    // applies each line it is given.
-    const res = await request(app()).post(`${S}/transfers/bulk`).send({
-        from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam',
-        transfers: [{ product_id: PRODUCT_ID, quantity: 2 }]
-    });
-    assert.equal(res.body.results[0].to_on_hand, 2);
-});
-
-test('one shortfall in a batch fails only that line and leaves the rest posted', async () => {
-    reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 2, LOC_A);
     await receive(PRODUCT_2, 5, LOC_A);
 
     const res = await request(app()).post(`${S}/transfers/bulk`).send({
-        from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam',
+        from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id, actor_label: 'Sam',
         transfers: [
             { product_id: PRODUCT_ID, quantity: 5 },   // only 2 on hand
             { product_id: PRODUCT_2, quantity: 1 }
@@ -504,22 +570,26 @@ test('one shortfall in a batch fails only that line and leaves the rest posted',
     assert.equal(fake.db.inventory_transfers.length, 1);
 });
 
-test('a transfer batch needs a name, a from, and a to before touching any line', async () => {
+test('a transfer batch needs a name, a from, a to and a driver before touching any line', async () => {
     reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 10, LOC_A);
     const line = { product_id: PRODUCT_ID, quantity: 1 };
 
     assert.equal((await request(app()).post(`${S}/transfers/bulk`)
-        .send({ from_location_id: LOC_A, to_location_id: LOC_B, transfers: [line] })).status, 400);
+        .send({ from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id, transfers: [line] })).status, 400);
     assert.equal((await request(app()).post(`${S}/transfers/bulk`)
-        .send({ from_location_id: LOC_A, to_location_id: LOC_A, actor_label: 'Sam', transfers: [line] })).status, 400);
+        .send({ from_location_id: LOC_A, to_location_id: LOC_A, driver_id: driver.id, actor_label: 'Sam', transfers: [line] })).status, 400);
     assert.equal((await request(app()).post(`${S}/transfers/bulk`)
-        .send({ from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam', transfers: [] })).status, 400);
+        .send({ from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Sam', transfers: [line] })).status, 400);
+    assert.equal((await request(app()).post(`${S}/transfers/bulk`)
+        .send({ from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id, actor_label: 'Sam', transfers: [] })).status, 400);
     assert.equal(fake.db.inventory_transfers.length, 0);
 });
 
 test('another company cannot batch-transfer using this company\'s locations', async () => {
     reset();
+    const driver = addDriver();
     await receive(PRODUCT_ID, 10, LOC_A);
     authCompany = { id: '99999999-9999-4999-8999-999999999999', name: 'Someone else', slug: 'other' };
     fake.db.companies.push({
@@ -528,11 +598,187 @@ test('another company cannot batch-transfer using this company\'s locations', as
     });
 
     const res = await request(app()).post('/api/store/other/inventory/transfers/bulk').send({
-        from_location_id: LOC_A, to_location_id: LOC_B, actor_label: 'Mallory',
+        from_location_id: LOC_A, to_location_id: LOC_B, driver_id: driver.id, actor_label: 'Mallory',
         transfers: [{ product_id: PRODUCT_ID, quantity: 1 }]
     });
     assert.equal(res.status, 400);
     assert.equal(fake.db.inventory_transfers.length, 0);
+});
+
+// ---------- transfers: receiving (phase two -- closes out the trip) ----------
+
+async function ship(quantity, { productId = PRODUCT_ID, from = LOC_A, to = LOC_B, driver } = {}) {
+    const d = driver || addDriver();
+    const res = await request(app()).post(`${S}/transfers`).send({
+        from_location_id: from, to_location_id: to, driver_id: d.id,
+        product_id: productId, quantity, actor_label: 'Sam'
+    });
+    return res.body.transfer;
+}
+
+test('an incoming list shows what is headed to a location and nothing else', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    await ship(4);
+
+    const incoming = await request(app()).get(`${S}/transfers/incoming?location_id=${LOC_B}`);
+    assert.equal(incoming.status, 200);
+    assert.equal(incoming.body.incoming.length, 1);
+    assert.equal(incoming.body.incoming[0].quantity, 4);
+    assert.equal(incoming.body.incoming[0].driver_name, 'Chris');
+    assert.equal(incoming.body.incoming[0].from_location_name, 'Burlington');
+
+    const nothingForA = await request(app()).get(`${S}/transfers/incoming?location_id=${LOC_A}`);
+    assert.equal(nothingForA.body.incoming.length, 0);
+});
+
+test('receiving the exact quantity completes the transfer and credits the destination', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const transfer = await ship(4);
+
+    const res = await request(app()).post(`${S}/transfers/receive/bulk`).send({
+        location_id: LOC_B, actor_label: 'Robin',
+        receipts: [{ transfer_id: transfer.id, quantity: 4 }]
+    });
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.applied, 1);
+    assert.equal(res.body.discrepancies, 0);
+    assert.equal(res.body.results[0].to_on_hand, 4);
+    assert.equal(res.body.results[0].discrepancy, false);
+
+    const inn = fake.db.stock_movements.find(m => m.movement_type === 'transfer_in');
+    assert.equal(Number(inn.qty_change), 4);
+    const row = fake.db.inventory_transfers.find(t => t.id === transfer.id);
+    assert.equal(row.status, 'received');
+    assert.equal(row.received_by, 'Robin');
+    assert.equal(Number(row.quantity_received), 4);
+});
+
+test('receiving a different quantity than was shipped completes the transfer but is flagged, not blocked', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const transfer = await ship(5);
+
+    const short = await request(app()).post(`${S}/transfers/receive/bulk`).send({
+        location_id: LOC_B, actor_label: 'Robin',
+        receipts: [{ transfer_id: transfer.id, quantity: 3 }]
+    });
+
+    assert.equal(short.status, 201);
+    assert.equal(short.body.discrepancies, 1);
+    assert.equal(short.body.results[0].ok, true, 'a mismatch still completes the receipt');
+    assert.equal(short.body.results[0].discrepancy, true);
+    assert.equal(short.body.results[0].to_on_hand, 3, 'only what actually arrived is credited');
+
+    const row = fake.db.inventory_transfers.find(t => t.id === transfer.id);
+    assert.equal(row.status, 'received');
+    assert.equal(Number(row.quantity_received), 3);
+});
+
+test('a shipment cannot be received at the wrong location', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const transfer = await ship(4);
+
+    const res = await request(app()).post(`${S}/transfers/receive/bulk`).send({
+        location_id: LOC_A, actor_label: 'Robin',
+        receipts: [{ transfer_id: transfer.id, quantity: 4 }]
+    });
+    assert.equal(res.body.applied, 0);
+    assert.match(res.body.results[0].error, /not headed to this location/);
+});
+
+test('a shipment cannot be received twice', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const transfer = await ship(4);
+    await request(app()).post(`${S}/transfers/receive/bulk`).send({
+        location_id: LOC_B, actor_label: 'Robin', receipts: [{ transfer_id: transfer.id, quantity: 4 }]
+    });
+
+    const again = await request(app()).post(`${S}/transfers/receive/bulk`).send({
+        location_id: LOC_B, actor_label: 'Robin', receipts: [{ transfer_id: transfer.id, quantity: 4 }]
+    });
+    assert.equal(again.body.applied, 0);
+    assert.match(again.body.results[0].error, /Already received/);
+    assert.equal(fake.db.stock_movements.filter(m => m.movement_type === 'transfer_in').length, 1);
+});
+
+test('receiving needs a name', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const transfer = await ship(4);
+    const res = await request(app()).post(`${S}/transfers/receive/bulk`).send({
+        location_id: LOC_B, receipts: [{ transfer_id: transfer.id, quantity: 4 }]
+    });
+    assert.equal(res.status, 400);
+});
+
+// ---------- transfers: cancelling an in-transit shipment ----------
+
+test('the shipping location can cancel a shipment before it is received, and stock comes back', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const transfer = await ship(4);
+    assert.equal(fake.db.inventory_levels.find(l => l.location_id === LOC_A).on_hand, 6);
+
+    const res = await request(app()).post(`${S}/transfers/${transfer.id}/cancel`).send({
+        location_id: LOC_A, actor_label: 'Sam'
+    });
+    assert.equal(res.status, 200);
+    assert.equal(fake.db.inventory_levels.find(l => l.location_id === LOC_A).on_hand, 10);
+
+    const row = fake.db.inventory_transfers.find(t => t.id === transfer.id);
+    assert.equal(row.status, 'cancelled');
+    assert.equal(row.cancelled_by, 'Sam');
+});
+
+test('the destination cannot cancel a shipment it never had', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const transfer = await ship(4);
+    const res = await request(app()).post(`${S}/transfers/${transfer.id}/cancel`).send({
+        location_id: LOC_B, actor_label: 'Robin'
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /Only the shipping location/);
+});
+
+test('a received shipment cannot be cancelled after the fact', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    const transfer = await ship(4);
+    await request(app()).post(`${S}/transfers/receive/bulk`).send({
+        location_id: LOC_B, actor_label: 'Robin', receipts: [{ transfer_id: transfer.id, quantity: 4 }]
+    });
+
+    const res = await request(app()).post(`${S}/transfers/${transfer.id}/cancel`).send({
+        location_id: LOC_A, actor_label: 'Sam'
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /already received/);
+});
+
+// ---------- transfers: history ----------
+
+test('the transfer history can be filtered by status and flags discrepancies', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10, LOC_A);
+    await receive(PRODUCT_2, 5, LOC_A);
+    const shipped = await ship(4);
+    await ship(2, { productId: PRODUCT_2 });
+    await request(app()).post(`${S}/transfers/receive/bulk`).send({
+        location_id: LOC_B, actor_label: 'Robin', receipts: [{ transfer_id: shipped.id, quantity: 3 }]
+    });
+
+    const inTransit = await request(app()).get(`${S}/transfers?status=in_transit`);
+    assert.equal(inTransit.body.transfers.length, 1);
+
+    const received = await request(app()).get(`${S}/transfers?status=received`);
+    assert.equal(received.body.transfers.length, 1);
+    assert.equal(received.body.transfers[0].discrepancy, true);
 });
 
 // ---------- analytics ----------

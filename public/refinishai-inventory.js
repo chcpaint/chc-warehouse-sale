@@ -503,68 +503,148 @@
         "                    </div>",
         "                </div>",
         "",
-        "                <!-- ---------- TRANSFER VIEW (phase 4) ---------- -->",
+        "                <!-- ---------- TRANSFER VIEW (phase 4, ship/receive) ---------- -->",
         "                <div id=\"inv-view-transfer\" class=\"hidden\">",
-        "                    <div class=\"bg-white rounded-xl shadow-sm p-5 mb-4\">",
-        "                        <h3 class=\"font-semibold text-gray-800 mb-1\">Move stock between shops</h3>",
-        "                        <p class=\"text-sm text-gray-500 mb-4\">",
-        "                            Both sides are recorded as one event, so a shortfall at one shop and a",
-        "                            surplus at another are never left looking unexplained.",
-        "                        </p>",
-        "                        <div class=\"grid md:grid-cols-2 gap-3 mb-4\">",
-        "                            <div>",
-        "                                <label class=\"block text-xs uppercase tracking-wide text-gray-400 mb-1\">From</label>",
-        "                                <select id=\"inv-tr-from\" onchange=\"RAI.onTransferLocationChange()\"",
-        "                                    class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
-        "                            </div>",
-        "                            <div>",
-        "                                <label class=\"block text-xs uppercase tracking-wide text-gray-400 mb-1\">To</label>",
-        "                                <select id=\"inv-tr-to\" onchange=\"RAI.onTransferLocationChange()\"",
-        "                                    class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
-        "                            </div>",
-        "                        </div>",
-        "                        <div class=\"flex flex-wrap items-center gap-3 mb-3\">",
-        "                            <span id=\"inv-tr-hint\" class=\"text-sm text-gray-500\">",
-        "                                Each scan adds one. Scan it again to add another, or type the quantity on the line.",
-        "                            </span>",
-        "                            <input id=\"inv-tr-reason\" type=\"text\" maxlength=\"200\" placeholder=\"Reason (optional)\"",
-        "                                class=\"border rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[12rem] focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
-        "                        </div>",
-        "                        <div class=\"relative\">",
-        "                            <i class=\"fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400\"></i>",
-        "                            <input id=\"inv-tr-scan\" type=\"text\" autocomplete=\"off\"",
-        "                                placeholder=\"Scan a barcode or type a part number, then press Enter\"",
-        "                                class=\"w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-3 text-lg focus:border-blue-500 focus:outline-none\"",
-        "                                onkeydown=\"if(event.key==='Enter'){event.preventDefault();RAI.transferScan(this.value);}\">",
-        "                        </div>",
-        "                        <p class=\"text-xs text-gray-400 mt-2\">",
-        "                            A USB or Bluetooth scanner works anywhere on this page — no need to click the box first.",
-        "                        </p>",
-        "                        <div id=\"inv-tr-result\" class=\"mt-3\"></div>",
+        "                    <div class=\"flex items-center gap-1 mb-4 border-b\">",
+        "                        <button onclick=\"RAI.showTransferMode('ship')\" data-trmode=\"ship\"",
+        "                            class=\"tr-mode-btn px-4 py-2 -mb-px border-b-2 font-medium text-sm\">",
+        "                            <i class=\"fas fa-truck-loading mr-1\"></i> Ship",
+        "                        </button>",
+        "                        <button onclick=\"RAI.showTransferMode('receive')\" data-trmode=\"receive\"",
+        "                            class=\"tr-mode-btn px-4 py-2 -mb-px border-b-2 font-medium text-sm\">",
+        "                            <i class=\"fas fa-dolly mr-1\"></i> Receive",
+        "                            <span id=\"inv-rcv-badge\" class=\"hidden ml-1 bg-amber-100 text-amber-800 text-xs font-semibold rounded-full px-2 py-0.5\"></span>",
+        "                        </button>",
         "                    </div>",
         "",
-        "                    <!-- Staged. Nothing moves until Post. -->",
-        "                    <div class=\"bg-white rounded-xl shadow-sm overflow-hidden mb-4\">",
-        "                        <div class=\"px-5 py-3 border-b flex flex-wrap items-center justify-between gap-2\">",
-        "                            <div>",
-        "                                <h3 class=\"font-semibold text-gray-700\">Ready to move <span id=\"inv-tr-basket-count\" class=\"text-gray-400 font-normal\"></span></h3>",
-        "                                <p class=\"text-xs text-gray-400\">Nothing is written until you post it.</p>",
+        "                    <!-- ---- SHIP: leaves the source, parks the shipment in transit ---- -->",
+        "                    <div id=\"inv-tr-ship-panel\">",
+        "                        <div class=\"bg-white rounded-xl shadow-sm p-5 mb-4\">",
+        "                            <h3 class=\"font-semibold text-gray-800 mb-1\">Ship stock to another shop</h3>",
+        "                            <p class=\"text-sm text-gray-500 mb-4\">",
+        "                                Shipping only removes it from the source. It stays <strong>in transit</strong> — with",
+        "                                the driver below — until someone at the destination receives it, so everyone can see",
+        "                                where it actually is.",
+        "                            </p>",
+        "                            <div class=\"grid md:grid-cols-3 gap-3 mb-4\">",
+        "                                <div>",
+        "                                    <label class=\"block text-xs uppercase tracking-wide text-gray-400 mb-1\">From</label>",
+        "                                    <select id=\"inv-tr-from\" onchange=\"RAI.onTransferLocationChange()\"",
+        "                                        class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
+        "                                </div>",
+        "                                <div>",
+        "                                    <label class=\"block text-xs uppercase tracking-wide text-gray-400 mb-1\">To</label>",
+        "                                    <select id=\"inv-tr-to\" onchange=\"RAI.onTransferLocationChange()\"",
+        "                                        class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
+        "                                </div>",
+        "                                <div>",
+        "                                    <label class=\"block text-xs uppercase tracking-wide text-gray-400 mb-1\">Driver — who's responsible in transit</label>",
+        "                                    <div class=\"flex gap-1\">",
+        "                                        <select id=\"inv-tr-driver\"",
+        "                                            class=\"w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
+        "                                        <button onclick=\"RAI.addDriverPrompt()\" type=\"button\" title=\"Add a new driver\"",
+        "                                            class=\"shrink-0 w-10 h-10 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-100\">+</button>",
+        "                                    </div>",
+        "                                </div>",
         "                            </div>",
-        "                            <div class=\"flex items-center gap-2\">",
-        "                                <button onclick=\"RAI.clearTransferBasket()\" class=\"text-sm text-gray-400 hover:text-gray-600 px-3 py-2\">Clear</button>",
-        "                                <button onclick=\"RAI.commitTransferBasket()\" id=\"inv-tr-basket-post\" disabled",
-        "                                    class=\"bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40\">",
-        "                                    <i class=\"fas fa-check mr-1\"></i> Post",
-        "                                </button>",
+        "                            <div class=\"flex flex-wrap items-center gap-3 mb-3\">",
+        "                                <span id=\"inv-tr-hint\" class=\"text-sm text-gray-500\">",
+        "                                    Each scan adds one. Scan it again to add another, or type the quantity on the line.",
+        "                                </span>",
+        "                                <input id=\"inv-tr-reason\" type=\"text\" maxlength=\"200\" placeholder=\"Reason (optional)\"",
+        "                                    class=\"border rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[12rem] focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
+        "                            </div>",
+        "                            <div class=\"relative\">",
+        "                                <i class=\"fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400\"></i>",
+        "                                <input id=\"inv-tr-scan\" type=\"text\" autocomplete=\"off\"",
+        "                                    placeholder=\"Scan a barcode or type a part number, then press Enter\"",
+        "                                    class=\"w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-3 text-lg focus:border-blue-500 focus:outline-none\"",
+        "                                    onkeydown=\"if(event.key==='Enter'){event.preventDefault();RAI.transferScan(this.value);}\">",
+        "                            </div>",
+        "                            <p class=\"text-xs text-gray-400 mt-2\">",
+        "                                A USB or Bluetooth scanner works anywhere on this page — no need to click the box first.",
+        "                            </p>",
+        "                            <div id=\"inv-tr-result\" class=\"mt-3\"></div>",
+        "                        </div>",
+        "",
+        "                        <!-- Staged. Nothing moves until Ship. -->",
+        "                        <div class=\"bg-white rounded-xl shadow-sm overflow-hidden mb-4\">",
+        "                            <div class=\"px-5 py-3 border-b flex flex-wrap items-center justify-between gap-2\">",
+        "                                <div>",
+        "                                    <h3 class=\"font-semibold text-gray-700\">Ready to ship <span id=\"inv-tr-basket-count\" class=\"text-gray-400 font-normal\"></span></h3>",
+        "                                    <p class=\"text-xs text-gray-400\">Nothing is written until you ship it.</p>",
+        "                                </div>",
+        "                                <div class=\"flex items-center gap-2\">",
+        "                                    <button onclick=\"RAI.clearTransferBasket()\" class=\"text-sm text-gray-400 hover:text-gray-600 px-3 py-2\">Clear</button>",
+        "                                    <button onclick=\"RAI.commitTransferBasket()\" id=\"inv-tr-basket-post\" disabled",
+        "                                        class=\"bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40\">",
+        "                                        <i class=\"fas fa-truck mr-1\"></i> Ship",
+        "                                    </button>",
+        "                                </div>",
+        "                            </div>",
+        "                            <div id=\"inv-tr-basket-list\" class=\"divide-y max-h-96 overflow-y-auto\">",
+        "                                <div class=\"px-5 py-8 text-center text-gray-400 text-sm\">Nothing scanned yet.</div>",
         "                            </div>",
         "                        </div>",
-        "                        <div id=\"inv-tr-basket-list\" class=\"divide-y max-h-96 overflow-y-auto\">",
-        "                            <div class=\"px-5 py-8 text-center text-gray-400 text-sm\">Nothing scanned yet.</div>",
+        "                    </div>",
+        "",
+        "                    <!-- ---- RECEIVE: closes out a shipment headed to this shop ---- -->",
+        "                    <div id=\"inv-tr-receive-panel\" class=\"hidden\">",
+        "                        <div class=\"bg-white rounded-xl shadow-sm p-5 mb-4\">",
+        "                            <h3 class=\"font-semibold text-gray-800 mb-1\">Receive stock arriving here</h3>",
+        "                            <p class=\"text-sm text-gray-500 mb-4\">",
+        "                                Scan a box as it comes off the truck. If what actually arrives doesn't match what",
+        "                                was shipped, it's still received — just flagged as a discrepancy for someone to review.",
+        "                            </p>",
+        "                            <div class=\"relative\">",
+        "                                <i class=\"fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400\"></i>",
+        "                                <input id=\"inv-rcv-scan\" type=\"text\" autocomplete=\"off\"",
+        "                                    placeholder=\"Scan a barcode or type a part number, then press Enter\"",
+        "                                    class=\"w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-3 text-lg focus:border-blue-500 focus:outline-none\"",
+        "                                    onkeydown=\"if(event.key==='Enter'){event.preventDefault();RAI.receiveScan(this.value);}\">",
+        "                            </div>",
+        "                            <div id=\"inv-rcv-result\" class=\"mt-3\"></div>",
+        "                        </div>",
+        "",
+        "                        <div class=\"bg-white rounded-xl shadow-sm overflow-hidden mb-4\">",
+        "                            <div class=\"px-5 py-3 border-b font-semibold text-gray-700\">Pending — in transit to here</div>",
+        "                            <div id=\"inv-rcv-pending-list\" class=\"divide-y\">",
+        "                                <div class=\"px-5 py-8 text-center text-gray-400 text-sm\">Nothing incoming.</div>",
+        "                            </div>",
+        "                        </div>",
+        "",
+        "                        <!-- Staged. Nothing lands here until Receive. -->",
+        "                        <div class=\"bg-white rounded-xl shadow-sm overflow-hidden mb-4\">",
+        "                            <div class=\"px-5 py-3 border-b flex flex-wrap items-center justify-between gap-2\">",
+        "                                <div>",
+        "                                    <h3 class=\"font-semibold text-gray-700\">Ready to receive <span id=\"inv-rcv-basket-count\" class=\"text-gray-400 font-normal\"></span></h3>",
+        "                                    <p class=\"text-xs text-gray-400\">Nothing is credited until you receive it.</p>",
+        "                                </div>",
+        "                                <div class=\"flex items-center gap-2\">",
+        "                                    <button onclick=\"RAI.clearReceiveBasket()\" class=\"text-sm text-gray-400 hover:text-gray-600 px-3 py-2\">Clear</button>",
+        "                                    <button onclick=\"RAI.commitReceiveBasket()\" id=\"inv-rcv-basket-post\" disabled",
+        "                                        class=\"bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40\">",
+        "                                        <i class=\"fas fa-check mr-1\"></i> Receive",
+        "                                    </button>",
+        "                                </div>",
+        "                            </div>",
+        "                            <div id=\"inv-rcv-basket-list\" class=\"divide-y max-h-96 overflow-y-auto\">",
+        "                                <div class=\"px-5 py-8 text-center text-gray-400 text-sm\">Nothing scanned yet.</div>",
+        "                            </div>",
         "                        </div>",
         "                    </div>",
         "",
         "                    <div class=\"bg-white rounded-xl shadow-sm overflow-hidden\">",
-        "                        <div class=\"px-5 py-3 border-b font-semibold text-gray-700\">Recent transfers</div>",
+        "                        <div class=\"px-5 py-3 border-b flex items-center justify-between gap-2\">",
+        "                            <span class=\"font-semibold text-gray-700\">Recent transfers</span>",
+        "                            <select id=\"inv-tr-history-filter\" onchange=\"RAI.loadTransfers()\"",
+        "                                class=\"border rounded-lg px-2 py-1 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
+        "                                <option value=\"\">All statuses</option>",
+        "                                <option value=\"in_transit\">In transit</option>",
+        "                                <option value=\"received\">Received</option>",
+        "                                <option value=\"cancelled\">Cancelled</option>",
+        "                            </select>",
+        "                        </div>",
         "                        <div class=\"overflow-x-auto\">",
         "                            <table class=\"w-full text-sm\">",
         "                                <thead class=\"bg-gray-50 text-gray-500 text-xs uppercase tracking-wide\">",
@@ -574,6 +654,8 @@
         "                                        <th class=\"text-right px-4 py-3\">Qty</th>",
         "                                        <th class=\"text-left px-4 py-3\">From</th>",
         "                                        <th class=\"text-left px-4 py-3\">To</th>",
+        "                                        <th class=\"text-left px-4 py-3\">Driver</th>",
+        "                                        <th class=\"text-left px-4 py-3\">Status</th>",
         "                                        <th class=\"text-left px-4 py-3\">By</th>",
         "                                    </tr>",
         "                                </thead>",
@@ -696,6 +778,10 @@
         basket: [],
         trBasket: [],
         trActiveProductId: null,
+        trMode: 'ship',
+        drivers: [],
+        rcvPending: [],
+        rcvBasket: [],
         stock: [],
         replenishment: [],
         camera: { on: false, target: 'scan', stream: null, detector: null, raf: null, html5: null, lastCode: '', lastAt: 0 },
@@ -790,7 +876,7 @@
         if (view === 'history') RAI.loadInvHistory();
         if (view === 'kits') RAI.loadKits();
         if (view === 'count') RAI.loadCount();
-        if (view === 'transfer') { RAI.loadTransfers(); RAI.renderTransferBasket(); }
+        if (view === 'transfer') RAI.showTransferMode(inv.trMode || 'ship');
         if (view === 'analytics') RAI.loadAnalytics();
         if (view === 'scan') RAI.focusScanInput();
     }
@@ -2142,10 +2228,41 @@
     };
 
     // ============================================================
-    // PHASE 4 — TRANSFERS
+    // PHASE 4 — TRANSFERS: ship (leaves the source, in transit) and
+    // receive (lands at the destination, closes the transfer out).
     // ============================================================
 
-    RAI.transfer = { locations: [], product: null };
+    RAI.transfer = { locations: [] };
+
+    /**
+     * Switches between the Ship and Receive halves of the Transfer tab, and
+     * loads whatever that half needs. Kept as one entry point (rather than
+     * two separate view-switch cases) because both halves share the location
+     * pickers and the same "in transit" concept, and a driver shipped from
+     * here can just as easily be the person standing at Receive a minute
+     * later.
+     */
+    RAI.showTransferMode = function (mode) {
+        inv.trMode = mode;
+        document.getElementById('inv-tr-ship-panel').classList.toggle('hidden', mode !== 'ship');
+        document.getElementById('inv-tr-receive-panel').classList.toggle('hidden', mode !== 'receive');
+        document.querySelectorAll('.tr-mode-btn').forEach(b => {
+            const on = b.dataset.trmode === mode;
+            b.classList.toggle('border-blue-600', on);
+            b.classList.toggle('text-blue-700', on);
+            b.classList.toggle('border-transparent', !on);
+            b.classList.toggle('text-gray-500', !on);
+        });
+
+        RAI.loadTransfers();
+        if (mode === 'ship') {
+            RAI.loadDrivers();
+            RAI.renderTransferBasket();
+        } else {
+            RAI.loadIncomingTransfers();
+            RAI.renderReceiveBasket();
+        }
+    };
 
     RAI.loadTransfers = async function () {
         if (!RAI.transfer.locations.length) {
@@ -2164,16 +2281,25 @@
             }
         }
 
-        const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/transfers?location_id=${RAI.invLocationId()}&limit=50`);
+        const status = (document.getElementById('inv-tr-history-filter') || {}).value || '';
+        const q = status ? `&status=${encodeURIComponent(status)}` : '';
+        const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/transfers?location_id=${RAI.invLocationId()}&limit=50${q}`);
         const body = document.getElementById('inv-tr-body');
         if (!body) return;
-        if (!resp.ok) { body.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-red-500">Failed to load transfers.</td></tr>'; return; }
+        if (!resp.ok) { body.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-red-500">Failed to load transfers.</td></tr>'; return; }
 
         const { transfers } = await resp.json();
         if (!transfers.length) {
-            body.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No transfers yet.</td></tr>';
+            body.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No transfers yet.</td></tr>';
             return;
         }
+        const statusPill = t => {
+            if (t.status === 'in_transit') return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">In transit</span>';
+            if (t.status === 'cancelled') return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500">Cancelled</span>';
+            return t.discrepancy
+                ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800" title="Received quantity did not match what was shipped">Received — discrepancy</span>'
+                : '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">Received</span>';
+        };
         body.innerHTML = transfers.map(t => `
             <tr class="hover:bg-gray-50">
                 <td class="px-4 py-3 text-gray-500 whitespace-nowrap">${new Date(t.created_at).toLocaleString()}</td>
@@ -2181,22 +2307,62 @@
                     <div class="font-medium text-gray-800">${RAI.esc((t.products && t.products.name) || '')}</div>
                     <div class="text-xs text-gray-400 font-mono">${RAI.esc((t.products && t.products.sku) || '')}</div>
                 </td>
-                <td class="px-4 py-3 text-right font-semibold">${RAI.formatQty(t.quantity)}</td>
+                <td class="px-4 py-3 text-right font-semibold">
+                    ${RAI.formatQty(t.quantity)}${t.quantity_received !== null && t.quantity_received !== undefined && Number(t.quantity_received) !== Number(t.quantity)
+                        ? `<div class="text-xs font-normal text-amber-600">recv'd ${RAI.formatQty(t.quantity_received)}</div>` : ''}
+                </td>
                 <td class="px-4 py-3 text-gray-600">${RAI.esc(t.from_location_name || '')}</td>
                 <td class="px-4 py-3 text-gray-600">${RAI.esc(t.to_location_name || '')}</td>
-                <td class="px-4 py-3 text-gray-500">${RAI.esc(t.actor_label || '')}</td>
+                <td class="px-4 py-3 text-gray-600">${RAI.esc(t.driver_name || '')}</td>
+                <td class="px-4 py-3">${statusPill(t)}</td>
+                <td class="px-4 py-3 text-gray-500">${RAI.esc(t.received_by || t.actor_label || '')}</td>
             </tr>`).join('');
     };
 
     // ------------------------------------------------------------
-    // THE TRANSFER BASKET
-    //
-    // Same shape as the scan basket above: a scan stages a line, the same
-    // barcode again adds to it, the quantity can be typed directly, and one
-    // Post writes the whole list. Kept as its own basket rather than folded
-    // into inv.basket because a transfer carries two locations, not one, and
-    // switching either one mid-basket invalidates every on-hand number
-    // already staged — a distinction the single-location modes don't have.
+    // DRIVERS — a per-company named roster, no login, same idea as typing
+    // your own name into actor_label everywhere else in this app.
+    // ------------------------------------------------------------
+
+    RAI.loadDrivers = async function () {
+        const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/transfers/drivers`);
+        const sel = document.getElementById('inv-tr-driver');
+        if (!sel) return;
+        if (!resp.ok) return;
+        const { drivers } = await resp.json();
+        inv.drivers = drivers || [];
+        const current = sel.value;
+        sel.innerHTML = inv.drivers.length
+            ? inv.drivers.map(d => `<option value="${d.id}">${RAI.esc(d.name)}</option>`).join('')
+            : '<option value="">No drivers yet — add one</option>';
+        if (inv.drivers.some(d => d.id === current)) sel.value = current;
+    };
+
+    RAI.addDriverPrompt = async function () {
+        const name = (prompt('Driver name') || '').trim();
+        if (!name) return;
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/transfers/drivers`, {
+                method: 'POST', body: JSON.stringify({ name })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Could not add that driver.'); return; }
+            await RAI.loadDrivers();
+            const sel = document.getElementById('inv-tr-driver');
+            if (sel) sel.value = data.driver.id;
+        } catch (err) {
+            console.error('[Inventory] add driver failed:', err);
+            alert('Could not reach the server.');
+        }
+    };
+
+    // ------------------------------------------------------------
+    // SHIP — leaves the source only. The same scan-basket shape used
+    // throughout this file: a scan stages a line, the same barcode again
+    // adds to it, one Ship writes the whole list. Kept as its own basket
+    // rather than folded into inv.basket because a transfer carries two
+    // locations and a driver, not one, and switching any of them mid-basket
+    // invalidates every on-hand number already staged.
     // ------------------------------------------------------------
 
     RAI.transferLocations = function () {
@@ -2300,7 +2466,7 @@
     };
 
     RAI.clearTransferBasket = function () {
-        if (inv.trBasket.length > 1 && !confirm('Clear everything scanned but not yet posted?')) return;
+        if (inv.trBasket.length > 1 && !confirm('Clear everything scanned but not yet shipped?')) return;
         inv.trBasket = [];
         inv.trActiveProductId = null;
         RAI.renderTransferBasket();
@@ -2353,7 +2519,9 @@
     /**
      * Write the whole staged list as one batch. Lines that fail (almost
      * always a shortfall at the source) stay on the list carrying their
-     * reason, same discipline as commitBasket.
+     * reason, same discipline as commitBasket. Every line ends up
+     * 'in_transit' with the chosen driver -- nothing reaches the destination
+     * until someone there receives it.
      */
     RAI.commitTransferBasket = async function () {
         if (!inv.trBasket.length || inv.busy) return;
@@ -2363,9 +2531,12 @@
         if (!from || !to) { RAI.transferResult('Choose both a source and a destination first.', 'amber'); return; }
         if (from === to) { RAI.transferResult('Source and destination must be different.', 'amber'); return; }
 
+        const driverId = (document.getElementById('inv-tr-driver') || {}).value || '';
+        if (!driverId) { RAI.transferResult('Select a driver for this shipment first.', 'amber'); return; }
+
         inv.busy = true;
         const post = document.getElementById('inv-tr-basket-post');
-        if (post) { post.disabled = true; post.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Posting'; }
+        if (post) { post.disabled = true; post.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Shipping'; }
 
         const reason = (document.getElementById('inv-tr-reason') || {}).value || '';
         const sending = inv.trBasket.slice();
@@ -2376,6 +2547,7 @@
                 body: JSON.stringify({
                     from_location_id: from,
                     to_location_id: to,
+                    driver_id: driverId,
                     actor_label: RAI.invActor(),
                     reason,
                     transfers: sending.map(l => ({
@@ -2392,10 +2564,10 @@
             results.forEach((r, i) => {
                 const line = sending[i];
                 if (!line) return;
-                if (!r.ok) { line.error = r.error || 'Could not be posted.'; failed.push(line); }
+                if (!r.ok) { line.error = r.error || 'Could not be shipped.'; failed.push(line); }
             });
             if (!results.length && !resp.ok) {
-                sending.forEach(l => { l.error = data.error || 'Could not be posted.'; });
+                sending.forEach(l => { l.error = data.error || 'Could not be shipped.'; });
                 inv.trBasket = sending;
             } else {
                 inv.trBasket = failed;
@@ -2405,8 +2577,8 @@
             RAI.beep(failed.length > 0);
             RAI.transferResult(
                 failed.length
-                    ? `${posted} moved, ${failed.length} still to sort out — fix the quantity and post again.`
-                    : `${posted} item(s) moved.`,
+                    ? `${posted} shipped, ${failed.length} still to sort out — fix the quantity and ship again.`
+                    : `${posted} item(s) shipped — in transit.`,
                 failed.length ? 'amber' : 'green');
 
             RAI.renderTransferBasket();
@@ -2414,10 +2586,10 @@
             RAI.loadInvSummary();
         } catch (err) {
             console.error('[Inventory] transfer post failed:', err);
-            RAI.transferResult('Could not reach the server. Nothing was moved — everything is still on the list.', 'red');
+            RAI.transferResult('Could not reach the server. Nothing was shipped — everything is still on the list.', 'red');
         } finally {
             inv.busy = false;
-            if (post) { post.disabled = inv.trBasket.length === 0; post.innerHTML = '<i class="fas fa-check mr-1"></i> Post'; }
+            if (post) { post.disabled = inv.trBasket.length === 0; post.innerHTML = '<i class="fas fa-truck mr-1"></i> Ship'; }
             const input = document.getElementById('inv-tr-scan');
             if (input) input.focus();
         }
@@ -2425,6 +2597,245 @@
 
     RAI.transferResult = function (message, tone) {
         const el = document.getElementById('inv-tr-result');
+        if (!el) return;
+        if (!message) { el.innerHTML = ''; return; }
+        const map = {
+            green: 'bg-green-50 border-green-200 text-green-800',
+            amber: 'bg-amber-50 border-amber-200 text-amber-800',
+            red:   'bg-red-50 border-red-200 text-red-700'
+        };
+        el.innerHTML = `<div class="border rounded-lg px-4 py-3 text-sm ${map[tone] || map.amber}">${RAI.esc(message)}</div>`;
+    };
+
+    // ------------------------------------------------------------
+    // RECEIVE — the second half of the trip. Stock only lands here; nothing
+    // above this ever touched the destination. Pending shipments are listed
+    // oldest-first; scanning a barcode claims the oldest matching one into the
+    // receive basket (the same "scan claims the next unstaged line" idea as
+    // order-receiving), and a Post credits the destination for whatever was
+    // actually staged -- which can differ from what was shipped.
+    // ------------------------------------------------------------
+
+    RAI.loadIncomingTransfers = async function () {
+        const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/transfers/incoming?location_id=${RAI.invLocationId()}`);
+        const badge = document.getElementById('inv-rcv-badge');
+        if (!resp.ok) return;
+        const { incoming } = await resp.json();
+        inv.rcvPending = incoming || [];
+        // Anything already staged in the receive basket is claimed -- don't
+        // also show it as still pending, or a scan could claim it twice.
+        const stagedIds = new Set(inv.rcvBasket.map(l => l.transfer_id));
+        const visible = inv.rcvPending.filter(p => !stagedIds.has(p.id));
+
+        if (badge) {
+            if (inv.rcvPending.length) { badge.textContent = inv.rcvPending.length; badge.classList.remove('hidden'); }
+            else badge.classList.add('hidden');
+        }
+
+        const el = document.getElementById('inv-rcv-pending-list');
+        if (!el) return;
+        if (!visible.length) {
+            el.innerHTML = `<div class="px-5 py-8 text-center text-gray-400 text-sm">${inv.rcvPending.length ? 'Everything incoming is already staged below.' : 'Nothing incoming.'}</div>`;
+            return;
+        }
+        el.innerHTML = visible.map(p => `
+            <div class="px-4 py-3 flex items-center gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium text-gray-800 truncate">${RAI.esc(p.name || '')}</div>
+                    <div class="text-xs text-gray-500">
+                        ${RAI.esc(p.sku || '')} · ${RAI.formatQty(p.quantity)} from ${RAI.esc(p.from_location_name || '')}
+                        · driver ${RAI.esc(p.driver_name || 'unassigned')} · shipped ${RAI.timeAgo ? RAI.timeAgo(p.shipped_at) : new Date(p.shipped_at).toLocaleString()}
+                    </div>
+                </div>
+                <button onclick="RAI.stagePendingTransfer('${p.id}')" type="button"
+                    class="shrink-0 px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold">
+                    Receive
+                </button>
+            </div>`).join('');
+    };
+
+    /** Claims one pending line straight from the list, without needing a scan -- for a driver handing over a slip instead of a barcode. */
+    RAI.stagePendingTransfer = function (transferId) {
+        const pending = inv.rcvPending.find(p => p.id === transferId);
+        if (!pending) return;
+        RAI.addToReceiveBasket(pending);
+    };
+
+    RAI.receiveScan = async function (rawCode) {
+        const code = String(rawCode || '').trim();
+        const input = document.getElementById('inv-rcv-scan');
+        if (input) input.value = '';
+        if (!code) return;
+        if (!RAI.requireActor('inv-rcv-result')) return;
+
+        if (inv.busy) return;
+        inv.busy = true;
+        try {
+            const lookup = await RAI.api(
+                `/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${RAI.invLocationId()}`);
+            const found = await lookup.json();
+            if (lookup.status === 300) { RAI.beep(true); RAI.receiveResult('That barcode is on more than one item — use the Scan tab to identify it, then receive it from the list below.', 'amber'); return; }
+            if (!lookup.ok) { RAI.beep(true); RAI.receiveResult(found.error || 'No product matches that code.', 'red'); return; }
+
+            const stagedIds = new Set(inv.rcvBasket.map(l => l.transfer_id));
+            const match = inv.rcvPending
+                .filter(p => p.product_id === found.product.id && !stagedIds.has(p.id))
+                .sort((a, b) => new Date(a.shipped_at) - new Date(b.shipped_at))[0];
+            if (!match) { RAI.beep(true); RAI.receiveResult(`No pending incoming transfer for ${found.product.sku || found.product.name} at this location.`, 'amber'); return; }
+
+            RAI.addToReceiveBasket(match);
+        } catch (err) {
+            console.error('[Inventory] receive scan failed:', err);
+            RAI.receiveResult('Could not reach the server. Scan again.', 'red');
+        } finally {
+            inv.busy = false;
+            if (input) input.focus();
+        }
+    };
+
+    RAI.addToReceiveBasket = function (pending) {
+        if (inv.rcvBasket.some(l => l.transfer_id === pending.id)) return;
+        inv.rcvBasket.unshift({
+            transfer_id: pending.id,
+            name: pending.name,
+            sku: pending.sku,
+            from_location_name: pending.from_location_name,
+            driver_name: pending.driver_name,
+            quantity_shipped: Number(pending.quantity),
+            quantity: Number(pending.quantity),
+            error: null
+        });
+        RAI.beep();
+        RAI.receiveResult('');
+        RAI.renderReceiveBasket();
+        RAI.loadIncomingTransfers();
+    };
+
+    RAI.setReceiveLineQty = function (transferId, value) {
+        const line = inv.rcvBasket.find(l => l.transfer_id === transferId);
+        if (!line) return;
+        const n = parseFloat(value);
+        if (!Number.isFinite(n) || n <= 0) return;
+        line.quantity = round4(n);
+        line.error = null;
+        RAI.renderReceiveBasket();
+    };
+
+    RAI.removeReceiveLine = function (transferId) {
+        inv.rcvBasket = inv.rcvBasket.filter(l => l.transfer_id !== transferId);
+        RAI.renderReceiveBasket();
+        RAI.loadIncomingTransfers();
+    };
+
+    RAI.clearReceiveBasket = function () {
+        if (inv.rcvBasket.length > 1 && !confirm('Clear everything staged but not yet received?')) return;
+        inv.rcvBasket = [];
+        RAI.renderReceiveBasket();
+        RAI.loadIncomingTransfers();
+        const input = document.getElementById('inv-rcv-scan');
+        if (input) input.focus();
+    };
+
+    RAI.renderReceiveBasket = function () {
+        const el = document.getElementById('inv-rcv-basket-list');
+        const count = document.getElementById('inv-rcv-basket-count');
+        const post = document.getElementById('inv-rcv-basket-post');
+        if (!el) return;
+
+        if (count) count.textContent = inv.rcvBasket.length ? `— ${inv.rcvBasket.length} item(s)` : '';
+        if (post) post.disabled = inv.rcvBasket.length === 0;
+
+        if (!inv.rcvBasket.length) {
+            el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 text-sm">Nothing scanned yet.</div>';
+            return;
+        }
+
+        el.innerHTML = inv.rcvBasket.map(l => {
+            const mismatch = Number(l.quantity) !== Number(l.quantity_shipped);
+            return `
+            <div class="px-4 py-3 flex items-center gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium text-gray-800 truncate">${RAI.esc(l.name)}</div>
+                    <div class="text-xs text-gray-500">
+                        ${RAI.esc(l.sku || '')} · from ${RAI.esc(l.from_location_name || '')} · driver ${RAI.esc(l.driver_name || 'unassigned')}
+                        · shipped ${RAI.formatQty(l.quantity_shipped)}
+                    </div>
+                    ${mismatch ? `<div class="text-xs text-amber-600 mt-1"><i class="fas fa-triangle-exclamation mr-1"></i>Will be flagged as a discrepancy</div>` : ''}
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                    <input type="number" step="0.5" min="0.01" value="${l.quantity}"
+                        onchange="RAI.setReceiveLineQty('${l.transfer_id}', this.value)"
+                        onfocus="this.select()"
+                        aria-label="Quantity actually received for ${RAI.esc(l.name)}"
+                        class="w-20 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none ${mismatch ? 'border-amber-400' : ''}">
+                    <button onclick="RAI.removeReceiveLine('${l.transfer_id}')" type="button" title="Take this off the list"
+                        class="w-9 h-9 rounded-lg text-gray-300 hover:text-red-600">&times;</button>
+                </div>
+            </div>`;
+        }).join('');
+    };
+
+    RAI.commitReceiveBasket = async function () {
+        if (!inv.rcvBasket.length || inv.busy) return;
+        if (!RAI.requireActor('inv-rcv-result')) return;
+
+        inv.busy = true;
+        const post = document.getElementById('inv-rcv-basket-post');
+        if (post) { post.disabled = true; post.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Receiving'; }
+
+        const sending = inv.rcvBasket.slice();
+
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/transfers/receive/bulk`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    location_id: RAI.invLocationId(),
+                    actor_label: RAI.invActor(),
+                    receipts: sending.map(l => ({ transfer_id: l.transfer_id, quantity: l.quantity }))
+                })
+            });
+            const data = await resp.json();
+            const results = data.results || [];
+
+            const failed = [];
+            results.forEach((r, i) => {
+                const line = sending[i];
+                if (!line) return;
+                if (!r.ok) { line.error = r.error || 'Could not be received.'; failed.push(line); }
+            });
+            if (!results.length && !resp.ok) {
+                sending.forEach(l => { l.error = data.error || 'Could not be received.'; });
+                inv.rcvBasket = sending;
+            } else {
+                inv.rcvBasket = failed;
+            }
+
+            const posted = results.filter(r => r.ok).length;
+            const discrepancies = data.discrepancies || 0;
+            RAI.beep(failed.length > 0);
+            RAI.receiveResult(
+                failed.length
+                    ? `${posted} received, ${failed.length} still to sort out.`
+                    : `${posted} item(s) received${discrepancies ? `, ${discrepancies} flagged as a discrepancy` : ''}.`,
+                failed.length ? 'amber' : (discrepancies ? 'amber' : 'green'));
+
+            RAI.renderReceiveBasket();
+            RAI.loadIncomingTransfers();
+            RAI.loadTransfers();
+            RAI.loadInvSummary();
+        } catch (err) {
+            console.error('[Inventory] receive post failed:', err);
+            RAI.receiveResult('Could not reach the server. Nothing was received — everything is still on the list.', 'red');
+        } finally {
+            inv.busy = false;
+            if (post) { post.disabled = inv.rcvBasket.length === 0; post.innerHTML = '<i class="fas fa-check mr-1"></i> Receive'; }
+            const input = document.getElementById('inv-rcv-scan');
+            if (input) input.focus();
+        }
+    };
+
+    RAI.receiveResult = function (message, tone) {
+        const el = document.getElementById('inv-rcv-result');
         if (!el) return;
         if (!message) { el.innerHTML = ''; return; }
         const map = {
