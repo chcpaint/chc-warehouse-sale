@@ -407,6 +407,23 @@
                     <button onclick="showTab('products')" type="button" class="mb-4 text-blue-600 hover:underline text-sm">
                         <i class="fas fa-arrow-left mr-1"></i>Continue shopping
                     </button>
+
+                    <!-- Select-all + bulk delete. Always visible once the cart
+                         has anything in it -- the button is just disabled
+                         until something is checked, rather than the whole bar
+                         appearing/disappearing on every click. -->
+                    <div class="flex items-center justify-between bg-gray-50 border rounded-lg px-4 py-2 mb-3 text-sm">
+                        <label class="flex items-center gap-2 cursor-pointer select-none text-gray-700">
+                            <input type="checkbox" id="cart-select-all" onchange="toggleSelectAllCart(this.checked)"
+                                   class="w-4 h-4 rounded border-gray-300 text-blue-600">
+                            <span id="cart-selected-count">Select all</span>
+                        </label>
+                        <button type="button" id="cart-delete-selected-btn" onclick="deleteSelectedCartItems()" disabled
+                                class="text-red-600 hover:text-red-800 font-semibold disabled:text-gray-300 disabled:cursor-not-allowed">
+                            <i class="fas fa-trash mr-1"></i>Delete Selected
+                        </button>
+                    </div>
+
                     <div id="cart-items" class="space-y-3 mb-6"></div>
                     <div class="bg-white rounded-xl shadow-sm border p-6">
                         <div class="flex justify-between text-sm text-gray-500 mb-1">
@@ -2318,11 +2335,74 @@
         return state.cart.filter(isPriceOnRequest);
     }
 
+    // ------------------------------------------------------------
+    // Cart selection -- checkboxes for the bulk "Delete Selected"
+    // action, independent of the per-line trash icon. Product IDs, not
+    // array indexes, since the cart can be re-sorted or re-rendered
+    // between a checkbox click and the delete click.
+    // ------------------------------------------------------------
+    let cartSelection = new Set();
+
+    function toggleCartItemSelect(productId, checked) {
+        if (checked) cartSelection.add(productId); else cartSelection.delete(productId);
+        updateCartBulkBar();
+    }
+
+    function toggleSelectAllCart(checked) {
+        cartSelection = checked ? new Set(state.cart.map(c => c.product_id)) : new Set();
+        renderCart();
+    }
+
+    /** Keeps the "Select all" checkbox, its label, and the delete button in sync. */
+    function updateCartBulkBar() {
+        const btn = document.getElementById('cart-delete-selected-btn');
+        const label = document.getElementById('cart-selected-count');
+        const selectAll = document.getElementById('cart-select-all');
+        const count = cartSelection.size;
+        const total = state.cart.length;
+        if (btn) btn.disabled = count === 0;
+        if (label) label.textContent = count > 0 ? `${count} selected` : 'Select all';
+        if (selectAll) {
+            selectAll.checked = total > 0 && count === total;
+            selectAll.indeterminate = count > 0 && count < total;
+        }
+    }
+
+    /** One-click removal from the trash icon on a single line -- no confirm,
+     *  same as letting the "-" stepper reach zero did before. */
+    function removeCartItem(productId) {
+        state.cart = state.cart.filter(c => c.product_id !== productId);
+        cartSelection.delete(productId);
+        saveCart();
+        renderProducts();
+        renderCart();
+    }
+
+    /** The bulk action: everything checked, gone in one click. Confirmed
+     *  first since, unlike the per-line trash icon, this can clear the
+     *  whole cart in one shot. */
+    function deleteSelectedCartItems() {
+        const count = cartSelection.size;
+        if (count === 0) return;
+        if (!confirm(`Remove ${count} item${count === 1 ? '' : 's'} from the cart?`)) return;
+        state.cart = state.cart.filter(c => !cartSelection.has(c.product_id));
+        cartSelection.clear();
+        saveCart();
+        renderProducts();
+        renderCart();
+    }
+
     function renderCart() {
         const empty = document.getElementById('cart-empty');
         const content = document.getElementById('cart-content');
         const itemsEl = document.getElementById('cart-items');
         const checkout = document.getElementById('checkout-form');
+
+        // Drop any selection for a line that no longer exists (removed via
+        // the trash icon, the "-" stepper reaching zero, or the cart being
+        // cleared elsewhere) before it can affect the bulk bar below.
+        const cartIds = new Set(state.cart.map(c => c.product_id));
+        cartSelection.forEach(id => { if (!cartIds.has(id)) cartSelection.delete(id); });
 
         if (!state.cart.length) {
             empty.classList.remove('hidden');
@@ -2343,14 +2423,19 @@
             total += subtotal;
             return `
             <div class="bg-white rounded-lg shadow-sm border p-4 flex items-center justify-between">
-                <div class="flex-1">
-                    <h4 class="font-semibold text-gray-800">${escapeHtml(item.name)}</h4>
-                    <p class="text-sm text-gray-400">${escapeHtml(item.brand)} ${item.sku ? '| ' + escapeHtml(item.sku) : ''}</p>
-                    <div class="flex items-baseline gap-2 mt-1">
-                        ${isPriceOnRequest(item)
-                            ? `<span class="text-sm font-semibold text-blue-700">${PRICE_ON_REQUEST_LABEL}</span>`
-                            : `<span class="font-bold ${item.is_promo ? 'text-red-600' : 'text-gray-800'}">$${item.price.toFixed(2)}</span>`}
-                        ${item.is_promo ? `<span class="text-xs text-gray-400 line-through">$${item.original_price.toFixed(2)}</span><span class="text-xs text-red-500 font-semibold">PROMO</span>` : ''}
+                <div class="flex items-center flex-1 min-w-0">
+                    <input type="checkbox" class="cart-item-checkbox w-4 h-4 rounded border-gray-300 text-blue-600 mr-3 flex-shrink-0"
+                           onchange="toggleCartItemSelect('${item.product_id}', this.checked)"
+                           ${cartSelection.has(item.product_id) ? 'checked' : ''}>
+                    <div class="flex-1 min-w-0">
+                        <h4 class="font-semibold text-gray-800">${escapeHtml(item.name)}</h4>
+                        <p class="text-sm text-gray-400">${escapeHtml(item.brand)} ${item.sku ? '| ' + escapeHtml(item.sku) : ''}</p>
+                        <div class="flex items-baseline gap-2 mt-1">
+                            ${isPriceOnRequest(item)
+                                ? `<span class="text-sm font-semibold text-blue-700">${PRICE_ON_REQUEST_LABEL}</span>`
+                                : `<span class="font-bold ${item.is_promo ? 'text-red-600' : 'text-gray-800'}">$${item.price.toFixed(2)}</span>`}
+                            ${item.is_promo ? `<span class="text-xs text-gray-400 line-through">$${item.original_price.toFixed(2)}</span><span class="text-xs text-red-500 font-semibold">PROMO</span>` : ''}
+                        </div>
                     </div>
                 </div>
                 <div class="flex items-center gap-2 ml-4">
@@ -2358,6 +2443,10 @@
                     <span class="w-8 text-center font-semibold">${item.quantity}</span>
                     <button onclick="updateCart('${item.product_id}', ${item.quantity + 1})" class="w-8 h-8 bg-blue-100 hover:bg-blue-200 rounded text-blue-700 font-bold">+</button>
                     <span class="ml-3 font-bold text-gray-800 w-20 text-right">${isPriceOnRequest(item) ? '&mdash;' : '$' + subtotal.toFixed(2)}</span>
+                    <button onclick="removeCartItem('${item.product_id}')" title="Remove item" aria-label="Remove ${escapeHtml(item.name)} from cart"
+                            class="ml-1 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                        <i class="fas fa-trash"></i>
+                    </button>
                 </div>
             </div>`;
         }).join('');
@@ -2416,6 +2505,8 @@
                 : '';
             note.classList.toggle('hidden', quoted === 0);
         }
+
+        updateCartBulkBar();
     }
 
     function showCheckout() {
