@@ -20,6 +20,20 @@
         .stage-tab-active .cnt{background:rgba(255,255,255,.25);}
         @keyframes pulseSlow{0%,100%{opacity:1;}50%{opacity:.5;}}
         .animate-pulse-slow{animation:pulseSlow 1.8s ease-in-out infinite;}
+        /* Sidebar: off-canvas drawer below md, a slimmer fixed rail at md and
+           up. order-desk-only accounts see one nav item, so they get an even
+           narrower rail once JS adds that body class (see showAdminApp()). */
+        #admin-sidebar { width: 17rem; transform: translateX(-100%); transition: transform .2s ease; }
+        #admin-sidebar.sidebar-open { transform: translateX(0); }
+        @media (min-width: 768px) {
+            #admin-sidebar { width: 14rem; transform: translateX(0); }
+            body.order-desk-only #admin-sidebar { width: 11.5rem; }
+        }
+        #admin-main { margin-left: 0; }
+        @media (min-width: 768px) {
+            #admin-main { margin-left: 14rem; }
+            body.order-desk-only #admin-main { margin-left: 11.5rem; }
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -67,7 +81,10 @@
     <!-- ============================================================ -->
     <div id="admin-app" class="hidden flex min-h-screen">
         <!-- Sidebar -->
-        <aside class="w-64 bg-white shadow-lg border-r flex flex-col fixed h-full z-40">
+        <!-- Width and open/closed state are driven entirely by the CSS above
+             (#admin-sidebar) so it can be a full-width off-canvas drawer on
+             a phone and a slim fixed rail everywhere else. -->
+        <aside id="admin-sidebar" class="bg-white shadow-lg border-r flex flex-col fixed h-full z-40">
             <div class="p-4 border-b">
                 <img src="/assets/chc-logo.png" alt="CHC" class="h-10 mb-2" onerror="this.outerHTML='<span class=\'font-bold text-blue-900 text-xl\'>CHC Admin</span>'">
                 <p id="admin-welcome" class="text-sm text-gray-500"></p>
@@ -123,9 +140,16 @@
             </div>
         </aside>
 
+        <!-- Dims the page and closes the drawer on a tap outside it. Only
+             ever shown below the md breakpoint -- see openSidebar(). -->
+        <div id="sidebar-backdrop" onclick="closeSidebar()" class="hidden fixed inset-0 bg-black/40 z-30"></div>
+
         <!-- Main Content -->
-        <div class="flex-1 ml-64">
-            <header class="bg-white shadow-sm border-b px-6 py-4 sticky top-0 z-30">
+        <div id="admin-main" class="flex-1 w-full">
+            <header class="bg-white shadow-sm border-b px-4 md:px-6 py-4 sticky top-0 z-30 flex items-center gap-3">
+                <button id="sidebar-toggle" onclick="toggleSidebar()" aria-label="Open menu" class="md:hidden text-gray-600 hover:text-gray-900 -ml-1 p-1">
+                    <i class="fas fa-bars text-lg"></i>
+                </button>
                 <h1 id="page-title" class="text-xl font-bold text-gray-800">Dashboard</h1>
             </header>
 
@@ -973,7 +997,7 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="flex gap-2 items-center">
+                        <div class="flex gap-2 items-center flex-wrap">
                             <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
                                 <button id="grp-branch" onclick="setOrderGroup('branch', this)" class="px-3 py-1.5 bg-blue-700 text-white font-semibold"><i class="fas fa-warehouse mr-1"></i>By CHC Branch</button>
                                 <button id="grp-all" onclick="setOrderGroup('all', this)" class="px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50">All</button>
@@ -1018,6 +1042,7 @@
                             <span class="text-sm font-semibold text-gray-700">Orders &amp; Revenue by Location</span>
                             <span id="location-summary-meta" class="text-xs text-gray-400"></span>
                         </div>
+                        <div class="overflow-x-auto">
                         <table class="w-full">
                             <thead class="bg-gray-50 border-b">
                                 <tr>
@@ -1028,8 +1053,13 @@
                             </thead>
                             <tbody id="location-summary-tbody"></tbody>
                         </table>
+                        </div>
                     </div>
+                    <!-- Scrolls horizontally on its own below md instead of
+                         forcing the whole page wider than the screen -- see
+                         the sidebar rewrite in this same change. -->
                     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <div class="overflow-x-auto">
                         <table class="w-full">
                             <thead class="bg-gray-50 border-b">
                                 <tr>
@@ -1046,6 +1076,7 @@
                             </thead>
                             <tbody id="orders-tbody"></tbody>
                         </table>
+                        </div>
                     </div>
                 </section>
 
@@ -1924,7 +1955,27 @@
         } catch (err) { console.error('Platform logo load failed:', err); }
     }
 
+    // ============================================================
+    // MOBILE SIDEBAR (off-canvas below the md breakpoint -- see the
+    // #admin-sidebar / #admin-main rules in <style>)
+    // ============================================================
+    function openSidebar() {
+        document.getElementById('admin-sidebar').classList.add('sidebar-open');
+        document.getElementById('sidebar-backdrop').classList.remove('hidden');
+    }
+    function closeSidebar() {
+        document.getElementById('admin-sidebar').classList.remove('sidebar-open');
+        document.getElementById('sidebar-backdrop').classList.add('hidden');
+    }
+    function toggleSidebar() {
+        document.getElementById('admin-sidebar').classList.contains('sidebar-open') ? closeSidebar() : openSidebar();
+    }
+
     function adminNav(section) {
+        // A nav pick always closes the mobile drawer. Harmless on desktop,
+        // where it's already closed (the CSS pins the sidebar open there
+        // regardless of the sidebar-open class).
+        closeSidebar();
         document.querySelectorAll('[id^="section-"]').forEach(el => el.classList.add('hidden'));
         document.getElementById(`section-${section}`).classList.remove('hidden');
         document.querySelectorAll('.sidebar-link').forEach(el => el.classList.remove('active'));
