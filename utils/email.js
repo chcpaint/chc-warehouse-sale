@@ -42,7 +42,7 @@ async function sendOrderNotification(options) {
         return { sent: false, reason: 'not_configured' };
     }
 
-    const { to, order, companyName, contactName, contactEmail, contactPhone, poNumber, location, notes, replyTo } = options;
+    const { to, order, companyName, contactName, contactEmail, contactPhone, poNumber, location, notes, replyTo, hidePricing } = options;
 
     // `to` may be a single address or an array of manager addresses
     const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
@@ -58,36 +58,50 @@ async function sendOrderNotification(options) {
     // the list printed beneath it.
     const quotedCount = (order.items || []).filter(i => i.price_on_request).length;
 
-    // Build line items HTML
+    // Build line items HTML. In packing-slip mode (hidePricing) no price or
+    // subtotal column is shown at all -- this is what a driver or a receiving
+    // shop that isn't meant to see dollar amounts gets.
     const itemsHtml = (order.items || []).map(item => `
         <tr>
             <td style="padding: 8px; border-bottom: 1px solid #eee;">${escHtml(item.name)}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee;">${escHtml(item.sku || '-')}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.price_on_request
+            ${hidePricing ? '' : `<td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.price_on_request
                 ? '<span style="color:#1d4ed8;font-weight:600;">Price on request</span>'
                 : '$' + Number(item.unit_price).toFixed(2)}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.price_on_request
                 ? '<span style="color:#1d4ed8;font-weight:600;">TO PRICE</span>'
-                : '$' + Number(item.subtotal).toFixed(2)}</td>
+                : '$' + Number(item.subtotal).toFixed(2)}</td>`}
         </tr>
     `).join('');
+
+    // The order note, rendered as its own line within the items table rather
+    // than a separate block below it -- so it travels with the list of what
+    // was ordered, not as an afterthought under the totals.
+    const noteRowHtml = notes ? `
+        <tr>
+            <td colspan="${hidePricing ? 3 : 5}" style="padding: 8px; background: #f9fafb; border-bottom: 1px solid #eee; font-size: 13px;">
+                <strong>Note:</strong> ${escHtml(notes)}
+            </td>
+        </tr>` : '';
 
     const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">Order Received</h2>
+            <h2 style="margin: 0;">${hidePricing ? 'Packing Slip — Order Received' : 'Order Received'}</h2>
             <p style="margin: 5px 0 0; opacity: 0.9;">Order #${escHtml(order.order_number || order.id)}</p>
         </div>
         <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
             <h3 style="color: #374151; margin-top: 0;">Company: ${escHtml(companyName)}</h3>
-            <p style="color:#374151; margin:0 0 15px;">Thank you — we've received your order. Our team will follow up with your invoice for payment. A copy is below for your records.</p>
+            <p style="color:#374151; margin:0 0 15px;">${hidePricing
+                ? 'Thank you — we\'ve received your order. Here is what will be shipped, for your records.'
+                : 'Thank you — we\'ve received your order. Our team will follow up with your invoice for payment. A copy is below for your records.'}</p>
 
             ${poNumber ? `<div style="margin-bottom: 15px; padding: 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;">
                 <strong style="font-size: 16px; color: #1e40af;">PO #: ${escHtml(poNumber)}</strong>
             </div>` : ''}
 
-            ${quotedCount ? `<div style="margin-bottom: 15px; padding: 12px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px;">
+            ${(!hidePricing && quotedCount) ? `<div style="margin-bottom: 15px; padding: 12px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px;">
                 <strong style="font-size: 15px; color: #92400e;">${quotedCount} item${quotedCount === 1 ? '' : 's'} on this order need${quotedCount === 1 ? 's' : ''} pricing</strong>
                 <p style="margin: 6px 0 0; color: #92400e; font-size: 13px;">
                     Marked <strong>TO PRICE</strong> below. The total shown excludes them — add the price at pick,
@@ -109,12 +123,12 @@ async function sendOrderNotification(options) {
                         <th style="padding: 8px; text-align: left; font-size: 12px; color: #6b7280;">Product</th>
                         <th style="padding: 8px; text-align: left; font-size: 12px; color: #6b7280;">SKU</th>
                         <th style="padding: 8px; text-align: center; font-size: 12px; color: #6b7280;">Qty</th>
-                        <th style="padding: 8px; text-align: right; font-size: 12px; color: #6b7280;">Price</th>
-                        <th style="padding: 8px; text-align: right; font-size: 12px; color: #6b7280;">Subtotal</th>
+                        ${hidePricing ? '' : `<th style="padding: 8px; text-align: right; font-size: 12px; color: #6b7280;">Price</th>
+                        <th style="padding: 8px; text-align: right; font-size: 12px; color: #6b7280;">Subtotal</th>`}
                     </tr>
                 </thead>
-                <tbody>${itemsHtml}</tbody>
-                <tfoot>
+                <tbody>${itemsHtml}${noteRowHtml}</tbody>
+                ${hidePricing ? '' : `<tfoot>
                     <tr>
                         <td colspan="4" style="padding: 6px 8px; text-align: right; color: #6b7280;">Subtotal:</td>
                         <td style="padding: 6px 8px; text-align: right; color: #6b7280;">$${Number(order.subtotal).toFixed(2)}</td>
@@ -131,26 +145,26 @@ async function sendOrderNotification(options) {
                         <td colspan="4" style="padding: 10px 8px; text-align: right; font-weight: bold;">Total:</td>
                         <td style="padding: 10px 8px; text-align: right; font-weight: bold; font-size: 16px; color: #1e40af;">$${Number(order.total).toFixed(2)}</td>
                     </tr>
-                </tfoot>
+                </tfoot>`}
             </table>
-
-            ${notes ? `<div style="margin-top: 15px; padding: 12px; background: #f9fafb; border-radius: 6px;"><strong>Notes:</strong> ${escHtml(notes)}</div>` : ''}
 
             <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">This is an automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
         </div>
     </div>`;
 
-    const textItems = (order.items || []).map(i => i.price_on_request
-        ? `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = ** TO PRICE **`
-        : `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = $${Number(i.subtotal).toFixed(2)}`).join('\n');
-    const totalsText = `Subtotal: $${Number(order.subtotal).toFixed(2)}${order.tax ? `\nTax${order.tax_rate ? ` (${(Number(order.tax_rate) * 100).toFixed(0)}%)` : ''}: $${Number(order.tax).toFixed(2)}` : ''}${order.delivery_fee ? `\nDelivery fee (order under $${DELIVERY_FEE_THRESHOLD}): $${Number(order.delivery_fee).toFixed(2)}` : ''}\nTotal: $${Number(order.total).toFixed(2)}`;
-    const text = `New Order #${order.order_number || order.id}${quotedCount ? `\n\n*** ${quotedCount} ITEM(S) NEED PRICING — see "TO PRICE" below. The total excludes them. ***` : ''}\nCompany: ${companyName}${poNumber ? `\nPO #: ${poNumber}` : ''}\nOrdered by: ${contactName} (${contactEmail})${location ? `\nLocation: ${location}` : ''}\n\nItems:\n${textItems}\n\n${totalsText}${notes ? `\n\nNotes: ${notes}` : ''}`;
+    const textItems = (order.items || []).map(i => hidePricing
+        ? `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity}`
+        : (i.price_on_request
+            ? `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = ** TO PRICE **`
+            : `  - ${i.name} (${i.sku || 'N/A'}) x${i.quantity} = $${Number(i.subtotal).toFixed(2)}`)).join('\n');
+    const totalsText = hidePricing ? '' : `Subtotal: $${Number(order.subtotal).toFixed(2)}${order.tax ? `\nTax${order.tax_rate ? ` (${(Number(order.tax_rate) * 100).toFixed(0)}%)` : ''}: $${Number(order.tax).toFixed(2)}` : ''}${order.delivery_fee ? `\nDelivery fee (order under $${DELIVERY_FEE_THRESHOLD}): $${Number(order.delivery_fee).toFixed(2)}` : ''}\nTotal: $${Number(order.total).toFixed(2)}`;
+    const text = `${hidePricing ? 'Packing Slip — ' : 'New '}Order #${order.order_number || order.id}${(!hidePricing && quotedCount) ? `\n\n*** ${quotedCount} ITEM(S) NEED PRICING — see "TO PRICE" below. The total excludes them. ***` : ''}\nCompany: ${companyName}${poNumber ? `\nPO #: ${poNumber}` : ''}\nOrdered by: ${contactName} (${contactEmail})${location ? `\nLocation: ${location}` : ''}\n\nItems:\n${textItems}${totalsText ? `\n\n${totalsText}` : ''}${notes ? `\n\nNote: ${notes}` : ''}`;
 
     try {
         await sgMail.send({
             to: recipients,
             from: fromAddress,
-            subject: `Order received \u2014 ${companyName} order ${order.order_number || order.id}${location ? ', ' + location : ''}`,
+            subject: `Order received — ${companyName} order ${order.order_number || order.id}${location ? ', ' + location : ''}`,
             replyTo: replyTo || undefined,
             text,
             html
@@ -160,6 +174,122 @@ async function sendOrderNotification(options) {
     } catch (err) {
         const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
         console.error('Email: Failed to send order notification:', errMsg);
+        return { sent: false, reason: 'send_failed', error: errMsg };
+    }
+}
+
+/**
+ * Notify recipients of a shipping-status change on an order: "Out for
+ * Delivery" (optionally flagged as a partial shipment with a backorder), or
+ * "Closed". This is separate from sendOrderClosed (payment-received /
+ * invoice-closed) -- that one is about billing; this one is about the
+ * shipment itself, and is what powers CHC's simplified status-step emails.
+ * Supports the same packing-slip (hidePricing) mode as sendOrderNotification.
+ *
+ * @param {Object} options
+ * @param {string[]|string} options.to
+ * @param {Object} options.order
+ * @param {string} options.companyName
+ * @param {string} options.statusLabel   already-resolved label (see utils/order-status.js)
+ * @param {boolean} [options.isPartialShipment]
+ * @param {boolean} [options.hidePricing]
+ * @param {string} [options.note]
+ * @param {string} [options.replyTo]
+ */
+async function sendOrderStatusUpdate(options) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+    const { to, order, companyName, statusLabel, isPartialShipment, hidePricing, note, replyTo } = options;
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) return { sent: false, reason: 'no_recipient' };
+
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    const orderNo = order.order_number || order.id;
+    const banner = isPartialShipment ? '#b45309' : '#1e40af';
+
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: ${banner}; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">${escHtml(statusLabel)}</h2>
+            <p style="margin: 5px 0 0; opacity: 0.9;">Order #${escHtml(orderNo)}</p>
+        </div>
+        <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <p style="color:#374151;">${escHtml(companyName)} order <strong>#${escHtml(orderNo)}</strong> is now <strong>${escHtml(statusLabel)}</strong>.</p>
+            ${isPartialShipment ? `<p style="color:#92400e;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:12px;">
+                Not everything on this order shipped in this delivery — the remaining item(s) are on backorder and will follow separately.
+            </p>` : ''}
+            ${note ? `<div style="margin-top:12px;padding:12px;background:#f9fafb;border-radius:6px;"><strong>Note:</strong> ${escHtml(note)}</div>` : ''}
+            <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
+        </div>
+    </div>`;
+    const text = `${statusLabel} — ${companyName} order #${orderNo}.${isPartialShipment ? '\nNot everything on this order shipped in this delivery — the remaining item(s) are on backorder and will follow separately.' : ''}${note ? `\n\nNote: ${note}` : ''}`;
+
+    try {
+        await sgMail.send({
+            to: recipients,
+            from: fromAddress,
+            subject: `${statusLabel} — ${companyName} order ${orderNo}`,
+            replyTo: replyTo || undefined,
+            text,
+            html
+        });
+        console.log(`Email: Order status update (${statusLabel}) sent to ${recipients.join(', ')} for order ${orderNo}`);
+        return { sent: true };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Email: Failed to send order status update:', errMsg);
+        return { sent: false, reason: 'send_failed', error: errMsg };
+    }
+}
+
+/**
+ * Notify the other side of an order that a note/message was added to it —
+ * a request for pricing on something outside the catalog, a return that
+ * needs picking up, or anything else that doesn't fit a line item. Carries
+ * no dollar amounts, so this is sent the same way whether or not the
+ * company has pricing hidden.
+ *
+ * @param {Object} options
+ * @param {string[]|string} options.to
+ * @param {Object} options.order
+ * @param {string} options.companyName
+ * @param {string} options.author    who wrote the note (name or email)
+ * @param {string} options.text
+ * @param {string} [options.replyTo]
+ */
+async function sendOrderNoteAdded(options) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+    const { to, order, companyName, author, text, replyTo } = options;
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) return { sent: false, reason: 'no_recipient' };
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    const orderNo = order.order_number || order.id;
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">New note on your order</h2>
+            <p style="margin: 5px 0 0; opacity: 0.9;">Order #${escHtml(orderNo)}</p>
+        </div>
+        <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <p style="color:#374151;">${escHtml(companyName)} order <strong>#${escHtml(orderNo)}</strong> has a new note${author ? ` from ${escHtml(author)}` : ''}:</p>
+            <div style="margin-top:10px;padding:12px;background:#f9fafb;border-radius:6px;white-space:pre-wrap;">${escHtml(text)}</div>
+            <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
+        </div>
+    </div>`;
+    const textBody = `New note on ${companyName} order #${orderNo}${author ? ` from ${author}` : ''}:\n\n${text}`;
+    try {
+        await sgMail.send({
+            to: recipients,
+            from: fromAddress,
+            subject: `New note — ${companyName} order ${orderNo}`,
+            replyTo: replyTo || undefined,
+            text: textBody,
+            html
+        });
+        console.log(`Email: Order note notification sent to ${recipients.join(', ')} for order ${orderNo}`);
+        return { sent: true };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Email: Failed to send order note notification:', errMsg);
         return { sent: false, reason: 'send_failed', error: errMsg };
     }
 }
@@ -525,4 +655,4 @@ async function sendInvite(o) {
     }
 }
 
-module.exports = { sendOrderNotification, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite };
+module.exports = { sendOrderNotification, sendOrderStatusUpdate, sendOrderNoteAdded, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite };

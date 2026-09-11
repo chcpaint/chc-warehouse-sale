@@ -1573,9 +1573,14 @@
 
     function renderReports() {
         const orders = repState.filteredOrders;
+        // All orders on this report belong to one company, so pricing_hidden
+        // (if set at all) is the same on every one of them.
+        const hidePricing = orders.some(o => o.pricing_hidden === true);
         const totalSpend = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
         const units = repState.items.reduce((s, i) => s + i.qty, 0);
-        const cards = [['Orders', orders.length], ['Total spend', '$' + totalSpend.toFixed(2)], ['Units', units], ['Unique items', repState.items.length]];
+        const cards = hidePricing
+            ? [['Orders', orders.length], ['Units', units], ['Unique items', repState.items.length]]
+            : [['Orders', orders.length], ['Total spend', '$' + totalSpend.toFixed(2)], ['Units', units], ['Unique items', repState.items.length]];
         document.getElementById('rep-summary').innerHTML = cards.map(c => `
             <div class="bg-white rounded-xl shadow-sm border p-4">
                 <p class="text-xs text-gray-400 uppercase">${c[0]}</p>
@@ -1589,7 +1594,7 @@
                 <td class="px-4 py-2">${escapeHtml(i.name)}</td>
                 <td class="px-4 py-2 text-right font-semibold">${i.qty}</td>
                 <td class="px-4 py-2 text-right">${i.orders}</td>
-                <td class="px-4 py-2 text-right">$${i.spend.toFixed(2)}</td>
+                <td class="px-4 py-2 text-right">${hidePricing ? '&mdash;' : '$' + i.spend.toFixed(2)}</td>
             </tr>`).join('') : '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No items in this range.</td></tr>';
         document.getElementById('rep-items-meta').textContent = repState.periodLabel;
         const so = repState.sort.orders;
@@ -1601,7 +1606,7 @@
                 <td class="px-4 py-2">${escapeHtml(o.location || '-')}</td>
                 <td class="px-4 py-2">${escapeHtml(o.po_number || '-')}</td>
                 <td class="px-4 py-2">${escapeHtml(o.contact_name || '-')}</td>
-                <td class="px-4 py-2 text-right font-semibold">$${parseFloat(o.total).toFixed(2)}</td>
+                <td class="px-4 py-2 text-right font-semibold">${hidePricing ? '&mdash;' : '$' + parseFloat(o.total).toFixed(2)}</td>
             </tr>`).join('') : '<tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No orders in this range.</td></tr>';
         document.getElementById('rep-orders-meta').textContent = `${orders.length} order${orders.length !== 1 ? 's' : ''} \u00b7 ${repState.periodLabel}`;
     }
@@ -2907,18 +2912,33 @@
                 pending: 'PENDING', processing: 'PROCESSING', out_on_delivery: 'OUT ON DELIVERY',
                 closed: 'CLOSED', cancelled: 'CANCELLED'
             };
+            // Prefer the server's already-resolved label (per-distributor wording,
+            // and the partial-shipment override) — the local map above is only a
+            // fallback for an older cached response that never got one.
+            const labelFor = (o) => o.status_label ? o.status_label.toUpperCase() : (statusLabels[o.status] || o.status.toUpperCase());
 
             list.innerHTML = data.orders.map((o, idx) => {
                 const items = o.items || [];
+                const hidePricing = o.pricing_hidden === true;
                 const itemsHtml = items.map(i => `
                     <tr>
                         <td class="px-3 py-2 text-sm">${escapeHtml(i.name)}</td>
                         <td class="px-3 py-2 text-sm text-gray-500">${escapeHtml(i.sku || '-')}</td>
                         <td class="px-3 py-2 text-sm text-center">${i.quantity}</td>
-                        <td class="px-3 py-2 text-sm text-right">$${parseFloat(i.unit_price).toFixed(2)}</td>
-                        <td class="px-3 py-2 text-sm text-right font-medium">$${parseFloat(i.subtotal).toFixed(2)}</td>
+                        ${hidePricing ? '' : `<td class="px-3 py-2 text-sm text-right">$${parseFloat(i.unit_price).toFixed(2)}</td>
+                        <td class="px-3 py-2 text-sm text-right font-medium">$${parseFloat(i.subtotal).toFixed(2)}</td>`}
                     </tr>
                 `).join('');
+
+                const notesLog = o.notes_log || [];
+                const notesHtml = notesLog.map(n => `
+                    <div class="p-2 rounded-lg ${n.from === 'staff' ? 'bg-blue-50' : 'bg-gray-50'} mb-2">
+                        <div class="text-xs text-gray-500 flex justify-between">
+                            <span class="font-semibold">${n.from === 'staff' ? 'CHC' : escapeHtml(n.author || 'You')}</span>
+                            <span>${new Date(n.created_at).toLocaleString()}</span>
+                        </div>
+                        <div class="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap">${escapeHtml(n.text)}</div>
+                    </div>`).join('');
 
                 return `
                 <div class="bg-white rounded-lg shadow-sm border fade-in" id="order-card-${idx}">
@@ -2929,8 +2949,8 @@
                                 <p class="text-sm text-gray-400">${new Date(o.created_at).toLocaleDateString()} - ${escapeHtml(o.contact_name)}${o.location ? ' · <i class="fas fa-map-marker-alt"></i> ' + escapeHtml(o.location) : ''}</p>
                             </div>
                             <div class="text-right">
-                                <span class="px-2 py-1 rounded-full text-xs font-semibold ${statusColors[o.status] || 'bg-gray-100'}">${statusLabels[o.status] || o.status.toUpperCase()}</span>
-                                <p class="font-bold text-gray-800 mt-1">$${parseFloat(o.total).toFixed(2)}</p>
+                                <span class="px-2 py-1 rounded-full text-xs font-semibold ${statusColors[o.status] || 'bg-gray-100'}">${labelFor(o)}</span>
+                                ${hidePricing ? '' : `<p class="font-bold text-gray-800 mt-1">$${parseFloat(o.total).toFixed(2)}</p>`}
                             </div>
                         </div>
                         <div class="flex justify-between items-center mt-2">
@@ -2949,12 +2969,12 @@
                                         <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">Product</th>
                                         <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500">SKU</th>
                                         <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500">Qty</th>
-                                        <th class="px-3 py-2 text-right text-xs font-semibold text-gray-500">Price</th>
-                                        <th class="px-3 py-2 text-right text-xs font-semibold text-gray-500">Subtotal</th>
+                                        ${hidePricing ? '' : `<th class="px-3 py-2 text-right text-xs font-semibold text-gray-500">Price</th>
+                                        <th class="px-3 py-2 text-right text-xs font-semibold text-gray-500">Subtotal</th>`}
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y">${itemsHtml}</tbody>
-                                <tfoot>
+                                ${hidePricing ? '' : `<tfoot>
                                     <tr class="border-t-2">
                                         <td colspan="4" class="px-3 py-2 text-right text-gray-500">Subtotal:</td>
                                         <td class="px-3 py-2 text-right text-gray-500">$${parseFloat(o.subtotal).toFixed(2)}</td>
@@ -2971,12 +2991,21 @@
                                         <td colspan="4" class="px-3 py-2 text-right font-bold">Total:</td>
                                         <td class="px-3 py-2 text-right font-bold text-blue-700">$${parseFloat(o.total).toFixed(2)}</td>
                                     </tr>
-                                </tfoot>
+                                </tfoot>`}
                             </table>
                         </div>
+                        <div class="p-3 border-t">
+                            <p class="text-xs font-semibold text-gray-500 mb-2">Notes</p>
+                            ${o.notes ? `<div class="mb-2 p-2 rounded-lg bg-amber-50 text-sm text-amber-900"><span class="font-semibold">At checkout:</span> ${escapeHtml(o.notes)}</div>` : ''}
+                            <div id="order-notes-${idx}">${notesHtml || '<p class="text-sm text-gray-400">No notes yet.</p>'}</div>
+                            <div class="flex items-end gap-2 mt-2">
+                                <textarea id="order-note-input-${idx}" rows="2" placeholder="Request pricing on something not in the catalog, flag a return for pickup, etc." class="flex-1 px-3 py-2 border rounded-lg text-sm"></textarea>
+                                <button onclick="event.stopPropagation(); addOrderNote(${idx})" class="px-3 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-lg text-sm font-semibold whitespace-nowrap">Send</button>
+                            </div>
+                        </div>
                         <div class="p-3 bg-gray-50 flex gap-2 flex-wrap">
-                            <button onclick="printOrder(${idx})" class="px-3 py-1.5 bg-white border rounded-lg text-sm hover:bg-gray-100 transition-colors"><i class="fas fa-print mr-1"></i>Print</button>
-                            <button onclick="downloadOrderCSV(${idx})" class="px-3 py-1.5 bg-white border rounded-lg text-sm hover:bg-gray-100 transition-colors"><i class="fas fa-download mr-1"></i>Download CSV</button>
+                            ${hidePricing ? '' : `<button onclick="printOrder(${idx})" class="px-3 py-1.5 bg-white border rounded-lg text-sm hover:bg-gray-100 transition-colors"><i class="fas fa-print mr-1"></i>Print</button>
+                            <button onclick="downloadOrderCSV(${idx})" class="px-3 py-1.5 bg-white border rounded-lg text-sm hover:bg-gray-100 transition-colors"><i class="fas fa-download mr-1"></i>Download CSV</button>`}
                         </div>
                     </div>
                 </div>`;
@@ -2987,6 +3016,38 @@
 
         } catch (err) {
             list.innerHTML = '<div class="text-center py-8 text-red-500">Failed to load orders.</div>';
+        }
+    }
+
+    async function addOrderNote(idx) {
+        const o = state.orders && state.orders[idx];
+        const input = document.getElementById(`order-note-input-${idx}`);
+        const text = input ? input.value.trim() : '';
+        if (!o || !text) return;
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/orders/${o.id}/notes`, {
+                method: 'POST',
+                body: JSON.stringify({ text })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to add note.'); return; }
+            // Reflect the new note locally and re-render this card's notes
+            // without a full reload, so the card stays open.
+            o.notes_log = data.order.notes_log;
+            input.value = '';
+            const notesWrap = document.getElementById(`order-notes-${idx}`);
+            if (notesWrap) {
+                notesWrap.innerHTML = (o.notes_log || []).map(n => `
+                    <div class="p-2 rounded-lg ${n.from === 'staff' ? 'bg-blue-50' : 'bg-gray-50'} mb-2">
+                        <div class="text-xs text-gray-500 flex justify-between">
+                            <span class="font-semibold">${n.from === 'staff' ? 'CHC' : escapeHtml(n.author || 'You')}</span>
+                            <span>${new Date(n.created_at).toLocaleString()}</span>
+                        </div>
+                        <div class="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap">${escapeHtml(n.text)}</div>
+                    </div>`).join('') || '<p class="text-sm text-gray-400">No notes yet.</p>';
+            }
+        } catch (err) {
+            alert('Failed to add note.');
         }
     }
 

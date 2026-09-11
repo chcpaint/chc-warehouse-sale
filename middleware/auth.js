@@ -189,6 +189,11 @@ const ORDER_DESK_ALLOW = [
     ['POST', /^\/companies\/[^/]+\/orders\/[^/]+\/invoice$/],
     ['GET', /^\/companies\/[^/]+\/orders\/[^/]+\/invoice$/],
     ['PUT', /^\/companies\/[^/]+\/orders\/[^/]+\/close$/],
+    // Any CHC staff account may adjust pricing on an order (discounts, price
+    // matches) and add a note to it -- per Adam, deliberately not fenced
+    // beyond ordinary order access. See requireOrderAccess below.
+    ['PUT', /^\/companies\/[^/]+\/orders\/[^/]+\/items$/],
+    ['POST', /^\/companies\/[^/]+\/orders\/[^/]+\/notes$/],
     // The Orders screen shows this account's own delivery-fee toggle
     // (read-only unless canManageDeliveryFee() says otherwise) for whichever
     // company is selected in the filter. Reachability here is not the
@@ -245,15 +250,27 @@ function requirePasswordCurrent(req, res, next) {
 }
 
 /**
- * Guard a single-order workflow action (invoice upload/view, close, status) so
- * it works for super admins, the owning company admin, AND an order-desk user
- * whose branch the order belongs to — but no one else.
+ * Guard a single-order workflow action (invoice upload/view, close, status,
+ * price edit, notes) so it works for super admins, the owning company admin,
+ * an order-desk user whose branch the order belongs to, AND an order-manager
+ * (every branch's orders, same as orderInScope already grants them) — but no
+ * one else.
+ *
+ * order_manager is handled here the same way as order_desk (both go through
+ * orderInScope, which already has a branch for order_manager: "every order").
+ * It previously fell through to the company-scoped check below, which
+ * compares req.admin.company_id (null for an order_manager, same as a super
+ * admin) against req.params.companyId and would always refuse — so an
+ * order_manager account could never actually reach an order-scoped route
+ * gated by this function. Folding it in here, rather than leaving it to be
+ * discovered against a real order_manager account, is what "any staff of
+ * CHC" requires for the new price-edit and notes endpoints.
  */
 async function requireOrderAccess(req, res, next) {
     if (!req.admin) return res.status(403).json({ error: 'Admin authentication required.' });
     if (req.admin.role === 'super_admin') return next();
 
-    if (req.admin.role === 'order_desk') {
+    if (req.admin.role === 'order_desk' || req.admin.role === 'order_manager') {
         const chk = await orderInScope(req, req.params.orderId);
         if (!chk.ok) return res.status(chk.code).json({ error: 'Access denied for this order.' });
         return next();

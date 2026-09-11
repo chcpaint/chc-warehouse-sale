@@ -1640,6 +1640,44 @@
         </div>
     </div>
 
+    <!-- Order Detail: pricing edit + notes -->
+    <div id="order-detail-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold"><i class="fas fa-pen-to-square text-blue-500 mr-2"></i>Order <span id="od-order-number"></span></h3>
+                <button onclick="hideModal('order-detail-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+
+            <h4 class="text-sm font-bold text-gray-700 mb-2">Pricing</h4>
+            <p class="text-xs text-gray-500 mb-2">Adjust any item, quantity, or price — for a discount, a price match, or a correction. Totals (subtotal, tax, delivery fee) are recalculated automatically. This never changes what a customer with pricing hidden sees — they only ever see items and quantities.</p>
+            <div class="overflow-x-auto border rounded-lg mb-1">
+                <table class="w-full">
+                    <thead class="bg-gray-50 text-xs text-gray-500"><tr><th class="px-2 py-1.5 text-left">Item</th><th class="px-2 py-1.5 text-right">Qty</th><th class="px-2 py-1.5 text-right">Unit Price</th></tr></thead>
+                    <tbody id="od-items-body" data-count="0"></tbody>
+                </table>
+            </div>
+            <span id="od-items-count" class="hidden" data-count="0"></span>
+            <p id="od-price-edited-note" class="text-xs text-gray-400 mb-2"></p>
+            <div class="flex items-end gap-2 mb-6">
+                <div class="flex-1">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Reason (optional, shown in the order history)</label>
+                    <input type="text" id="od-reason" placeholder="e.g. price match, loyalty discount" class="w-full px-3 py-2 border rounded-lg text-sm">
+                </div>
+                <button onclick="saveOrderPricing()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">Save Pricing</button>
+            </div>
+
+            <h4 class="text-sm font-bold text-gray-700 mb-2">Notes</h4>
+            <div id="od-original-note-wrap" class="hidden mb-2 p-2 rounded-lg bg-amber-50 text-sm text-amber-900">
+                <span class="font-semibold">At checkout:</span> <span id="od-original-note"></span>
+            </div>
+            <div id="od-notes-list" class="max-h-56 overflow-y-auto mb-3"></div>
+            <div class="flex items-end gap-2">
+                <textarea id="od-new-note" rows="2" placeholder="Add a note — a return to pick up, pricing on a non-catalog item, etc. The customer will be emailed." class="flex-1 px-3 py-2 border rounded-lg text-sm"></textarea>
+                <button onclick="addOrderNoteFromAdmin()" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">Add Note</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Upload Catalog Modal -->
     <div id="upload-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
@@ -1913,6 +1951,7 @@
         document.getElementById('admin-welcome').textContent = `Welcome, ${admin.user.name}`;
 
         loadPlatformLogo();
+        loadOrderStatusOptions();
 
         // Order-desk accounts are isolated to a single Orders page. Hide every
         // other nav item and boot straight into Orders. The backend enforces the
@@ -5339,10 +5378,28 @@
     // Labels for the granular per-row status dropdown -- kept separate from
     // orderStage()'s Ordered/Invoiced/Paid progress bar below, which reads
     // invoice_filename/payment_status instead and is unaffected by this list.
+    // Default (full) set, used until /whoami answers -- see loadOrderStatusOptions().
+    // CHC's simplified set (Received / Out for Delivery / Closed / Cancelled,
+    // with "processing" left off) replaces this once whoami responds, per
+    // utils/order-status.js.
+    let ORDER_STATUS_OPTIONS = ['pending', 'processing', 'out_on_delivery', 'closed', 'cancelled'];
+    const PARTIAL_SHIPMENT_LABEL = 'Partial Shipment with Backorder';
     const ORDER_STATUS_LABEL = {
         pending: 'Pending', processing: 'Processing', out_on_delivery: 'Out on Delivery',
         closed: 'Closed', cancelled: 'Cancelled'
     };
+
+    async function loadOrderStatusOptions() {
+        try {
+            const resp = await adminFetch('/whoami');
+            const data = await resp.json();
+            if (Array.isArray(data.order_status_options) && data.order_status_options.length) {
+                ORDER_STATUS_OPTIONS = data.order_status_options.map(o => o.value);
+                data.order_status_options.forEach(o => { ORDER_STATUS_LABEL[o.value] = o.label; });
+                renderAdminOrders();
+            }
+        } catch (err) { console.error('Order status options load failed:', err); }
+    }
 
     let orderLocationFilterLoaded = false;
     let currentAdminOrders = [];
@@ -5498,8 +5555,9 @@
     function renderOrderRow(o) {
         const st = orderStage(o);
         const hasInvoice = !!o.invoice_filename;
-        const statusOpts = ['pending','processing','out_on_delivery','closed','cancelled'];
+        const statusOpts = ORDER_STATUS_OPTIONS;
         const invMeta = hasInvoice ? `<div class="text-xs text-gray-400 mt-1" title="${esc(o.invoice_filename)}"><i class="fas fa-file-invoice-dollar text-emerald-500 mr-1"></i>${o.invoice_uploaded_at ? new Date(o.invoice_uploaded_at).toLocaleDateString() : 'uploaded'}</div>` : '';
+        const notesCount = (o.notes_log || []).length;
 
         // Context-aware action buttons per stage.
         let actions = '';
@@ -5534,9 +5592,13 @@
                 <td class="px-4 py-3 align-top">
                     <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold border ${st.color}">${st.label}</span>
                     ${stageBar(st)}
-                    <select onchange="updateOrderStatus('${o.id}', this.value)" class="mt-1.5 text-xs px-1.5 py-0.5 rounded border text-gray-500 bg-white" title="Set a granular status">
-                        ${statusOpts.map(sv => `<option value="${sv}" ${sv === o.status ? 'selected' : ''}>${ORDER_STATUS_LABEL[sv] || sv}</option>`).join('')}
+                    <select id="status-sel-${o.id}" onchange="updateOrderStatus('${o.id}', this.value)" class="mt-1.5 text-xs px-1.5 py-0.5 rounded border text-gray-500 bg-white" title="Set a granular status">
+                        ${statusOpts.map(sv => `<option value="${sv}" ${sv === o.status ? 'selected' : ''}>${sv === 'out_on_delivery' && o.is_partial_shipment ? PARTIAL_SHIPMENT_LABEL : (ORDER_STATUS_LABEL[sv] || sv)}</option>`).join('')}
                     </select>
+                    ${o.status === 'out_on_delivery' ? `<label class="flex items-center gap-1 mt-1 text-xs text-amber-700 cursor-pointer" title="Not everything shipped -- the rest is on backorder">
+                        <input type="checkbox" ${o.is_partial_shipment ? 'checked' : ''} onchange="updateOrderStatus('${o.id}', 'out_on_delivery', this.checked)">
+                        Partial / backorder
+                    </label>` : ''}
                     ${invMeta}
                 </td>
                 <td class="px-4 py-3 text-sm text-gray-500 align-top">${new Date(o.created_at).toLocaleDateString()}</td>
@@ -5545,7 +5607,11 @@
                     : '<span class="text-gray-300">not yet picked up</span>'}</td>
                 <td class="px-4 py-3 text-right text-sm whitespace-nowrap align-top">
                     ${actions}
-                    <div class="text-gray-400 text-xs mt-1">${(o.items || []).length} items</div>
+                    <div class="mt-1">
+                        <button onclick='openOrderDetail(${JSON.stringify(o.id)}, ${JSON.stringify(o.company_id)})' class="text-xs text-blue-600 hover:text-blue-800 font-medium" title="Adjust pricing or add a note">
+                            <i class="fas fa-pen-to-square mr-1"></i>${(o.items || []).length} items${notesCount ? ` &middot; ${notesCount} note${notesCount === 1 ? '' : 's'}` : ''}
+                        </button>
+                    </div>
                 </td>
             </tr>`;
     }
@@ -5605,10 +5671,118 @@
         input.click();
     }
 
-    async function updateOrderStatus(orderId, status) {
+    async function updateOrderStatus(orderId, status, isPartialShipment) {
         try {
-            await adminFetch(`/orders/${orderId}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+            await adminFetch(`/orders/${orderId}/status`, {
+                method: 'PUT',
+                body: JSON.stringify({ status, is_partial_shipment: !!isPartialShipment })
+            });
+            loadAdminOrders();
         } catch (err) { alert('Failed to update status.'); loadAdminOrders(); }
+    }
+
+    // ============================================================
+    // ORDER DETAIL: pricing edit + notes
+    //
+    // One modal covers both -- staff price adjustments (any role with
+    // access to the order, per Adam: "any staff of CHC") and the running
+    // notes/messages log, which any company may use regardless of pricing
+    // visibility.
+    // ============================================================
+    let orderDetailCtx = null; // { orderId, companyId }
+
+    function openOrderDetail(orderId, companyId) {
+        const o = (currentAdminOrders || []).find(x => x.id === orderId);
+        if (!o) return;
+        orderDetailCtx = { orderId, companyId };
+        document.getElementById('od-order-number').textContent = o.order_number;
+        renderOrderDetailItems(o);
+        renderOrderDetailNotes(o);
+        showModal('order-detail-modal');
+    }
+
+    function renderOrderDetailItems(o) {
+        const rows = (o.items || []).map((item, idx) => `
+            <tr>
+                <td class="px-2 py-1.5 text-sm">${esc(item.name)}<div class="text-xs text-gray-400">${esc(item.sku || '')}</div></td>
+                <td class="px-2 py-1.5"><input type="number" min="1" step="1" value="${Number(item.quantity) || 1}" id="od-qty-${idx}" class="w-20 px-2 py-1 border rounded text-sm text-right"></td>
+                <td class="px-2 py-1.5"><input type="number" min="0" step="0.01" value="${item.unit_price === null || item.unit_price === undefined ? '' : Number(item.unit_price).toFixed(2)}" id="od-price-${idx}" class="w-24 px-2 py-1 border rounded text-sm text-right" placeholder="${item.price_on_request ? 'to price' : ''}"></td>
+            </tr>`).join('');
+        document.getElementById('od-items-body').innerHTML = rows || '<tr><td colspan="3" class="text-center text-gray-400 py-3">No items.</td></tr>';
+        document.getElementById('od-items-count').dataset.count = (o.items || []).length;
+        document.getElementById('od-reason').value = '';
+        const editedNote = o.price_edited_at
+            ? `Last adjusted ${new Date(o.price_edited_at).toLocaleString()}${o.price_edit_reason ? ' — ' + esc(o.price_edit_reason) : ''}`
+            : '';
+        document.getElementById('od-price-edited-note').textContent = editedNote;
+    }
+
+    function renderOrderDetailNotes(o) {
+        const log = o.notes_log || [];
+        const html = log.length
+            ? log.map(n => `
+                <div class="p-2 rounded-lg ${n.from === 'staff' ? 'bg-blue-50' : 'bg-gray-50'} mb-2">
+                    <div class="text-xs text-gray-500 flex justify-between">
+                        <span class="font-semibold">${n.from === 'staff' ? '<i class="fas fa-user-tie mr-1"></i>' : '<i class="fas fa-store mr-1"></i>'}${esc(n.author || (n.from === 'staff' ? 'CHC' : 'Customer'))}</span>
+                        <span>${new Date(n.created_at).toLocaleString()}</span>
+                    </div>
+                    <div class="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap">${esc(n.text)}</div>
+                </div>`).join('')
+            : '<p class="text-sm text-gray-400">No notes on this order yet.</p>';
+        document.getElementById('od-notes-list').innerHTML = html;
+        document.getElementById('od-new-note').value = '';
+        if (o.notes) {
+            document.getElementById('od-original-note').textContent = o.notes;
+            document.getElementById('od-original-note-wrap').classList.remove('hidden');
+        } else {
+            document.getElementById('od-original-note-wrap').classList.add('hidden');
+        }
+    }
+
+    async function saveOrderPricing() {
+        if (!orderDetailCtx) return;
+        const o = (currentAdminOrders || []).find(x => x.id === orderDetailCtx.orderId);
+        const count = parseInt(document.getElementById('od-items-count').dataset.count || '0', 10);
+        const items = [];
+        for (let i = 0; i < count; i++) {
+            const qty = parseFloat(document.getElementById(`od-qty-${i}`).value);
+            const price = parseFloat(document.getElementById(`od-price-${i}`).value);
+            if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0) {
+                alert('Every line needs a positive quantity and a non-negative price.');
+                return;
+            }
+            items.push({
+                product_id: o?.items?.[i]?.product_id || null,
+                name: o?.items?.[i]?.name, sku: o?.items?.[i]?.sku,
+                quantity: qty, unit_price: price
+            });
+        }
+        const reason = document.getElementById('od-reason').value.trim();
+        try {
+            const resp = await adminFetch(`/companies/${orderDetailCtx.companyId}/orders/${orderDetailCtx.orderId}/items`, {
+                method: 'PUT', body: JSON.stringify({ items, reason })
+            });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to update pricing.'); return; }
+            hideModal('order-detail-modal');
+            loadAdminOrders();
+        } catch (err) { alert('Failed to update pricing.'); }
+    }
+
+    async function addOrderNoteFromAdmin() {
+        if (!orderDetailCtx) return;
+        const text = document.getElementById('od-new-note').value.trim();
+        if (!text) return;
+        try {
+            const resp = await adminFetch(`/companies/${orderDetailCtx.companyId}/orders/${orderDetailCtx.orderId}/notes`, {
+                method: 'POST', body: JSON.stringify({ text })
+            });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to add note.'); return; }
+            await loadAdminOrders();
+            const o = (currentAdminOrders || []).find(x => x.id === orderDetailCtx.orderId);
+            if (o) renderOrderDetailNotes(o);
+        } catch (err) { alert('Failed to add note.'); }
     }
 
     // Step 3: payment received -> mark paid and close the order.

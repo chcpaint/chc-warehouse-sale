@@ -48,7 +48,12 @@ const KNOWN_COLUMNS = {
         // caught by a test instead of by a demo.
         'handled_by', 'handled_by_name', 'handled_at',
         // The flat delivery fee on an order under $300 — see utils/delivery-fee.js.
-        'delivery_fee'
+        'delivery_fee',
+        // Added by migration 038: CHC's simplified-status "Partial Shipment
+        // with Backorder" flag on out_on_delivery, a running notes/messages
+        // log distinct from the original checkout `notes`, and who adjusted
+        // pricing on an order after it was placed, when, and why.
+        'is_partial_shipment', 'notes_log', 'price_edited_at', 'price_edited_by', 'price_edit_reason'
     ]),
     company_po_sequences: new Set([
         'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',

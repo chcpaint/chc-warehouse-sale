@@ -12,8 +12,16 @@ function validEmails(list) {
  *     per-company) + the servicing CHC branch assigned to the order's location.
  * REPLY-TO: the orderer (falls back to the company contact) so replies from the
  *     branch/CHC land with the person who placed the order.
+ *
+ * Also split into `staffTo` (the servicing CHC branch only) and `customerTo`
+ * (everyone else -- the orderer, the company contact, managers, the
+ * location's own notify list) so a caller that needs to send staff the full
+ * price and the customer side a packing slip (see utils/pricing-visibility.js)
+ * knows exactly who is on which side. `to` is unchanged and still the union
+ * of both, for every existing caller that doesn't need the split.
+ *
  * @param {{company_id:string, location_id?:string, contact_email?:string}} order
- * @returns {Promise<{to:string[], replyTo?:string}>}
+ * @returns {Promise<{to:string[], replyTo?:string, staffTo:string[], customerTo:string[]}>}
  */
 async function resolveOrderRecipients(order) {
     const { data: company } = await supabaseAdmin
@@ -38,15 +46,16 @@ async function resolveOrderRecipients(order) {
     }
 
     const orderer = order.contact_email;
-    const to = validEmails([
+    const customerTo = validEmails([
         ...(orderer ? [orderer] : []),
         ...(companyContact ? [companyContact] : []),
         ...managers,
-        ...locationEmails,
-        ...branchEmails
+        ...locationEmails
     ]);
+    const staffTo = validEmails(branchEmails);
+    const to = validEmails([...customerTo, ...staffTo]);
     const replyTo = validEmails([...(orderer ? [orderer] : []), ...(companyContact ? [companyContact] : [])])[0];
-    return { to, replyTo };
+    return { to, replyTo, staffTo, customerTo };
 }
 
 module.exports = { resolveOrderRecipients, validEmails };

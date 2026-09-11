@@ -2,14 +2,35 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
-const { sendOrderNotification } = require('../utils/email');
+const { sendOrderNotification, sendOrderNoteAdded } = require('../utils/email');
 const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
 const { taxSettings, computeTax } = require('../utils/tax');
 const { deliveryFeeSettings, computeDeliveryFee, THRESHOLD, FEE } = require('../utils/delivery-fee');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
+const { resolveOrderRecipients } = require('../utils/recipients');
+const { hidePricingEnabled, stripOrderPricing } = require('../utils/pricing-visibility');
+const { labelFor } = require('../utils/order-status');
 
 const router = express.Router();
+
+/**
+ * Apply this company's pricing-visibility setting and the distributor's
+ * status labels to a list of orders headed to the customer-facing storefront.
+ * One settings read for the whole list rather than per order.
+ */
+async function withCustomerVisibility(req, orders) {
+    const list = orders || [];
+    if (!list.length) return list;
+    const { data: company } = await supabaseAdmin
+        .from('companies').select('settings').eq('id', req.company.id).maybeSingle();
+    const hide = hidePricingEnabled(company?.settings);
+    const distributorSettings = req.distributor ? req.distributor.settings : null;
+    return list.map(o => {
+        const withLabel = { ...o, status_label: labelFor(o.status, o.is_partial_shipment, distributorSettings) };
+        return hide ? stripOrderPricing(withLabel) : withLabel;
+    });
+}
 
 /**
  * GET /api/store/platform-logo
@@ -592,56 +613,43 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             return res.status(500).json({ error: 'Failed to submit order.' });
         }
 
-        // Send email notification (non-blocking — don't fail the order if email fails)
+        // Send email notification (non-blocking — don't fail the order if email fails).
+        // This is the "Received" step of CHC's simplified order workflow — the
+        // one that already fires today regardless of distributor.
         try {
-            // Get company's email_config for notification routing
-            const { data: companyData } = await supabaseAdmin
-                .from('companies')
-                .select('email_config, contact_email')
-                .eq('id', companyId)
-                .single();
+            const { staffTo, customerTo, to: recipients, replyTo } = await resolveOrderRecipients({
+                company_id: companyId, location_id: locationRow.id, contact_email
+            });
 
-            // Notify the company notification/contact email plus every configured manager.
-            const cfg = companyData?.email_config || {};
-            const managerEmails = Array.isArray(cfg.manager_emails) ? cfg.manager_emails : [];
-            // Company contact email (if the company has one set). Managers below are the optional per-company group.
-            const companyContact = companyData?.contact_email;
+            // poCompany.settings was already fetched above for tax/delivery-fee
+            // — reused here rather than a second read of the same row.
+            const hidePricing = hidePricingEnabled(poCompany?.settings);
 
-            // Route to the servicing CHC branch assigned to this order's location.
-            let branchEmails = [];
-            if (locationRow.supplier_branch_id) {
-                const { data: branch } = await supabaseAdmin
-                    .from('supplier_branches')
-                    .select('emails, is_active')
-                    .eq('id', locationRow.supplier_branch_id)
-                    .single();
-                if (branch && branch.is_active !== false && Array.isArray(branch.emails)) branchEmails = branch.emails;
-            }
+            const baseEmail = {
+                order: { ...order, items: verifiedItems },
+                companyName: req.company.name,
+                contactName: stripHtml(contact_name),
+                contactEmail: stripHtml(contact_email),
+                contactPhone: stripHtml(contact_phone || ''),
+                poNumber: finalPo,
+                location: resolvedLocationName,
+                notes: stripHtml(notes || '')
+            };
 
-            // Always email the person who placed the order + the company contact (if set)
-            // + the optional manager/general group + the servicing CHC branch.
-            const ordererEmail = String(contact_email || '').trim().toLowerCase();
-            const recipients = [...new Set(
-                [ordererEmail, ...(companyContact ? [companyContact] : []), ...managerEmails, ...(Array.isArray(locationRow.notify_emails) ? locationRow.notify_emails : []), ...branchEmails]
-                    .map(e => String(e || '').trim().toLowerCase())
-                    .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
-            )];
-            // Replies (from the branch/CHC) go back to the person who ordered, then the company contact.
-            const replyTo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ordererEmail) ? ordererEmail : (companyContact || undefined);
-
-            if (recipients.length) {
-                sendOrderNotification({
-                    to: recipients,
-                    replyTo,
-                    order: { ...order, items: verifiedItems },
-                    companyName: req.company.name,
-                    contactName: stripHtml(contact_name),
-                    contactEmail: stripHtml(contact_email),
-                    contactPhone: stripHtml(contact_phone || ''),
-                    poNumber: finalPo,
-                    location: resolvedLocationName,
-                    notes: stripHtml(notes || '')
-                }).catch(err => console.error('Order email failed (non-blocking):', err.message));
+            if (hidePricing) {
+                // Staff (the servicing branch) always keep full pricing; only
+                // the customer/delivery side gets the packing-slip version.
+                if (staffTo.length) {
+                    sendOrderNotification({ ...baseEmail, to: staffTo, replyTo, hidePricing: false })
+                        .catch(err => console.error('Order email (staff) failed (non-blocking):', err.message));
+                }
+                if (customerTo.length) {
+                    sendOrderNotification({ ...baseEmail, to: customerTo, replyTo, hidePricing: true })
+                        .catch(err => console.error('Order email (customer) failed (non-blocking):', err.message));
+                }
+            } else if (recipients.length) {
+                sendOrderNotification({ ...baseEmail, to: recipients, replyTo })
+                    .catch(err => console.error('Order email failed (non-blocking):', err.message));
             }
         } catch (emailErr) {
             console.error('Email lookup error (non-blocking):', emailErr.message);
@@ -681,7 +689,7 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const { data: orders, error } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
+            .select('id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, is_partial_shipment, notes, notes_log, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -691,7 +699,7 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
             return res.status(500).json({ error: 'Failed to load orders.' });
         }
 
-        res.json({ orders: orders || [] });
+        res.json({ orders: await withCustomerVisibility(req, orders) });
 
     } catch (err) {
         console.error('Orders error:', err);
@@ -709,7 +717,7 @@ router.get('/:slug/reports/orders', requireCompanyAuth, async (req, res) => {
         const { location_id, from, to } = req.query;
         let q = supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, po_number, status, subtotal, tax, tax_rate, total, location, location_id, created_at, items')
+            .select('id, order_number, contact_name, po_number, status, is_partial_shipment, subtotal, tax, tax_rate, total, location, location_id, created_at, items')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(5000);
@@ -718,7 +726,7 @@ router.get('/:slug/reports/orders', requireCompanyAuth, async (req, res) => {
         if (to) q = q.lte('created_at', to);
         const { data, error } = await q;
         if (error) { console.error('Reports fetch error:', error); return res.status(500).json({ error: 'Failed to load report data.' }); }
-        res.json({ orders: data || [] });
+        res.json({ orders: await withCustomerVisibility(req, data) });
     } catch (err) {
         console.error('Reports error:', err);
         res.status(500).json({ error: 'Failed to load report data.' });
@@ -827,6 +835,56 @@ router.get('/:slug/orders/:orderId/invoice', requireCompanyAuth, async (req, res
     } catch (err) {
         console.error('Invoice download error:', err);
         res.status(500).json({ error: 'Failed to get invoice.' });
+    }
+});
+
+/**
+ * POST /api/store/:slug/orders/:orderId/notes
+ *
+ * A customer message on an already-placed order — a request for pricing on
+ * something not in the catalog, a return that needs to be picked up, etc.
+ * Appended to the running log (not the original checkout `notes`, which
+ * stays as the order was placed) and emailed to the servicing CHC branch.
+ */
+router.post('/:slug/orders/:orderId/notes', requireCompanyAuth, async (req, res) => {
+    try {
+        const text = stripHtml(req.body?.text || '').trim();
+        if (!text) return res.status(400).json({ error: 'Note text is required.' });
+
+        const { data: order, error: oErr } = await supabaseAdmin
+            .from('orders')
+            .select('id, order_number, company_id, location_id, contact_email, notes_log')
+            .eq('id', req.params.orderId).eq('company_id', req.company.id).single();
+        if (oErr || !order) return res.status(404).json({ error: 'Order not found.' });
+
+        const author = (req.companyUser && (req.companyUser.name || req.companyUser.email)) || req.company.name;
+        const entry = { from: 'customer', author, text, created_at: new Date().toISOString() };
+        const notesLog = [...(order.notes_log || []), entry];
+
+        const { data: updated, error: updErr } = await supabaseAdmin
+            .from('orders')
+            .update({ notes_log: notesLog })
+            .eq('id', order.id)
+            .select('id, order_number, notes_log')
+            .single();
+        if (updErr) throw updErr;
+
+        try {
+            const { staffTo, replyTo } = await resolveOrderRecipients(order);
+            if (staffTo.length) {
+                sendOrderNoteAdded({
+                    to: staffTo, replyTo,
+                    order: { id: order.id, order_number: order.order_number },
+                    companyName: req.company.name,
+                    author, text
+                }).catch(e => console.error('Customer note email failed (non-blocking):', e.message));
+            }
+        } catch (e) { console.error('Customer note recipients error (non-blocking):', e.message); }
+
+        res.status(201).json({ order: updated });
+    } catch (err) {
+        console.error('Order note add error:', err);
+        res.status(500).json({ error: 'Failed to add note.' });
     }
 });
 
