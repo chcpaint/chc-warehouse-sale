@@ -153,6 +153,12 @@ const KNOWN_COLUMNS = {
     ]),
     inventory_drivers: new Set([
         'id', 'company_id', 'name', 'phone', 'is_active', 'created_at'
+    ]),
+    // Added by migration 037 for the distributor tenancy layer.
+    distributors: new Set([
+        'id', 'name', 'slug', 'custom_domain', 'logo_url', 'contact_email', 'contact_phone',
+        'settings', 'stripe_account_id', 'stripe_connect_status', 'is_active', 'is_default',
+        'created_at', 'updated_at'
     ])
 };
 
@@ -380,7 +386,7 @@ class Query {
 function createFakeSupabase(seed = {}) {
     let counter = 0;
     const db = {
-        products: [], companies: [], company_locations: [], supplier_branches: [],
+        distributors: [], products: [], companies: [], company_locations: [], supplier_branches: [],
         product_barcodes: [], inventory_levels: [], stock_movements: [],
         replenishment_orders: [], replenishment_order_lines: [], inventory_uploads: [],
         inventory_count_sessions: [], inventory_count_lines: [], inventory_transfers: [],

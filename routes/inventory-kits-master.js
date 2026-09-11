@@ -559,8 +559,10 @@ router.get('/:kitId/access', async (req, res) => {
         if (!kit) return res.status(404).json({ error: 'Kit not found.' });
         if (kit.company_id !== null) return res.status(400).json({ error: 'Only a CHC master kit has customer access to manage.' });
 
+        let companiesQuery = supabaseAdmin.from('companies').select('id, name, slug, is_active').order('name', { ascending: true });
+        if (req.distributor) companiesQuery = companiesQuery.eq('distributor_id', req.distributor.id);
         const [{ data: companies }, { data: access }, { data: items }] = await Promise.all([
-            supabaseAdmin.from('companies').select('id, name, slug, is_active').order('name', { ascending: true }),
+            companiesQuery,
             supabaseAdmin.from('company_kit_access').select('company_id, enabled').eq('kit_id', kit.id),
             supabaseAdmin.from('kit_items').select('id').eq('kit_id', kit.id)
         ]);
@@ -611,7 +613,9 @@ router.put('/:kitId/access/bulk', async (req, res) => {
 
         const enabled = req.body?.enabled === true;
 
-        const { data: real } = await supabaseAdmin.from('companies').select('id').in('id', companyIds);
+        let realQuery = supabaseAdmin.from('companies').select('id').in('id', companyIds);
+        if (req.distributor) realQuery = realQuery.eq('distributor_id', req.distributor.id);
+        const { data: real } = await realQuery;
         const realIds = new Set((real || []).map(c => c.id));
         const rows = companyIds.filter(id => realIds.has(id)).map(id => ({ company_id: id, kit_id: kit.id, enabled }));
 

@@ -823,7 +823,9 @@ router.get('/exclusions', async (req, res) => {
             .select('id, company_id, brand, category, sku_key, reason, created_at')
             .order('created_at');
         if (error) throw error;
-        const { data: companies } = await supabaseAdmin.from('companies').select('id, name');
+        let exclCompaniesQuery = supabaseAdmin.from('companies').select('id, name');
+        if (req.distributor) exclCompaniesQuery = exclCompaniesQuery.eq('distributor_id', req.distributor.id);
+        const { data: companies } = await exclCompaniesQuery;
         const nameOf = new Map((companies || []).map(c => [c.id, c.name]));
         res.json({ exclusions: (data || []).map(x => ({ ...x, company_name: nameOf.get(x.company_id) || 'Unknown' })) });
     } catch (err) {
@@ -942,8 +944,11 @@ router.post('/push', async (req, res) => {
         if (!items.length) return res.status(400).json({ error: 'That selection matched no active master items.' });
 
         // ---- which customers ----
-        const allCompanies = await readAll(() => supabaseAdmin.from('companies')
-            .select('id, name, is_active').eq('is_active', true));
+        const allCompanies = await readAll(() => {
+            let q = supabaseAdmin.from('companies').select('id, name, is_active').eq('is_active', true);
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         let companies = allCompanies;
         if (Array.isArray(req.body.company_ids) && req.body.company_ids.length) {
             const wanted = new Set(req.body.company_ids.filter(isValidUUID));
@@ -1142,8 +1147,11 @@ router.post('/sync', async (req, res) => {
         if (!fields.length) return res.status(400).json({ error: 'Choose at least one of name, sku or barcode.' });
 
         // ---- who ----
-        const allCompanies = await readAll(() => supabaseAdmin.from('companies')
-            .select('id, name, is_active').eq('is_active', true));
+        const allCompanies = await readAll(() => {
+            let q = supabaseAdmin.from('companies').select('id, name, is_active').eq('is_active', true);
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         let companies = allCompanies;
         if (Array.isArray(req.body.company_ids) && req.body.company_ids.length) {
             const want = new Set(req.body.company_ids.filter(isValidUUID));
@@ -1163,8 +1171,11 @@ router.post('/sync', async (req, res) => {
         const frozen = companies.filter(c => (policyFor.get(c.id) || {}).push_mode === 'frozen');
         const candidates = companies.filter(c => (policyFor.get(c.id) || {}).push_mode !== 'frozen');
 
-        const master = await readAll(() => supabaseAdmin.from('item_library')
-            .select('id, sku, sku_key, name, brand, barcode, is_active'));
+        const master = await readAll(() => {
+            let q = supabaseAdmin.from('item_library').select('id, sku, sku_key, name, brand, barcode, is_active');
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         const bySkuKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
 
         const perCompany = [];
@@ -1384,8 +1395,11 @@ router.post('/prices', async (req, res) => {
             });
         }
 
-        const allCompanies = await readAll(() => supabaseAdmin.from('companies')
-            .select('id, name, is_active').eq('is_active', true));
+        const allCompanies = await readAll(() => {
+            let q = supabaseAdmin.from('companies').select('id, name, is_active').eq('is_active', true);
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         let companies = allCompanies;
         if (Array.isArray(req.body.company_ids) && req.body.company_ids.length) {
             const want = new Set(req.body.company_ids.filter(isValidUUID));
@@ -1400,8 +1414,12 @@ router.post('/prices', async (req, res) => {
         const frozen = companies.filter(c => (policyFor.get(c.id) || {}).push_mode === 'frozen');
         const candidates = companies.filter(c => (policyFor.get(c.id) || {}).push_mode !== 'frozen');
 
-        const master = await readAll(() => supabaseAdmin.from('item_library')
-            .select('sku_key, sku, name, list_price, is_active').ilike('brand', brand));
+        const master = await readAll(() => {
+            let q = supabaseAdmin.from('item_library')
+                .select('sku_key, sku, name, list_price, is_active').ilike('brand', brand);
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         const priceOf = new Map(master
             .filter(m => m.is_active !== false && Number(m.list_price) > 0)
             .map(m => [m.sku_key, m]));
@@ -1500,14 +1518,27 @@ router.post('/prices', async (req, res) => {
  */
 router.get('/gaps', async (req, res) => {
     try {
-        const master = await readAll(() => supabaseAdmin.from('item_library')
-            .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active'));
+        const master = await readAll(() => {
+            let q = supabaseAdmin.from('item_library')
+                .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active');
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         const byKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
 
-        const products = await readAll(() => supabaseAdmin.from('products')
-            .select('id, company_id, sku, name, brand, category, price, is_active').eq('is_active', true));
-        const companies = await readAll(() => supabaseAdmin.from('companies').select('id, name'));
+        const companies = await readAll(() => {
+            let q = supabaseAdmin.from('companies').select('id, name');
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         const nameOf = new Map(companies.map(c => [c.id, c.name]));
+
+        const products = await readAll(() => {
+            let q = supabaseAdmin.from('products')
+                .select('id, company_id, sku, name, brand, category, price, is_active').eq('is_active', true);
+            if (req.distributor) q = q.in('company_id', companies.map(c => c.id));
+            return q;
+        });
 
         const ids = products.map(p => p.id);
         const codes = [];
@@ -1619,14 +1650,27 @@ router.post('/backfill', async (req, res) => {
             : ALLOWED.slice();
         if (!fields.length) return res.status(400).json({ error: 'Choose at least one field to fill in.' });
 
-        const master = await readAll(() => supabaseAdmin.from('item_library')
-            .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active'));
+        const master = await readAll(() => {
+            let q = supabaseAdmin.from('item_library')
+                .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active');
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         const byKey = new Map(master.filter(m => m.is_active !== false).map(m => [m.sku_key, m]));
 
-        const products = await readAll(() => supabaseAdmin.from('products')
-            .select('id, company_id, sku, brand, category, price, is_active').eq('is_active', true));
-        const companies = await readAll(() => supabaseAdmin.from('companies').select('id, name'));
+        const companies = await readAll(() => {
+            let q = supabaseAdmin.from('companies').select('id, name');
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+            return q;
+        });
         const nameOf = new Map(companies.map(c => [c.id, c.name]));
+
+        const products = await readAll(() => {
+            let q = supabaseAdmin.from('products')
+                .select('id, company_id, sku, brand, category, price, is_active').eq('is_active', true);
+            if (req.distributor) q = q.in('company_id', companies.map(c => c.id));
+            return q;
+        });
 
         const ids = products.map(p => p.id);
         const codeFor = new Map();

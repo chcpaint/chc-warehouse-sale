@@ -34,12 +34,18 @@ router.use('/', require('./admin-password'));
 router.use('/users', require('./admin-users'));
 router.use('/companies/:companyId/users', require('./company-users-admin'));
 
+// Platform-level distributor onboarding (platform_admin only -- see
+// routes/distributors-admin.js for why this is separate from super_admin).
+router.use('/platform/distributors', require('./distributors-admin'));
+
 // Identity bootstrap — lets the console (including an order-desk account) render
 // the right view without exposing anything the account cannot already see.
 router.get('/whoami', (req, res) => {
     res.json({
         id: req.admin.id, name: req.admin.name, email: req.admin.email,
         role: req.admin.role, company_id: req.admin.company_id, branch_id: req.admin.branch_id,
+        distributor_id: req.admin.distributor_id,
+        distributor: req.distributor ? { id: req.distributor.id, name: req.distributor.name, slug: req.distributor.slug } : null,
         is_branch_manager: req.admin.is_branch_manager === true
     });
 });
@@ -93,6 +99,7 @@ router.get('/stats', async (req, res) => {
         const companyFilter = isSuper ? {} : { company_id: req.admin.company_id };
 
         let companiesQuery = supabaseAdmin.from('companies').select('id', { count: 'exact', head: true });
+        if (req.distributor) companiesQuery = companiesQuery.eq('distributor_id', req.distributor.id);
         if (!isSuper) companiesQuery = companiesQuery.eq('id', req.admin.company_id);
         const { count: totalCompanies } = await companiesQuery;
 
@@ -154,6 +161,8 @@ router.get('/companies', async (req, res) => {
             .select('id, name, slug, logo_url, contact_email, email_config, settings, is_active, created_at, updated_at')
             .order('name');
 
+        if (req.distributor) query = query.eq('distributor_id', req.distributor.id);
+
         if (req.admin.role !== 'super_admin') {
             query = query.eq('id', req.admin.company_id);
         }
@@ -181,12 +190,10 @@ router.post('/companies', requireSuperAdmin, async (req, res) => {
 
         const slug = generateSlug(name);
 
-        // Check slug uniqueness
-        const { data: existing } = await supabaseAdmin
-            .from('companies')
-            .select('id')
-            .eq('slug', slug)
-            .single();
+        // Check slug uniqueness (slugs are unique per distributor, not globally)
+        let slugCheck = supabaseAdmin.from('companies').select('id').eq('slug', slug);
+        if (req.distributor) slugCheck = slugCheck.eq('distributor_id', req.distributor.id);
+        const { data: existing } = await slugCheck.single();
 
         if (existing) {
             return res.status(409).json({ error: 'A company with a similar name already exists.' });
@@ -205,7 +212,8 @@ router.post('/companies', requireSuperAdmin, async (req, res) => {
                 address: address || null,
                 email_config: email_config || {},
                 settings: settings || {},
-                is_active: true
+                is_active: true,
+                ...(req.distributor ? { distributor_id: req.distributor.id } : {})
             })
             .select()
             .single();

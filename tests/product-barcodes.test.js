@@ -35,6 +35,7 @@ const stubs = {
     [path.join(ROOT, 'middleware/auth.js')]: {
         requireAdminAuth: (req, res, next) => { req.admin = authAdmin; next(); },
         requireSuperAdmin: (req, res, next) => next(),
+        requirePlatformAdmin: (req, res, next) => next(),
         requireCompanyAccess: (req, res, next) => { req.admin = authAdmin; next(); },
         requireFullAdmin: (req, res, next) => next(),
         restrictOrderDesk: (req, res, next) => next(),
