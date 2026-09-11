@@ -378,6 +378,9 @@
 
             <!-- ============ PROMOTIONS TAB ============ -->
             <section id="tab-promotions" class="hidden fade-in">
+                <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
+                    <i class="fas fa-arrow-left mr-1"></i>Back to Products
+                </button>
                 <div class="mb-4">
                     <h2 class="text-2xl font-bold text-gray-800"><i class="fas fa-tags text-red-500 mr-2"></i>Current Promotions</h2>
                     <p class="text-gray-500 mt-1">Special pricing on select products — limited time!</p>
@@ -401,6 +404,9 @@
                     <button onclick="showTab('products')" class="mt-3 text-blue-600 hover:underline">Browse products</button>
                 </div>
                 <div id="cart-content" class="hidden">
+                    <button onclick="showTab('products')" type="button" class="mb-4 text-blue-600 hover:underline text-sm">
+                        <i class="fas fa-arrow-left mr-1"></i>Continue shopping
+                    </button>
                     <div id="cart-items" class="space-y-3 mb-6"></div>
                     <div class="bg-white rounded-xl shadow-sm border p-6">
                         <div class="flex justify-between text-sm text-gray-500 mb-1">
@@ -434,6 +440,9 @@
 
                 <!-- Checkout Form -->
                 <div id="checkout-form" class="hidden mt-6 bg-white rounded-xl shadow-sm border p-6 fade-in">
+                    <button onclick="hideCheckout()" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
+                        <i class="fas fa-arrow-left mr-1"></i>Back to cart
+                    </button>
                     <h3 class="text-xl font-bold mb-1">Step 2 &mdash; Convert to Order</h3>
                     <p class="text-sm text-gray-500 mb-4">Enter the PO number from your approved quote, then submit. This places the order and emails everyone.</p>
                     <form onsubmit="submitOrder(event)" class="space-y-4">
@@ -486,6 +495,9 @@
 
             <!-- ============ ORDERS TAB ============ -->
             <section id="tab-orders" class="hidden fade-in">
+                <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
+                    <i class="fas fa-arrow-left mr-1"></i>Back to Products
+                </button>
                 <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-receipt mr-2"></i>Order History</h2>
                 <div id="orders-list" class="space-y-3"></div>
                 <div id="no-orders" class="hidden text-center py-12 text-gray-400">
@@ -495,6 +507,9 @@
             </section>
             <!-- ============ REPORTS TAB ============ -->
             <section id="tab-reports" class="hidden fade-in">
+                <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
+                    <i class="fas fa-arrow-left mr-1"></i>Back to Products
+                </button>
                 <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-chart-line mr-2"></i>Reports</h2>
                 <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
                     <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -580,6 +595,9 @@
 
             <!-- ============ CONTACT TAB ============ -->
             <section id="tab-contact" class="hidden fade-in">
+                <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
+                    <i class="fas fa-arrow-left mr-1"></i>Back to Products
+                </button>
                 <h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-address-book mr-2"></i>Contact CHC</h2>
                 <p class="text-gray-500 mb-5">Reach CHC head office or your servicing branch.</p>
 
@@ -1415,6 +1433,15 @@
         if (tab === 'cart') renderCart();
         if (tab === 'orders') loadOrders();
         if (tab === 'reports') loadReports();
+
+        // Landing back on Products -- from the drawer, "Continue shopping" in
+        // the cart, or "Back to cart" then away again -- should drop the
+        // cursor straight into the scan box, not make whoever is scanning
+        // items click into it first.
+        if (tab === 'products') {
+            const scanInput = document.getElementById('scan-to-cart-input');
+            if (scanInput) scanInput.focus();
+        }
 
         // Keep the drawer's highlight honest even when navigation came from
         // somewhere else — an empty-cart "Browse products" link, say.
@@ -2400,6 +2427,13 @@
         loadPaymentConfig();
         loadPoConfig();
         document.getElementById('checkout-name').focus();
+    }
+
+    // "Back to cart" from Step 2. The cart itself (cart-content) was never
+    // hidden underneath it -- showCheckout() only reveals the form -- so
+    // there is nothing to restore here, just the form to put away.
+    function hideCheckout() {
+        document.getElementById('checkout-form').classList.add('hidden');
     }
 
     // Online payments are pre-wired but disabled by default; the section only appears
