@@ -423,29 +423,38 @@ router.post('/counts/:id/cancel', async (req, res) => {
 // ============================================================
 // INTER-LOCATION TRANSFERS
 // ============================================================
+//
+// A transfer is a two-phase move, not one atomic step: shipping writes only
+// the outbound leg and parks the line 'in_transit' with a driver attached;
+// the destination only gains the stock -- and the line only closes out --
+// once someone there receives it (see RECEIVING TRANSFERS below). That way a
+// shop, a store or a driver can always answer "where is this and who has
+// it" for whatever is between the two locations, instead of stock appearing
+// to teleport between shelves in the same request.
+
+async function resolveDriver(companyId, driverId) {
+    if (!driverId || !isValidUUID(driverId)) return null;
+    const { data } = await supabaseAdmin
+        .from('inventory_drivers')
+        .select('id, name, phone')
+        .eq('id', driverId).eq('company_id', companyId).eq('is_active', true).maybeSingle();
+    return data || null;
+}
 
 /**
- * POST /transfers
- * Move stock between two of this company's locations.
- * Body: { from_location_id, to_location_id, product_id, quantity, reason?, actor_label }
+ * One product, one direction, the outbound leg only. The destination does
+ * not gain the stock here -- it gains it when someone there receives the
+ * line. Because only one ledger row is written, there is nothing to reverse
+ * if it fails; the old two-leg reversal dance no longer applies once
+ * shipping and receiving are separate requests days or hours apart.
  *
- * Two ledger rows have to agree. Postgres has no cross-statement transaction
- * over PostgREST, so the outbound leg is written first and reversed if the
- * inbound leg fails — the stock is never counted in two places at once, and a
- * partial transfer leaves a visible, self-cancelling pair rather than a hole.
+ * `from`, `to` and `driver` are already-resolved (validated once by the
+ * caller, not per line, since a scan basket shares one From/To/driver for
+ * the whole batch).
+ *
+ * @returns {{ok:true, message, transfer, product_id, sku, from_on_hand}|{ok:false, error}}
  */
-/**
- * One product, one direction, both ledger legs. Shared by the single-line
- * endpoint below and the batch endpoint the scan basket posts to — a transfer
- * is the same operation either way, and a shortfall or a reversed leg must be
- * handled identically regardless of which door it came in.
- *
- * `from` and `to` are already-resolved locations (validated once by the
- * caller, not per line, since a scan basket shares one From/To pair).
- *
- * @returns {{ok:true, message, transfer, from_on_hand, to_on_hand}|{ok:false, error}}
- */
-async function performOneTransfer({ companyId, settings, from, to, actor, productId, quantity, reason, scannedBarcode }) {
+async function shipOneTransferLine({ companyId, settings, from, to, actor, driver, productId, quantity, reason, scannedBarcode }) {
     if (!isValidUUID(productId)) return { ok: false, error: 'A valid product is required.' };
 
     const qty = Number(quantity);
@@ -459,7 +468,7 @@ async function performOneTransfer({ companyId, settings, from, to, actor, produc
     if (!product) return { ok: false, error: 'Product not found for this account.' };
     if (product.is_active === false) return { ok: false, error: 'That product is no longer active.' };
 
-    // The destination's category lock applies to arriving stock too.
+    // The destination's category lock applies to stock heading there too.
     if (to.restrict_to_category && (product.category || '') !== to.restrict_to_category) {
         return { ok: false, error: `${to.name} only stocks ${to.restrict_to_category} items.` };
     }
@@ -482,40 +491,13 @@ async function performOneTransfer({ companyId, settings, from, to, actor, produc
         .insert({
             company_id: companyId, location_id: from.id, product_id: productId,
             qty_change: -delta, movement_type: 'transfer_out',
-            reason: `${reasonText} (to ${to.name})`,
+            reason: `${reasonText} (to ${to.name}, in transit with ${driver.name})`,
             source_doc_type: 'transfer',
             scanned_barcode: barcode,
             actor_type: 'store', actor_label: actor
         })
         .select('id, on_hand_after').single();
     if (outErr) return { ok: false, error: outErr.message };
-
-    const { data: inMove, error: inErr } = await supabaseAdmin
-        .from('stock_movements')
-        .insert({
-            company_id: companyId, location_id: to.id, product_id: productId,
-            qty_change: delta, movement_type: 'transfer_in',
-            reason: `${reasonText} (from ${from.name})`,
-            source_doc_type: 'transfer',
-            scanned_barcode: barcode,
-            actor_type: 'store', actor_label: actor
-        })
-        .select('id, on_hand_after').single();
-
-    if (inErr) {
-        // Reverse the outbound leg so the stock reappears where it started.
-        // The ledger is append-only, so this is a compensating movement, not
-        // a delete — the failed attempt stays visible.
-        await supabaseAdmin.from('stock_movements').insert({
-            company_id: companyId, location_id: from.id, product_id: productId,
-            qty_change: delta, movement_type: 'adjust',
-            reason: `Reversing failed transfer to ${to.name}`,
-            source_doc_type: 'transfer_reversal', source_doc_id: outMove.id,
-            actor_type: 'system', actor_label: 'refinishAI Inventory'
-        });
-        console.error('Transfer inbound leg failed, reversed:', inErr.message);
-        return { ok: false, error: 'The transfer could not be completed and was reversed.' };
-    }
 
     const { data: transfer } = await supabaseAdmin
         .from('inventory_transfers')
@@ -527,19 +509,20 @@ async function performOneTransfer({ companyId, settings, from, to, actor, produc
             quantity: delta,
             reason: reasonText,
             actor_label: actor,
-            out_movement_id: outMove.id,
-            in_movement_id: inMove.id
+            status: 'in_transit',
+            driver_id: driver.id,
+            driver_name: driver.name,
+            out_movement_id: outMove.id
         })
         .select().single();
 
     return {
         ok: true,
-        message: `${delta} × ${product.sku || product.name} moved from ${from.name} to ${to.name}.`,
+        message: `${delta} × ${product.sku || product.name} shipped to ${to.name} — in transit with ${driver.name}.`,
         transfer,
         product_id: product.id,
         sku: product.sku,
-        from_on_hand: Number(outMove.on_hand_after),
-        to_on_hand: Number(inMove.on_hand_after)
+        from_on_hand: Number(outMove.on_hand_after)
     };
 }
 
@@ -557,8 +540,11 @@ router.post('/transfers', async (req, res) => {
         const actor = actorLabel(req);
         if (!actor) return res.status(400).json({ error: 'Enter your name to record a transfer.' });
 
-        const outcome = await performOneTransfer({
-            companyId, settings, from, to, actor,
+        const driver = await resolveDriver(companyId, req.body?.driver_id);
+        if (!driver) return res.status(400).json({ error: 'Select a driver for this shipment.' });
+
+        const outcome = await shipOneTransferLine({
+            companyId, settings, from, to, actor, driver,
             productId: req.body?.product_id,
             quantity: req.body?.quantity,
             reason: text(req.body?.reason, 200)
@@ -577,13 +563,13 @@ router.post('/transfers', async (req, res) => {
 
 /**
  * POST /transfers/bulk
- * Body: { from_location_id, to_location_id, actor_label, reason?, transfers: [{ product_id, quantity, scanned_barcode? }] }
+ * Body: { from_location_id, to_location_id, driver_id, actor_label, reason?, transfers: [{ product_id, quantity, scanned_barcode? }] }
  *
- * The scan-basket equivalent of the single-line endpoint above: one From/To
- * pair, validated once, then every staged line posted as its own two-legged
- * transfer. Mirrors /movements/bulk's shape — per-line ok/error — so a line
- * that fails (usually a shortfall) stays on the caller's list with its reason
- * while the rest go through.
+ * The scan-basket equivalent of the single-line endpoint above: one
+ * From/To/driver, validated once, then every staged line shipped as its own
+ * outbound leg. Mirrors /movements/bulk's shape — per-line ok/error — so a
+ * line that fails (usually a shortfall) stays on the caller's list with its
+ * reason while the rest go through.
  */
 router.post('/transfers/bulk', async (req, res) => {
     try {
@@ -599,6 +585,9 @@ router.post('/transfers/bulk', async (req, res) => {
         const actor = actorLabel(req);
         if (!actor) return res.status(400).json({ error: 'Enter your name to record a transfer.' });
 
+        const driver = await resolveDriver(companyId, req.body?.driver_id);
+        if (!driver) return res.status(400).json({ error: 'Select a driver for this shipment.' });
+
         const reason = text(req.body?.reason, 200);
         const lines = Array.isArray(req.body?.transfers) ? req.body.transfers : [];
         if (lines.length === 0) return res.status(400).json({ error: 'No transfers supplied.' });
@@ -607,8 +596,8 @@ router.post('/transfers/bulk', async (req, res) => {
         const results = [];
         for (const [idx, line] of lines.entries()) {
             try {
-                const outcome = await performOneTransfer({
-                    companyId, settings, from, to, actor,
+                const outcome = await shipOneTransferLine({
+                    companyId, settings, from, to, actor, driver,
                     productId: line?.product_id,
                     quantity: line?.quantity,
                     reason,
@@ -622,7 +611,7 @@ router.post('/transfers/bulk', async (req, res) => {
 
         const applied = results.filter(r => r.ok).length;
         res.status(applied ? 201 : 400).json({
-            message: `${applied} of ${lines.length} transfer(s) recorded.`,
+            message: `${applied} of ${lines.length} line(s) shipped — in transit with ${driver.name}.`,
             applied,
             failed: results.length - applied,
             results
@@ -633,18 +622,94 @@ router.post('/transfers/bulk', async (req, res) => {
     }
 });
 
-/** GET /transfers?location_id=&limit= — transfers touching a location. */
+// ------------------------------------------------------------
+// DRIVERS -- a lightweight named roster for who is carrying a shipment.
+// No login, same as actor_label everywhere else in this app: a driver is
+// picked from a per-company list so a shipment records who is responsible
+// without anyone needing an account.
+// ------------------------------------------------------------
+
+/** GET /transfers/drivers -- active drivers for this company. Pass all=1 to include inactive ones for management. */
+router.get('/transfers/drivers', async (req, res) => {
+    try {
+        let query = supabaseAdmin
+            .from('inventory_drivers').select('id, name, phone, is_active')
+            .eq('company_id', req.company.id)
+            .order('name', { ascending: true });
+        if (req.query.all !== '1') query = query.eq('is_active', true);
+        const { data, error } = await query;
+        if (error) throw error;
+        res.json({ drivers: data || [] });
+    } catch (err) {
+        console.error('List drivers error:', err);
+        res.status(500).json({ error: 'Failed to load drivers.' });
+    }
+});
+
+/** POST /transfers/drivers -- add a driver to the roster. Body: { name, phone? } */
+router.post('/transfers/drivers', async (req, res) => {
+    try {
+        const name = text(req.body?.name, 120);
+        if (!name) return res.status(400).json({ error: 'Enter a driver name.' });
+        const phone = text(req.body?.phone, 40) || null;
+
+        const { data, error } = await supabaseAdmin
+            .from('inventory_drivers')
+            .insert({ company_id: req.company.id, name, phone, is_active: true })
+            .select('id, name, phone, is_active').single();
+        if (error) throw error;
+        res.status(201).json({ driver: data });
+    } catch (err) {
+        console.error('Create driver error:', err);
+        res.status(500).json({ error: 'Failed to add that driver.' });
+    }
+});
+
+/** PUT /transfers/drivers/:id -- rename, update phone, or activate/deactivate. */
+router.put('/transfers/drivers/:id', async (req, res) => {
+    try {
+        if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid driver id.' });
+        const patch = {};
+        if (req.body?.name !== undefined) {
+            const name = text(req.body.name, 120);
+            if (!name) return res.status(400).json({ error: 'Enter a driver name.' });
+            patch.name = name;
+        }
+        if (req.body?.phone !== undefined) patch.phone = text(req.body.phone, 40) || null;
+        if (req.body?.is_active !== undefined) patch.is_active = !!req.body.is_active;
+        if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
+
+        const { data, error } = await supabaseAdmin
+            .from('inventory_drivers')
+            .update(patch)
+            .eq('id', req.params.id).eq('company_id', req.company.id)
+            .select('id, name, phone, is_active').maybeSingle();
+        if (error) throw error;
+        if (!data) return res.status(404).json({ error: 'Driver not found.' });
+        res.json({ driver: data });
+    } catch (err) {
+        console.error('Update driver error:', err);
+        res.status(500).json({ error: 'Failed to update that driver.' });
+    }
+});
+
+/** GET /transfers?location_id=&status=&limit= — transfers touching a location, newest first. */
 router.get('/transfers', async (req, res) => {
     try {
         const companyId = req.company.id;
         const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
 
-        const { data, error } = await supabaseAdmin
+        let query = supabaseAdmin
             .from('inventory_transfers')
             .select('*, products(sku, name, brand)')
             .eq('company_id', companyId)
             .order('created_at', { ascending: false })
             .limit(limit);
+        if (['in_transit', 'received', 'cancelled'].includes(req.query.status)) {
+            query = query.eq('status', req.query.status);
+        }
+
+        const { data, error } = await query;
         if (error) throw error;
 
         let rows = data || [];
@@ -666,12 +731,233 @@ router.get('/transfers', async (req, res) => {
             transfers: rows.map(t => ({
                 ...t,
                 from_location_name: names[t.from_location_id] || null,
-                to_location_name: names[t.to_location_id] || null
+                to_location_name: names[t.to_location_id] || null,
+                discrepancy: t.status === 'received' && t.quantity_received !== null
+                    && Number(t.quantity_received) !== Number(t.quantity)
             }))
         });
     } catch (err) {
         console.error('List transfers error:', err);
         res.status(500).json({ error: 'Failed to load transfers.' });
+    }
+});
+
+// ============================================================
+// RECEIVING TRANSFERS
+// ============================================================
+//
+// The second half of the trip. Stock only reaches the destination here --
+// shipping only ever removed it from the source and parked it 'in_transit'.
+
+/**
+ * One shipped line, received. Quantity may differ from what was shipped --
+ * a box shorted or overshipped is still real stock arriving, not an error to
+ * lose the scan over, so it is written through and flagged as a discrepancy
+ * rather than blocked. Mirrors the order-receiving endpoint's over/under
+ * handling for the same reason.
+ */
+async function receiveOneTransferLine({ companyId, location, actor, transferId, quantity }) {
+    if (!isValidUUID(transferId)) return { ok: false, error: 'Invalid transfer.' };
+
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty) || qty <= 0 || qty > 1000000) {
+        return { ok: false, error: 'Received quantity must be greater than zero.' };
+    }
+
+    const { data: transfer } = await supabaseAdmin
+        .from('inventory_transfers').select('*, products(sku, name)')
+        .eq('id', transferId).eq('company_id', companyId).maybeSingle();
+    if (!transfer) return { ok: false, error: 'Transfer not found for this account.' };
+    if (transfer.to_location_id !== location.id) return { ok: false, error: 'That shipment is not headed to this location.' };
+    if (transfer.status === 'received') return { ok: false, error: 'Already received.' };
+    if (transfer.status === 'cancelled') return { ok: false, error: 'That shipment was cancelled.' };
+
+    const product = transfer.products || {};
+    const delta = round4(qty);
+    const reasonText = `${transfer.reason || 'Transfer'} (in transit with ${transfer.driver_name || 'unassigned driver'})`;
+
+    const { data: inMove, error: inErr } = await supabaseAdmin
+        .from('stock_movements')
+        .insert({
+            company_id: companyId, location_id: location.id, product_id: transfer.product_id,
+            qty_change: delta, movement_type: 'transfer_in',
+            reason: reasonText,
+            source_doc_type: 'transfer', source_doc_id: transfer.id,
+            actor_type: 'store', actor_label: actor
+        })
+        .select('id, on_hand_after').single();
+    if (inErr) return { ok: false, error: inErr.message };
+
+    const discrepancy = delta !== Number(transfer.quantity);
+
+    const { data: updated } = await supabaseAdmin
+        .from('inventory_transfers')
+        .update({
+            status: 'received',
+            quantity_received: delta,
+            received_at: new Date().toISOString(),
+            received_by: actor,
+            in_movement_id: inMove.id
+        })
+        .eq('id', transfer.id)
+        .select().single();
+
+    return {
+        ok: true,
+        message: discrepancy
+            ? `${delta} × ${product.sku || product.name} received (shipped ${transfer.quantity}) — flagged as a discrepancy.`
+            : `${delta} × ${product.sku || product.name} received.`,
+        transfer: updated,
+        product_id: transfer.product_id,
+        sku: product.sku,
+        to_on_hand: Number(inMove.on_hand_after),
+        discrepancy,
+        quantity_shipped: Number(transfer.quantity)
+    };
+}
+
+/**
+ * GET /transfers/incoming?location_id= — pending shipments headed here,
+ * oldest first, so the receive screen and the scan-to-receive matcher both
+ * work through them in the order they went out.
+ */
+router.get('/transfers/incoming', async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const location = await resolveLocation(companyId, req.query.location_id);
+        if (!location) return res.status(400).json({ error: 'Select a valid location first.' });
+
+        const { data, error } = await supabaseAdmin
+            .from('inventory_transfers')
+            .select('*, products(sku, name, brand)')
+            .eq('company_id', companyId)
+            .eq('to_location_id', location.id)
+            .eq('status', 'in_transit')
+            .order('created_at', { ascending: true });
+        if (error) throw error;
+
+        const rows = data || [];
+        const fromIds = [...new Set(rows.map(t => t.from_location_id))];
+        const names = {};
+        if (fromIds.length) {
+            const { data: locs } = await supabaseAdmin
+                .from('company_locations').select('id, name').in('id', fromIds);
+            for (const l of locs || []) names[l.id] = l.name;
+        }
+
+        res.json({
+            incoming: rows.map(t => ({
+                id: t.id,
+                product_id: t.product_id,
+                sku: t.products?.sku, name: t.products?.name, brand: t.products?.brand,
+                quantity: Number(t.quantity),
+                from_location_id: t.from_location_id,
+                from_location_name: names[t.from_location_id] || null,
+                driver_id: t.driver_id, driver_name: t.driver_name,
+                shipped_by: t.actor_label,
+                shipped_at: t.created_at
+            }))
+        });
+    } catch (err) {
+        console.error('Incoming transfers error:', err);
+        res.status(500).json({ error: 'Failed to load incoming transfers.' });
+    }
+});
+
+/**
+ * POST /transfers/receive/bulk
+ * Body: { location_id, actor_label, receipts: [{ transfer_id, quantity }] }
+ * The receive basket's Post — one call, one line per shipment being closed
+ * out, the same shape as /transfers/bulk and /orders/:id/lines.
+ */
+router.post('/transfers/receive/bulk', async (req, res) => {
+    try {
+        const companyId = req.company.id;
+
+        const location = await resolveLocation(companyId, req.body?.location_id);
+        if (!location) return res.status(400).json({ error: 'Select a valid location first.' });
+
+        const actor = actorLabel(req);
+        if (!actor) return res.status(400).json({ error: 'Enter your name to record a receipt.' });
+
+        const lines = Array.isArray(req.body?.receipts) ? req.body.receipts : [];
+        if (lines.length === 0) return res.status(400).json({ error: 'No receipts supplied.' });
+        if (lines.length > 500) return res.status(400).json({ error: 'Maximum 500 receipts per batch.' });
+
+        const results = [];
+        for (const [idx, line] of lines.entries()) {
+            try {
+                const outcome = await receiveOneTransferLine({
+                    companyId, location, actor,
+                    transferId: line?.transfer_id,
+                    quantity: line?.quantity
+                });
+                results.push({ index: idx, ...outcome });
+            } catch (e) {
+                results.push({ index: idx, ok: false, error: e.message || 'Failed to record that receipt.' });
+            }
+        }
+
+        const applied = results.filter(r => r.ok).length;
+        const discrepancies = results.filter(r => r.ok && r.discrepancy).length;
+        res.status(applied ? 201 : 400).json({
+            message: `${applied} of ${lines.length} line(s) received${discrepancies ? `, ${discrepancies} flagged as a discrepancy` : ''}.`,
+            applied,
+            failed: results.length - applied,
+            discrepancies,
+            results
+        });
+    } catch (err) {
+        console.error('Bulk receive error:', err);
+        res.status(500).json({ error: 'Failed to record that batch.' });
+    }
+});
+
+/**
+ * POST /transfers/:id/cancel
+ * Body: { location_id, actor_label }
+ * Recalls a shipment that has not been received yet — e.g. the wrong item
+ * was scanned out. Only the shipping location can cancel: the destination
+ * never had the goods, so it has nothing to undo. Writes a compensating
+ * `adjust` movement returning the stock, the same append-only pattern the
+ * old failed-transfer reversal used.
+ */
+router.post('/transfers/:id/cancel', async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid transfer id.' });
+
+        const location = await resolveLocation(companyId, req.body?.location_id);
+        if (!location) return res.status(400).json({ error: 'Select a valid location first.' });
+
+        const actor = actorLabel(req);
+        if (!actor) return res.status(400).json({ error: 'Enter your name to cancel a shipment.' });
+
+        const { data: transfer } = await supabaseAdmin
+            .from('inventory_transfers').select('*')
+            .eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
+        if (!transfer) return res.status(404).json({ error: 'Transfer not found for this account.' });
+        if (transfer.from_location_id !== location.id) return res.status(400).json({ error: 'Only the shipping location can cancel this shipment.' });
+        if (transfer.status !== 'in_transit') return res.status(400).json({ error: `This shipment is already ${transfer.status}.` });
+
+        await supabaseAdmin.from('stock_movements').insert({
+            company_id: companyId, location_id: location.id, product_id: transfer.product_id,
+            qty_change: Number(transfer.quantity), movement_type: 'adjust',
+            reason: 'Cancelled transfer — stock returned',
+            source_doc_type: 'transfer_reversal', source_doc_id: transfer.id,
+            actor_type: 'store', actor_label: actor
+        });
+
+        const { data: updated } = await supabaseAdmin
+            .from('inventory_transfers')
+            .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancelled_by: actor })
+            .eq('id', transfer.id)
+            .select().single();
+
+        res.json({ ok: true, message: `Shipment cancelled — stock returned to ${location.name}.`, transfer: updated });
+    } catch (err) {
+        console.error('Cancel transfer error:', err);
+        res.status(500).json({ error: 'Failed to cancel that shipment.' });
     }
 });
 
