@@ -8,9 +8,13 @@ const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAd
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
-const { sendInvoiceReady, sendOrderClosed } = require('../utils/email');
+const { sendInvoiceReady, sendOrderClosed, sendOrderStatusUpdate, sendOrderNoteAdded } = require('../utils/email');
 const { orderScopeIds, applyOrderScope, orderInScope } = require('../utils/order-scope');
 const { redactSecrets } = require('../utils/audit');
+const { ALL_STATUSES, statusOptionsFor, labelFor, isSimplified } = require('../utils/order-status');
+const { hidePricingEnabled } = require('../utils/pricing-visibility');
+const { computeTax } = require('../utils/tax');
+const { deliveryFeeSettings, computeDeliveryFee } = require('../utils/delivery-fee');
 
 const router = express.Router();
 
@@ -41,12 +45,18 @@ router.use('/platform/distributors', require('./distributors-admin'));
 // Identity bootstrap — lets the console (including an order-desk account) render
 // the right view without exposing anything the account cannot already see.
 router.get('/whoami', (req, res) => {
+    const distributorSettings = req.distributor ? req.distributor.settings : null;
     res.json({
         id: req.admin.id, name: req.admin.name, email: req.admin.email,
         role: req.admin.role, company_id: req.admin.company_id, branch_id: req.admin.branch_id,
         distributor_id: req.admin.distributor_id,
         distributor: req.distributor ? { id: req.distributor.id, name: req.distributor.name, slug: req.distributor.slug } : null,
-        is_branch_manager: req.admin.is_branch_manager === true
+        is_branch_manager: req.admin.is_branch_manager === true,
+        // Drives the Orders screen's status dropdown and labels — see
+        // utils/order-status.js. A distributor not in simplified mode (or no
+        // distributor at all, e.g. a legacy token) gets the full status set,
+        // unchanged from before this existed.
+        order_status_options: statusOptionsFor(distributorSettings)
     });
 });
 
@@ -1434,7 +1444,17 @@ router.get('/orders', async (req, res) => {
         const { data, error, count } = await query;
         if (error) throw error;
 
-        res.json({ orders: data || [], total: count, page: parseInt(page), limit: parseInt(limit) });
+        // Staff console always sees full pricing (per the hide-pricing
+        // decision — only the customer/delivery side is ever blanked), so
+        // this just attaches the distributor-aware status label rather than
+        // touching any dollar figures.
+        const distributorSettings = req.distributor ? req.distributor.settings : null;
+        const orders = (data || []).map(o => ({
+            ...o,
+            status_label: labelFor(o.status, o.is_partial_shipment, distributorSettings)
+        }));
+
+        res.json({ orders, total: count, page: parseInt(page), limit: parseInt(limit) });
 
     } catch (err) {
         console.error('Admin orders error:', err);
@@ -1547,7 +1567,12 @@ router.get('/reports/orders', async (req, res) => {
         if (to) q = q.lte('created_at', to);
         const { data, error } = await q;
         if (error) throw error;
-        res.json({ orders: data || [] });
+        const distributorSettings = req.distributor ? req.distributor.settings : null;
+        const orders = (data || []).map(o => ({
+            ...o,
+            status_label: labelFor(o.status, o.is_partial_shipment, distributorSettings)
+        }));
+        res.json({ orders });
     } catch (err) {
         console.error('Admin reports/orders error:', err);
         res.status(500).json({ error: 'Failed to load report data.' });
@@ -1556,14 +1581,21 @@ router.get('/reports/orders', async (req, res) => {
 
 /**
  * PUT /api/admin/orders/:orderId/status
+ *
+ * `is_partial_shipment` is accepted alongside status rather than as its own
+ * endpoint: it only ever means something in combination with a status (today,
+ * out_on_delivery — see utils/order-status.js), so setting them together
+ * keeps that pairing atomic instead of two requests that could race or
+ * disagree. Sending it with any other status silently has no visible effect
+ * yet clears the flag going forward, since a shipment can't be "partial" once
+ * it isn't the delivery step.
  */
 router.put('/orders/:orderId/status', async (req, res) => {
     try {
-        const { status, note } = req.body;
-        const validStatuses = ['pending', 'processing', 'out_on_delivery', 'closed', 'cancelled'];
+        const { status, note, is_partial_shipment } = req.body;
 
-        if (!validStatuses.includes(status)) {
-            return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+        if (!ALL_STATUSES.includes(status)) {
+            return res.status(400).json({ error: `Invalid status. Must be one of: ${ALL_STATUSES.join(', ')}` });
         }
 
         // Scope: super admins pass; company admins are held to their company;
@@ -1573,25 +1605,31 @@ router.put('/orders/:orderId/status', async (req, res) => {
             return res.status(scope.code).json({ error: scope.code === 404 ? 'Order not found.' : 'Access denied for this order.' });
         }
 
-        // Get current order
+        // Get current order — enough to build the status-history entry, and
+        // (for the simplified-status email) to resolve recipients and pricing
+        // visibility without a second round trip later.
         const { data: order } = await supabaseAdmin
             .from('orders')
-            .select('status_history')
+            .select('status_history, company_id, location_id, contact_email, order_number, company_name')
             .eq('id', req.params.orderId)
             .single();
+
+        const partial = is_partial_shipment === true && status === 'out_on_delivery';
 
         const statusHistory = order?.status_history || [];
         statusHistory.push({
             status,
             timestamp: new Date().toISOString(),
             note: stripHtml(note || ''),
-            updated_by: req.admin.email
+            updated_by: req.admin.email,
+            ...(partial ? { is_partial_shipment: true } : {})
         });
 
         const { data, error } = await supabaseAdmin
             .from('orders')
             .update({
                 status, status_history: statusHistory,
+                is_partial_shipment: partial,
                 // Who dealt with this. status_history is the full trail; these
                 // columns answer the question without parsing JSON per row.
                 handled_by: req.admin.id,
@@ -1604,8 +1642,34 @@ router.put('/orders/:orderId/status', async (req, res) => {
 
         if (error) throw error;
 
-        await logAction(req.admin.id, 'order_status_updated', 'order', data.id, { status, note }, req.ip);
-        res.json({ order: data });
+        await logAction(req.admin.id, 'order_status_updated', 'order', data.id, { status, note, is_partial_shipment: partial }, req.ip);
+
+        // The simplified-status email is the point of the "Received / Out for
+        // Delivery / Partial Shipment with Backorder / Closed" workflow CHC
+        // asked for — order submission already emails "Received" from
+        // routes/storefront.js, so this covers the remaining two steps.
+        // Deliberately scoped to distributors in simplified mode: nothing
+        // changes for anyone else until they ask for the same thing.
+        const distributorSettings = req.distributor ? req.distributor.settings : null;
+        if (isSimplified(distributorSettings) && (status === 'out_on_delivery' || status === 'closed') && order) {
+            try {
+                const { data: company } = await supabaseAdmin
+                    .from('companies').select('name, settings').eq('id', order.company_id).single();
+                const { to, replyTo } = await resolveOrderRecipients({ ...order, company_id: order.company_id, location_id: order.location_id });
+                if (to.length) {
+                    sendOrderStatusUpdate({
+                        to, replyTo,
+                        order: { id: data.id, order_number: order.order_number },
+                        companyName: company?.name || order.company_name,
+                        statusLabel: labelFor(status, partial, distributorSettings),
+                        isPartialShipment: partial,
+                        note: note ? stripHtml(note) : undefined
+                    }).catch(e => console.error('Order status-update email failed (non-blocking):', e.message));
+                }
+            } catch (e) { console.error('Order status-update recipients error (non-blocking):', e.message); }
+        }
+
+        res.json({ order: { ...data, status_label: labelFor(data.status, data.is_partial_shipment, distributorSettings) } });
 
     } catch (err) {
         console.error('Order status update error:', err);
@@ -1676,6 +1740,160 @@ router.put('/companies/:companyId/orders/:orderId/close', requireOrderAccess, as
     } catch (err) {
         console.error('Order close error:', err);
         res.status(500).json({ error: 'Failed to close order.' });
+    }
+});
+
+/**
+ * PUT /api/admin/companies/:companyId/orders/:orderId/items
+ *
+ * Staff price/line edit on an already-placed order — a discount, a price
+ * match, a correction. Deliberately reachable by ANY staff account with
+ * access to the order (any role — see requireOrderAccess and the matching
+ * entry in ORDER_DESK_ALLOW), not fenced to admins only: per Adam, "any
+ * staff of CHC" should be able to do this.
+ *
+ * Body: { items: [{ product_id?, name, sku?, quantity, unit_price }], reason? }
+ * Every line is treated as fully priced by this edit — a price-on-request
+ * line that gets a real number here IS priced now, so `price_on_request` is
+ * cleared on write rather than left to disagree with the number next to it.
+ * Subtotal, tax (at the order's already-resolved tax_rate — never re-resolved
+ * against the company's CURRENT settings, which may have changed since the
+ * order was placed) and delivery fee (re-evaluated against the new subtotal,
+ * the same way it was at checkout) are recomputed from these lines, never
+ * taken from the request, so the totals can never disagree with what's on
+ * the order.
+ */
+router.put('/companies/:companyId/orders/:orderId/items', requireOrderAccess, async (req, res) => {
+    try {
+        const { companyId, orderId } = req.params;
+        const items = Array.isArray(req.body?.items) ? req.body.items : null;
+        const reason = stripHtml(req.body?.reason || '');
+
+        if (!items || !items.length) {
+            return res.status(400).json({ error: 'At least one item is required.' });
+        }
+        for (const it of items) {
+            const qty = Number(it.quantity);
+            const price = Number(it.unit_price);
+            if (!it.name || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0) {
+                return res.status(400).json({ error: 'Each item needs a name, a positive quantity, and a non-negative price.' });
+            }
+        }
+
+        const { data: order, error: oErr } = await supabaseAdmin
+            .from('orders')
+            .select('id, order_number, company_id, location_id, contact_email, status, tax_rate, status_history')
+            .eq('id', orderId).eq('company_id', companyId).single();
+        if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
+
+        const { data: company } = await supabaseAdmin
+            .from('companies').select('name, settings').eq('id', companyId).single();
+
+        const verifiedItems = items.map(it => {
+            const qty = Number(it.quantity);
+            const price = Number(it.unit_price);
+            return {
+                product_id: it.product_id || null,
+                name: stripHtml(it.name),
+                sku: stripHtml(it.sku || ''),
+                quantity: qty,
+                unit_price: price,
+                subtotal: Math.round(price * qty * 100) / 100,
+                price_on_request: false
+            };
+        });
+        const subtotal = Math.round(verifiedItems.reduce((s, i) => s + i.subtotal, 0) * 100) / 100;
+
+        // Same tax rate the order already carries — pricing edits correct a
+        // dollar amount, not the tax jurisdiction the order was placed under.
+        const tax = computeTax(subtotal, Number(order.tax_rate) || 0);
+        const deliveryFee = computeDeliveryFee(subtotal, deliveryFeeSettings(company?.settings).enabled);
+        const total = Math.round((subtotal + tax + deliveryFee) * 100) / 100;
+
+        const now = new Date().toISOString();
+        const statusHistory = order.status_history || [];
+        statusHistory.push({
+            status: order.status,
+            timestamp: now,
+            note: `Pricing adjusted by ${req.admin.name || req.admin.email}${reason ? `: ${reason}` : ''}`,
+            updated_by: req.admin.email
+        });
+
+        const { data: updated, error: updErr } = await supabaseAdmin
+            .from('orders')
+            .update({
+                items: verifiedItems,
+                subtotal, tax, delivery_fee: deliveryFee, total,
+                price_edited_at: now,
+                price_edited_by: req.admin.id,
+                price_edit_reason: reason || null,
+                status_history: statusHistory
+            })
+            .eq('id', orderId)
+            .select()
+            .single();
+        if (updErr) throw updErr;
+
+        await logAction(req.admin.id, 'order_pricing_edited', 'order', orderId, { reason, subtotal, tax, delivery_fee: deliveryFee, total }, req.ip);
+
+        res.json({ message: 'Pricing updated.', order: updated });
+    } catch (err) {
+        console.error('Order pricing edit error:', err);
+        res.status(500).json({ error: 'Failed to update pricing.' });
+    }
+});
+
+/**
+ * POST /api/admin/companies/:companyId/orders/:orderId/notes
+ *
+ * A staff note/message on an order, appended to the running log rather than
+ * overwriting the original checkout `notes` — a reply about a return pickup,
+ * a note that a non-catalog item has been priced, etc. Emails the customer
+ * side (never the branch that just wrote it).
+ */
+router.post('/companies/:companyId/orders/:orderId/notes', requireOrderAccess, async (req, res) => {
+    try {
+        const { companyId, orderId } = req.params;
+        const text = stripHtml(req.body?.text || '').trim();
+        if (!text) return res.status(400).json({ error: 'Note text is required.' });
+
+        const { data: order, error: oErr } = await supabaseAdmin
+            .from('orders')
+            .select('id, order_number, company_id, location_id, contact_email, notes_log')
+            .eq('id', orderId).eq('company_id', companyId).single();
+        if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
+
+        const author = req.admin.name || req.admin.email;
+        const entry = { from: 'staff', author, text, created_at: new Date().toISOString() };
+        const notesLog = [...(order.notes_log || []), entry];
+
+        const { data: updated, error: updErr } = await supabaseAdmin
+            .from('orders')
+            .update({ notes_log: notesLog })
+            .eq('id', orderId)
+            .select('id, order_number, notes_log')
+            .single();
+        if (updErr) throw updErr;
+
+        await logAction(req.admin.id, 'order_note_added', 'order', orderId, { text }, req.ip);
+
+        try {
+            const { data: company } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).single();
+            const { customerTo, replyTo } = await resolveOrderRecipients(order);
+            if (customerTo.length) {
+                sendOrderNoteAdded({
+                    to: customerTo, replyTo,
+                    order: { id: order.id, order_number: order.order_number },
+                    companyName: company?.name || '',
+                    author, text
+                }).catch(e => console.error('Order note email failed (non-blocking):', e.message));
+            }
+        } catch (e) { console.error('Order note recipients error (non-blocking):', e.message); }
+
+        res.status(201).json({ order: updated });
+    } catch (err) {
+        console.error('Order note add error:', err);
+        res.status(500).json({ error: 'Failed to add note.' });
     }
 });
 

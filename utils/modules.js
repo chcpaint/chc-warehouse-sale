@@ -89,6 +89,17 @@ const MODULES = {
         }
     },
 
+    hide_pricing: {
+        name: 'hide_pricing',
+        label: 'Hide pricing (packing slip mode)',
+        blurb: 'Customers and their delivery contacts see quantities only, never prices or totals. CHC staff keep full pricing in the console either way.',
+        requires: [],
+        released: true,
+        defaults: {
+            enabled: false
+        }
+    },
+
     insurance: {
         name: 'insurance',
         label: 'Insurance billing',
