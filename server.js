@@ -9,6 +9,7 @@ const path = require('path');
 const authRoutes = require('./routes/auth');
 const storefrontRoutes = require('./routes/storefront');
 const adminRoutes = require('./routes/admin');
+const { resolveDistributor } = require('./utils/tenant');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -137,6 +138,12 @@ app.use('/assets', express.static(path.join(__dirname, 'public', 'assets')));
 // ============================================================
 // API ROUTES
 // ============================================================
+
+// Every API request resolves to the distributor (CHC today; others once
+// onboarded) whose domain/subdomain it arrived on, before it reaches auth
+// or any route. See utils/tenant.js for the resolution order and the
+// permanent chcsale.com -> CHC fallback.
+app.use('/api/', resolveDistributor);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/store', storefrontRoutes);

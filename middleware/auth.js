@@ -20,25 +20,38 @@ function requireCompanyAuth(req, res, next) {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+        if (decoded.type !== 'company' && decoded.type !== 'company_user') {
+            return res.status(403).json({ error: 'Invalid token type.' });
+        }
+
+        // Defense in depth: a company (or its user) belongs to exactly one
+        // distributor. If the request resolved to a distributor (it always
+        // does in production -- see utils/tenant.js) and the token was
+        // issued under a different one, refuse it rather than letting a
+        // token minted on one distributor's domain reach another's data.
+        // decoded.distributor_id is absent on tokens issued before this
+        // feature shipped, which is treated as "not yet known" rather than
+        // a mismatch, so already-issued sessions keep working until they
+        // expire naturally (company tokens last 24h).
+        if (req.distributor && decoded.distributor_id && decoded.distributor_id !== req.distributor.id) {
+            return res.status(401).json({ error: 'Invalid or expired token.' });
+        }
+
         if (decoded.type === 'company') {
             req.company = { id: decoded.company_id, slug: decoded.slug, name: decoded.company_name };
             req.companyUser = null;
             return next();
         }
 
-        if (decoded.type === 'company_user') {
-            req.company = { id: decoded.company_id, slug: decoded.slug, name: decoded.company_name };
-            req.companyUser = {
-                id: decoded.user_id,
-                name: decoded.user_name,
-                email: decoded.user_email,
-                role: decoded.user_role,
-                location_id: decoded.location_id || null
-            };
-            return next();
-        }
-
-        return res.status(403).json({ error: 'Invalid token type.' });
+        req.company = { id: decoded.company_id, slug: decoded.slug, name: decoded.company_name };
+        req.companyUser = {
+            id: decoded.user_id,
+            name: decoded.user_name,
+            email: decoded.user_email,
+            role: decoded.user_role,
+            location_id: decoded.location_id || null
+        };
+        return next();
     } catch (err) {
         return res.status(401).json({ error: 'Invalid or expired token.' });
     }
@@ -79,11 +92,20 @@ async function requireAdminAuth(req, res, next) {
         // effect immediately, not only at next login.
         const { data: admin, error } = await supabaseAdmin
             .from('admin_users')
-            .select('id, email, name, role, company_id, branch_id, is_active, must_change_password, is_branch_manager')
+            .select('id, email, name, role, company_id, branch_id, distributor_id, is_active, must_change_password, is_branch_manager')
             .eq('id', decoded.admin_id)
             .single();
 
         if (error || !admin || !admin.is_active) {
+            return res.status(401).json({ error: 'Admin account not found or disabled.' });
+        }
+
+        // platform_admin has no home distributor and can reach any of them.
+        // Everyone else is fenced to the distributor whose domain the request
+        // resolved to -- the same "not found or disabled" message either way,
+        // so a mismatch reveals nothing about what does exist elsewhere.
+        if (req.distributor && admin.role !== 'platform_admin'
+            && admin.distributor_id && admin.distributor_id !== req.distributor.id) {
             return res.status(401).json({ error: 'Admin account not found or disabled.' });
         }
 
@@ -94,10 +116,27 @@ async function requireAdminAuth(req, res, next) {
     }
 }
 
-/** Require super_admin role. */
+/**
+ * Require super_admin role -- unchanged: this is still "sees everything
+ * within my own distributor", exactly as before there was more than one.
+ * platform_admin is a deliberately separate, narrower role (see
+ * requirePlatformAdmin) rather than a superset of this one: granting it a
+ * pass here would let it reach the dozens of existing `role === 'super_admin'`
+ * checks deeper in route bodies that assume a company_id/branch_id to scope
+ * by, which platform_admin does not have. Its own console is
+ * routes/distributors-admin.js.
+ */
 function requireSuperAdmin(req, res, next) {
     if (!req.admin || req.admin.role !== 'super_admin') {
         return res.status(403).json({ error: 'Super admin access required.' });
+    }
+    next();
+}
+
+/** Require platform_admin -- the only role that reaches across distributors. */
+function requirePlatformAdmin(req, res, next) {
+    if (!req.admin || req.admin.role !== 'platform_admin') {
+        return res.status(403).json({ error: 'Platform admin access required.' });
     }
     next();
 }
@@ -233,6 +272,7 @@ module.exports = {
     requireCompanyOwner,
     requireAdminAuth,
     requireSuperAdmin,
+    requirePlatformAdmin,
     requireFullAdmin,
     requireCompanyAccess,
     restrictOrderDesk,

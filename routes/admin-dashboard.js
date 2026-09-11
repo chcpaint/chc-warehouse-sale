@@ -144,6 +144,7 @@ router.get('/', async (req, res) => {
         // ---------------------------------------------------------------
         const { rows: companies } = await readAll(() => {
             let q = supabaseAdmin.from('companies').select('id, name, is_active, settings');
+            if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
             if (scopeIds) q = q.in('id', scopeIds);
             return q;
         });

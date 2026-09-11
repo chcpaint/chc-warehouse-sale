@@ -330,8 +330,9 @@ router.get('/benchmark', async (req, res) => {
         // Only compare companies actually in business today. A closed or
         // test account's old usage should not shape what a live shop is
         // told is "normal", and should not count toward the peer floor.
-        const { data: activeCompanies, error: cErr } = await supabaseAdmin
-            .from('companies').select('id').eq('is_active', true);
+        let activeCompaniesQuery = supabaseAdmin.from('companies').select('id').eq('is_active', true);
+        if (req.distributor) activeCompaniesQuery = activeCompaniesQuery.eq('distributor_id', req.distributor.id);
+        const { data: activeCompanies, error: cErr } = await activeCompaniesQuery;
         if (cErr) throw cErr;
         const activeIds = new Set((activeCompanies || []).map(c => c.id));
         activeIds.add(companyId); // the caller is presumed active by virtue of a live session

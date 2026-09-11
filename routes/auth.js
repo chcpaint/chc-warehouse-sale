@@ -7,6 +7,16 @@ const { stripHtml, validateEmail } = require('../utils/sanitize');
 const router = express.Router();
 
 /**
+ * A company's slug is only unique within its distributor, so every lookup by
+ * slug must be scoped to the distributor the request arrived on. req.distributor
+ * is always set in production (see utils/tenant.js); the guard just keeps this
+ * route working unchanged in tests that build a bare app without that middleware.
+ */
+function scopedBySlug(query, req) {
+    return req.distributor ? query.eq('distributor_id', req.distributor.id) : query;
+}
+
+/**
  * POST /api/auth/company-login
  * Company users log in with slug + access code
  */
@@ -19,11 +29,11 @@ router.post('/company-login', async (req, res) => {
             return res.status(400).json({ error: 'Company identifier and access code are required.' });
         }
 
-        // Look up company by slug
-        const { data: company, error } = await supabaseAdmin
+        // Look up company by slug, scoped to this request's distributor
+        const { data: company, error } = await scopedBySlug(supabaseAdmin
             .from('companies')
-            .select('id, name, slug, access_code, logo_url, is_active, settings')
-            .eq('slug', slug)
+            .select('id, name, slug, access_code, logo_url, is_active, settings, distributor_id')
+            .eq('slug', slug), req)
             .single();
 
         if (error || !company) {
@@ -45,7 +55,8 @@ router.post('/company-login', async (req, res) => {
             type: 'company',
             company_id: company.id,
             slug: company.slug,
-            company_name: company.name
+            company_name: company.name,
+            distributor_id: company.distributor_id
         }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
         res.json({
@@ -85,11 +96,20 @@ router.post('/admin-login', async (req, res) => {
         // Look up admin
         const { data: admin, error } = await supabaseAdmin
             .from('admin_users')
-            .select('id, email, name, role, company_id, branch_id, password_hash, is_active, must_change_password, is_branch_manager')
+            .select('id, email, name, role, company_id, branch_id, distributor_id, password_hash, is_active, must_change_password, is_branch_manager')
             .eq('email', email)
             .single();
 
         if (error || !admin) {
+            return res.status(401).json({ error: 'Invalid email or password.' });
+        }
+
+        // platform_admin isn't tied to a distributor and can sign in from any
+        // of them; everyone else only from the distributor they belong to.
+        // Same message as a wrong password -- this shouldn't reveal that the
+        // email exists under a different distributor.
+        if (req.distributor && admin.role !== 'platform_admin'
+            && admin.distributor_id && admin.distributor_id !== req.distributor.id) {
             return res.status(401).json({ error: 'Invalid email or password.' });
         }
 
@@ -120,7 +140,8 @@ router.post('/admin-login', async (req, res) => {
             admin_id: admin.id,
             role: admin.role,
             company_id: admin.company_id,
-            branch_id: admin.branch_id
+            branch_id: admin.branch_id,
+            distributor_id: admin.distributor_id
         }, process.env.JWT_SECRET, { expiresIn: '12h' });
 
         res.json({
@@ -136,6 +157,7 @@ router.post('/admin-login', async (req, res) => {
                 role: admin.role,
                 company_id: admin.company_id,
                 branch_id: admin.branch_id,
+                distributor_id: admin.distributor_id,
                 must_change_password: admin.must_change_password === true,
                 is_branch_manager: admin.is_branch_manager === true
             }
@@ -232,7 +254,7 @@ router.post('/admin-accept-invite', async (req, res) => {
 
         const { data: admin } = await supabaseAdmin
             .from('admin_users')
-            .select('id, email, name, role, company_id, branch_id, invite_expires_at, is_active')
+            .select('id, email, name, role, company_id, branch_id, distributor_id, invite_expires_at, is_active')
             .eq('invite_token', token)
             .maybeSingle();
 
@@ -248,12 +270,13 @@ router.post('/admin-accept-invite', async (req, res) => {
             .eq('id', admin.id);
 
         const jwtToken = jwt.sign({
-            type: 'admin', admin_id: admin.id, role: admin.role, company_id: admin.company_id, branch_id: admin.branch_id
+            type: 'admin', admin_id: admin.id, role: admin.role, company_id: admin.company_id, branch_id: admin.branch_id,
+            distributor_id: admin.distributor_id
         }, process.env.JWT_SECRET, { expiresIn: '12h' });
 
         res.json({
             token: jwtToken,
-            admin: { id: admin.id, email: admin.email, name: admin.name, role: admin.role, company_id: admin.company_id, branch_id: admin.branch_id }
+            admin: { id: admin.id, email: admin.email, name: admin.name, role: admin.role, company_id: admin.company_id, branch_id: admin.branch_id, distributor_id: admin.distributor_id }
         });
     } catch (err) {
         console.error('Admin accept-invite error:', err);
@@ -273,10 +296,10 @@ router.post('/company-user-login', async (req, res) => {
         const password = req.body.password;
         if (!slug || !email || !password) return res.status(400).json({ error: 'Company, email and password are required.' });
 
-        const { data: company } = await supabaseAdmin
+        const { data: company } = await scopedBySlug(supabaseAdmin
             .from('companies')
-            .select('id, name, slug, logo_url, is_active, settings')
-            .eq('slug', slug)
+            .select('id, name, slug, logo_url, is_active, settings, distributor_id')
+            .eq('slug', slug), req)
             .maybeSingle();
         if (!company || !company.is_active) return res.status(401).json({ error: 'Invalid company or credentials.' });
 
@@ -300,7 +323,7 @@ router.post('/company-user-login', async (req, res) => {
             type: 'company_user',
             company_id: company.id, slug: company.slug, company_name: company.name,
             user_id: user.id, user_name: user.name, user_email: user.email, user_role: user.role,
-            location_id: user.location_id
+            location_id: user.location_id, distributor_id: company.distributor_id
         }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
         res.json({
@@ -337,7 +360,7 @@ router.post('/company-accept-invite', async (req, res) => {
         }
 
         const { data: company } = await supabaseAdmin
-            .from('companies').select('id, name, slug, logo_url, settings').eq('id', user.company_id).maybeSingle();
+            .from('companies').select('id, name, slug, logo_url, settings, distributor_id').eq('id', user.company_id).maybeSingle();
 
         const passwordHash = await bcrypt.hash(password, 12);
         await supabaseAdmin.from('company_users')
@@ -348,7 +371,7 @@ router.post('/company-accept-invite', async (req, res) => {
             type: 'company_user',
             company_id: company.id, slug: company.slug, company_name: company.name,
             user_id: user.id, user_name: user.name, user_email: user.email, user_role: user.role,
-            location_id: user.location_id
+            location_id: user.location_id, distributor_id: company.distributor_id
         }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
         res.json({

@@ -42,12 +42,13 @@ router.get('/platform-logo', async (req, res) => {
  */
 router.get('/:slug/info', async (req, res) => {
     try {
-        const { data: company, error } = await supabaseAdmin
+        let query = supabaseAdmin
             .from('companies')
             .select('id, name, slug, logo_url, settings')
             .eq('slug', req.params.slug)
-            .eq('is_active', true)
-            .single();
+            .eq('is_active', true);
+        if (req.distributor) query = query.eq('distributor_id', req.distributor.id);
+        const { data: company, error } = await query.single();
 
         if (error || !company) {
             return res.status(404).json({ error: 'Company not found.' });
@@ -334,8 +335,9 @@ router.post('/:slug/track', async (req, res) => {
     try {
         const { event, location_id, session_id } = req.body || {};
         const ev = ['visit', 'login', 'enter'].includes(event) ? event : 'visit';
-        const { data: company } = await supabaseAdmin
-            .from('companies').select('id').eq('slug', req.params.slug).single();
+        let trackQuery = supabaseAdmin.from('companies').select('id').eq('slug', req.params.slug);
+        if (req.distributor) trackQuery = trackQuery.eq('distributor_id', req.distributor.id);
+        const { data: company } = await trackQuery.single();
         if (!company) return res.json({ ok: true });
         await supabaseAdmin.from('console_visits').insert({
             company_id: company.id,
