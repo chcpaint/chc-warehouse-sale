@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { supabaseAdmin } = require('../utils/supabase');
-const { orderInScope } = require('../utils/order-scope');
+const { orderInScope, companyInScope } = require('../utils/order-scope');
 
 /**
  * Verify a storefront session token.
@@ -194,6 +194,12 @@ const ORDER_DESK_ALLOW = [
     // beyond ordinary order access. See requireOrderAccess below.
     ['PUT', /^\/companies\/[^/]+\/orders\/[^/]+\/items$/],
     ['POST', /^\/companies\/[^/]+\/orders\/[^/]+\/notes$/],
+    // The company-wide contact-note inbox (not tied to one order) is the
+    // same "any staff who can already see this company's orders" access as
+    // the order notes just above -- see requireCompanyNotesAccess below.
+    ['GET', /^\/companies\/[^/]+\/notes$/],
+    ['POST', /^\/companies\/[^/]+\/notes$/],
+    ['GET', /^\/notes\/inbox$/],
     // The Orders screen shows this account's own delivery-fee toggle
     // (read-only unless canManageDeliveryFee() says otherwise) for whichever
     // company is selected in the filter. Reachability here is not the
@@ -283,6 +289,32 @@ async function requireOrderAccess(req, res, next) {
     next();
 }
 
+/**
+ * Guard the company-wide contact-note inbox (GET/POST /companies/:companyId/notes)
+ * -- not about any one order, so requireOrderAccess doesn't fit, and not
+ * account configuration, so requireCompanyAccess's flat refusal of order_desk
+ * doesn't fit either. Same "any staff of CHC who can already reach this
+ * company's orders" shape as requireOrderAccess, one level up: super_admin
+ * always; order_desk/order_manager via companyInScope (their branch has to
+ * actually serve one of the company's locations); a company-scoped admin
+ * only for their own company.
+ */
+async function requireCompanyNotesAccess(req, res, next) {
+    if (!req.admin) return res.status(403).json({ error: 'Admin authentication required.' });
+    if (req.admin.role === 'super_admin') return next();
+
+    if (req.admin.role === 'order_desk' || req.admin.role === 'order_manager') {
+        const ok = await companyInScope(req, req.params.companyId);
+        if (!ok) return res.status(403).json({ error: 'Access denied for this company.' });
+        return next();
+    }
+
+    if (req.admin.company_id !== req.params.companyId) {
+        return res.status(403).json({ error: 'Access denied for this company.' });
+    }
+    next();
+}
+
 module.exports = {
     requireCompanyAuth,
     requireCompanyUser,
@@ -295,5 +327,6 @@ module.exports = {
     restrictOrderDesk,
     requirePasswordCurrent,
     requireOrderAccess,
+    requireCompanyNotesAccess,
     ORDER_ONLY_ROLES
 };

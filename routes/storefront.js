@@ -2,7 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
-const { sendOrderNotification, sendOrderNoteAdded } = require('../utils/email');
+const { sendOrderNotification, sendOrderNoteAdded, sendContactNote } = require('../utils/email');
 const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
 const { taxSettings, computeTax } = require('../utils/tax');
 const { deliveryFeeSettings, computeDeliveryFee, THRESHOLD, FEE } = require('../utils/delivery-fee');
@@ -689,7 +689,7 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const { data: orders, error } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, is_partial_shipment, notes, notes_log, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
+            .select('id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, is_partial_shipment, backorder_items, notes, notes_log, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
             .eq('company_id', req.company.id)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -885,6 +885,99 @@ router.post('/:slug/orders/:orderId/notes', requireCompanyAuth, async (req, res)
     } catch (err) {
         console.error('Order note add error:', err);
         res.status(500).json({ error: 'Failed to add note.' });
+    }
+});
+
+// ------------------------------------------------------------
+// Contact notes -- a message to CHC that isn't about any one order: a
+// product to quote that isn't in the catalogue yet, a shop closing early, a
+// general question. See routes/contact-notes-admin.js for the staff side of
+// the same thread. Separate from the per-order notes_log above on purpose --
+// this has nowhere else to live once there's no order to attach it to.
+// ------------------------------------------------------------
+
+/**
+ * GET /api/store/:slug/contact-notes
+ *
+ * This company's own thread, newest first, so "Contact CHC" can show what's
+ * already been sent alongside the form to send more.
+ */
+router.get('/:slug/contact-notes', requireCompanyAuth, async (req, res) => {
+    try {
+        const { data: notes, error } = await supabaseAdmin
+            .from('company_notes')
+            .select('id, author_type, author_name, text, created_at')
+            .eq('company_id', req.company.id)
+            .order('created_at', { ascending: false })
+            .limit(50);
+        if (error) throw error;
+        res.json({ notes: notes || [] });
+    } catch (err) {
+        console.error('Contact notes read error:', err);
+        res.status(500).json({ error: 'Failed to load messages.' });
+    }
+});
+
+/**
+ * POST /api/store/:slug/contact-notes   Body: { text, location_id? }
+ *
+ * location_id is whatever the customer is already signed in under (the
+ * store binds one at login) -- sent explicitly rather than looked up
+ * server-side, the same way order submission already does, so this works
+ * identically for a shared company login and an individual company_user.
+ * It's what lets the message route to the right servicing branch; without
+ * one the message still saves and still reaches CHC's general contacts.
+ */
+router.post('/:slug/contact-notes', requireCompanyAuth, async (req, res) => {
+    try {
+        const text = stripHtml(req.body?.text || '').trim();
+        if (!text) return res.status(400).json({ error: 'Message text is required.' });
+        if (text.length > 4000) return res.status(400).json({ error: 'That message is too long.' });
+
+        const locationId = req.body?.location_id;
+        if (locationId && !isValidUUID(locationId)) {
+            return res.status(400).json({ error: 'Invalid location.' });
+        }
+        if (locationId) {
+            const { data: loc } = await supabaseAdmin
+                .from('company_locations').select('id').eq('id', locationId).eq('company_id', req.company.id).maybeSingle();
+            if (!loc) return res.status(400).json({ error: 'That location is not on this account.' });
+        }
+
+        const author = (req.companyUser && (req.companyUser.name || req.companyUser.email)) || req.company.name;
+        const authorEmail = (req.companyUser && req.companyUser.email) || null;
+
+        const { data: note, error } = await supabaseAdmin
+            .from('company_notes')
+            .insert({
+                company_id: req.company.id,
+                location_id: locationId || null,
+                author_type: 'customer',
+                author_name: author,
+                author_email: authorEmail,
+                text
+            })
+            .select('id, author_type, author_name, text, created_at')
+            .single();
+        if (error) throw error;
+
+        try {
+            const { staffTo, replyTo } = await resolveOrderRecipients({
+                company_id: req.company.id, location_id: locationId, contact_email: authorEmail
+            });
+            if (staffTo.length) {
+                sendContactNote({
+                    to: staffTo, replyTo,
+                    companyName: req.company.name,
+                    author, text
+                }).catch(e => console.error('Contact note email failed (non-blocking):', e.message));
+            }
+        } catch (e) { console.error('Contact note recipients error (non-blocking):', e.message); }
+
+        res.status(201).json({ note });
+    } catch (err) {
+        console.error('Contact note add error:', err);
+        res.status(500).json({ error: 'Failed to send message.' });
     }
 });
 

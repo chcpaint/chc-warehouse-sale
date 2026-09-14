@@ -198,13 +198,24 @@ async function sendOrderNotification(options) {
  */
 async function sendOrderStatusUpdate(options) {
     if (!ensureInit()) return { sent: false, reason: 'not_configured' };
-    const { to, order, companyName, statusLabel, isPartialShipment, hidePricing, note, replyTo } = options;
+    const { to, order, companyName, statusLabel, isPartialShipment, backorderItems, hidePricing, note, replyTo } = options;
     const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
     if (!recipients.length) return { sent: false, reason: 'no_recipient' };
 
     const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
     const orderNo = order.order_number || order.id;
     const banner = isPartialShipment ? '#b45309' : '#1e40af';
+    const backorderLines = Array.isArray(backorderItems) ? backorderItems : [];
+
+    // Listed by name/qty, never a dollar amount — this notice goes out
+    // whether or not the company has pricing hidden (see hide_pricing).
+    const backorderListHtml = backorderLines.length
+        ? `<ul style="margin:8px 0 0; padding-left:18px;">${backorderLines.map(i =>
+            `<li>${escHtml(i.name)}${i.sku ? ` (${escHtml(i.sku)})` : ''} &mdash; ${escHtml(String(i.quantity))} backordered</li>`).join('')}</ul>`
+        : '';
+    const backorderListText = backorderLines.length
+        ? '\n' + backorderLines.map(i => `  - ${i.name}${i.sku ? ` (${i.sku})` : ''} — ${i.quantity} backordered`).join('\n')
+        : '';
 
     const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -215,13 +226,14 @@ async function sendOrderStatusUpdate(options) {
         <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
             <p style="color:#374151;">${escHtml(companyName)} order <strong>#${escHtml(orderNo)}</strong> is now <strong>${escHtml(statusLabel)}</strong>.</p>
             ${isPartialShipment ? `<p style="color:#92400e;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:12px;">
-                Not everything on this order shipped in this delivery — the remaining item(s) are on backorder and will follow separately.
+                Not everything on this order shipped in this delivery — the item(s) below are on backorder and will follow separately.
+                ${backorderListHtml}
             </p>` : ''}
             ${note ? `<div style="margin-top:12px;padding:12px;background:#f9fafb;border-radius:6px;"><strong>Note:</strong> ${escHtml(note)}</div>` : ''}
             <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
         </div>
     </div>`;
-    const text = `${statusLabel} — ${companyName} order #${orderNo}.${isPartialShipment ? '\nNot everything on this order shipped in this delivery — the remaining item(s) are on backorder and will follow separately.' : ''}${note ? `\n\nNote: ${note}` : ''}`;
+    const text = `${statusLabel} — ${companyName} order #${orderNo}.${isPartialShipment ? `\nNot everything on this order shipped in this delivery — the item(s) below are on backorder and will follow separately.${backorderListText}` : ''}${note ? `\n\nNote: ${note}` : ''}`;
 
     try {
         await sgMail.send({
@@ -290,6 +302,51 @@ async function sendOrderNoteAdded(options) {
     } catch (err) {
         const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
         console.error('Email: Failed to send order note notification:', errMsg);
+        return { sent: false, reason: 'send_failed', error: errMsg };
+    }
+}
+
+/**
+ * A company-wide contact note (see routes/storefront.js and
+ * routes/contact-notes-admin.js) -- not about any one order, so this is
+ * sendOrderNoteAdded's sibling rather than a variant of it: no order number,
+ * and the subject/body read as a general message either direction (customer
+ * to CHC, or CHC to a customer) can be sent in.
+ */
+async function sendContactNote(options) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+    const { to, companyName, author, text, replyTo, fromStaff } = options;
+    const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!recipients.length) return { sent: false, reason: 'no_recipient' };
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    const heading = fromStaff ? 'New message from CHC' : 'New message from a customer';
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">${escHtml(heading)}</h2>
+            <p style="margin: 5px 0 0; opacity: 0.9;">${escHtml(companyName)}</p>
+        </div>
+        <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <p style="color:#374151;">${escHtml(companyName)}${author ? ` (${escHtml(author)})` : ''} sent:</p>
+            <div style="margin-top:10px;padding:12px;background:#f9fafb;border-radius:6px;white-space:pre-wrap;">${escHtml(text)}</div>
+            <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
+        </div>
+    </div>`;
+    const textBody = `${heading} — ${companyName}${author ? ` (${author})` : ''}:\n\n${text}`;
+    try {
+        await sgMail.send({
+            to: recipients,
+            from: fromAddress,
+            subject: `${heading} — ${companyName}`,
+            replyTo: replyTo || undefined,
+            text: textBody,
+            html
+        });
+        console.log(`Email: Contact note sent to ${recipients.join(', ')} for ${companyName}`);
+        return { sent: true };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Email: Failed to send contact note:', errMsg);
         return { sent: false, reason: 'send_failed', error: errMsg };
     }
 }
@@ -655,4 +712,4 @@ async function sendInvite(o) {
     }
 }
 
-module.exports = { sendOrderNotification, sendOrderStatusUpdate, sendOrderNoteAdded, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite };
+module.exports = { sendOrderNotification, sendOrderStatusUpdate, sendOrderNoteAdded, sendContactNote, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite };
