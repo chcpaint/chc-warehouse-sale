@@ -9,7 +9,7 @@ const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/uplo
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed, sendOrderStatusUpdate, sendOrderNoteAdded } = require('../utils/email');
-const { orderScopeIds, applyOrderScope, orderInScope } = require('../utils/order-scope');
+const { orderScopeIds, applyOrderScope, orderInScope, branchLocationIds } = require('../utils/order-scope');
 const { redactSecrets } = require('../utils/audit');
 const { ALL_STATUSES, statusOptionsFor, labelFor, isSimplified } = require('../utils/order-status');
 const { hidePricingEnabled } = require('../utils/pricing-visibility');
@@ -60,6 +60,52 @@ router.get('/whoami', (req, res) => {
     });
 });
 
+/**
+ * GET /api/admin/notes/inbox
+ *
+ * Every company's contact notes (see company_notes / routes/contact-notes-admin.js)
+ * in one list, newest first — so a message doesn't only exist if a staff
+ * member happens to open that one company's record. Scoped the same way as
+ * everything else: super_admin and order_manager (head office) see every
+ * company; order_desk sees only companies with a location its branch
+ * serves; a company-scoped admin sees only its own company.
+ */
+router.get('/notes/inbox', async (req, res) => {
+    try {
+        let query = supabaseAdmin
+            .from('company_notes')
+            .select('id, company_id, location_id, author_type, author_name, text, read_at, created_at, companies(name)')
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+        const role = req.admin.role;
+        if (role === 'order_desk') {
+            const locIds = await branchLocationIds(req.admin.branch_id);
+            if (!locIds.length) return res.json({ notes: [], unread_count: 0 });
+            const { data: locs } = await supabaseAdmin
+                .from('company_locations').select('company_id').in('id', locIds);
+            const companyIds = [...new Set((locs || []).map(l => l.company_id))];
+            if (!companyIds.length) return res.json({ notes: [], unread_count: 0 });
+            query = query.in('company_id', companyIds);
+        } else if (role !== 'super_admin' && role !== 'order_manager') {
+            query = query.eq('company_id', req.admin.company_id);
+        }
+
+        const { data: notes, error } = await query;
+        if (error) throw error;
+
+        const shaped = (notes || []).map(n => ({
+            id: n.id, company_id: n.company_id, company_name: n.companies?.name || '',
+            author_type: n.author_type, author_name: n.author_name, text: n.text,
+            read_at: n.read_at, created_at: n.created_at
+        }));
+        res.json({ notes: shaped, unread_count: shaped.filter(n => n.author_type === 'customer' && !n.read_at).length });
+    } catch (err) {
+        console.error('Notes inbox error:', err);
+        res.status(500).json({ error: 'Failed to load messages.' });
+    }
+});
+
 // ============================================================
 // refinishAI INVENTORY (optional module, per company)
 //
@@ -70,6 +116,7 @@ router.get('/whoami', (req, res) => {
 router.use('/companies/:companyId/inventory', require('./inventory-admin'));
 router.use('/companies/:companyId/modules', require('./modules-admin'));
 router.use('/companies/:companyId/po', require('./po-admin'));
+router.use('/companies/:companyId/notes', require('./contact-notes-admin'));
 router.use('/companies/:companyId/tax', require('./tax-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));
 router.use('/companies/:companyId/library', require('./item-library'));
@@ -1589,6 +1636,14 @@ router.get('/reports/orders', async (req, res) => {
  * disagree. Sending it with any other status silently has no visible effect
  * yet clears the flag going forward, since a shipment can't be "partial" once
  * it isn't the delivery step.
+ *
+ * `backorder_items` (optional): which line(s) are actually short, and by how
+ * much — [{ product_id?, sku?, name, quantity }]. Only meaningful alongside
+ * is_partial_shipment; sent any other time it is silently dropped, the same
+ * way is_partial_shipment itself is. Each line is checked against the
+ * order's own items so the console can never save a backorder against
+ * something that wasn't ordered, or for more than was ordered — the whole
+ * point is that this matches the branch's AccountEdge invoice exactly.
  */
 router.put('/orders/:orderId/status', async (req, res) => {
     try {
@@ -1610,11 +1665,39 @@ router.put('/orders/:orderId/status', async (req, res) => {
         // visibility without a second round trip later.
         const { data: order } = await supabaseAdmin
             .from('orders')
-            .select('status_history, company_id, location_id, contact_email, order_number, company_name')
+            .select('status_history, company_id, location_id, contact_email, order_number, company_name, items')
             .eq('id', req.params.orderId)
             .single();
 
         const partial = is_partial_shipment === true && status === 'out_on_delivery';
+
+        let backorderItems = [];
+        if (partial && Array.isArray(req.body?.backorder_items)) {
+            const orderItems = order?.items || [];
+            for (const raw of req.body.backorder_items) {
+                const qty = Number(raw?.quantity);
+                if (!Number.isInteger(qty) || qty <= 0) {
+                    return res.status(400).json({ error: 'Each backordered item needs a whole, positive quantity.' });
+                }
+                const match = orderItems.find(oi =>
+                    (raw.product_id && oi.product_id === raw.product_id) ||
+                    (!raw.product_id && raw.sku && oi.sku === raw.sku) ||
+                    (!raw.product_id && !raw.sku && raw.name && oi.name === raw.name)
+                );
+                if (!match) {
+                    return res.status(400).json({ error: `"${raw?.name || raw?.sku || 'that item'}" is not on this order.` });
+                }
+                if (qty > Number(match.quantity)) {
+                    return res.status(400).json({ error: `${match.name}: backordered quantity can't exceed the ${match.quantity} ordered.` });
+                }
+                backorderItems.push({
+                    product_id: match.product_id || null,
+                    sku: match.sku || '',
+                    name: match.name,
+                    quantity: qty
+                });
+            }
+        }
 
         const statusHistory = order?.status_history || [];
         statusHistory.push({
@@ -1622,7 +1705,8 @@ router.put('/orders/:orderId/status', async (req, res) => {
             timestamp: new Date().toISOString(),
             note: stripHtml(note || ''),
             updated_by: req.admin.email,
-            ...(partial ? { is_partial_shipment: true } : {})
+            ...(partial ? { is_partial_shipment: true } : {}),
+            ...(backorderItems.length ? { backorder_items: backorderItems } : {})
         });
 
         const { data, error } = await supabaseAdmin
@@ -1630,6 +1714,7 @@ router.put('/orders/:orderId/status', async (req, res) => {
             .update({
                 status, status_history: statusHistory,
                 is_partial_shipment: partial,
+                backorder_items: backorderItems,
                 // Who dealt with this. status_history is the full trail; these
                 // columns answer the question without parsing JSON per row.
                 handled_by: req.admin.id,
@@ -1642,7 +1727,7 @@ router.put('/orders/:orderId/status', async (req, res) => {
 
         if (error) throw error;
 
-        await logAction(req.admin.id, 'order_status_updated', 'order', data.id, { status, note, is_partial_shipment: partial }, req.ip);
+        await logAction(req.admin.id, 'order_status_updated', 'order', data.id, { status, note, is_partial_shipment: partial, backorder_items: backorderItems }, req.ip);
 
         // The simplified-status email is the point of the "Received / Out for
         // Delivery / Partial Shipment with Backorder / Closed" workflow CHC
@@ -1663,6 +1748,7 @@ router.put('/orders/:orderId/status', async (req, res) => {
                         companyName: company?.name || order.company_name,
                         statusLabel: labelFor(status, partial, distributorSettings),
                         isPartialShipment: partial,
+                        backorderItems,
                         note: note ? stripHtml(note) : undefined
                     }).catch(e => console.error('Order status-update email failed (non-blocking):', e.message));
                 }

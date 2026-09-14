@@ -103,4 +103,31 @@ async function orderInScope(req, orderId) {
         : { ok: false, code: 403 };
 }
 
-module.exports = { branchLocationIds, orderScopeIds, applyOrderScope, orderInScope };
+/**
+ * Is a COMPANY (not a single order) within this admin's scope? Used to guard
+ * company-wide staff actions that aren't about any one order -- right now
+ * that's just company_notes (see requireCompanyNotesAccess in
+ * middleware/auth.js). Mirrors orderInScope's role logic one level up: an
+ * order_desk account's branch has to actually serve at least one of the
+ * company's locations, not just any location anywhere.
+ */
+async function companyInScope(req, companyId) {
+    const role = req.admin.role;
+    if (role === 'super_admin' || role === 'order_manager') return true;
+
+    if (role === 'order_desk') {
+        const ids = await branchLocationIds(req.admin.branch_id);
+        if (!ids.length) return false;
+        const { data } = await supabaseAdmin
+            .from('company_locations')
+            .select('id')
+            .eq('company_id', companyId)
+            .in('id', ids)
+            .limit(1);
+        return Boolean(data && data.length);
+    }
+
+    return req.admin.company_id === companyId;
+}
+
+module.exports = { branchLocationIds, orderScopeIds, applyOrderScope, orderInScope, companyInScope };

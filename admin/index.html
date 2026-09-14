@@ -151,6 +151,11 @@
                     <i class="fas fa-bars text-lg"></i>
                 </button>
                 <h1 id="page-title" class="text-xl font-bold text-gray-800">Dashboard</h1>
+                <div class="flex-1"></div>
+                <button onclick="openNotesInbox()" class="relative text-gray-500 hover:text-blue-700 p-2" title="Messages from customers">
+                    <i class="fas fa-bell text-lg"></i>
+                    <span id="notes-inbox-badge" class="hidden absolute -top-0.5 -right-0.5 bg-red-600 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center leading-none"></span>
+                </button>
             </header>
 
             <main class="p-6">
@@ -1679,6 +1684,49 @@
         </div>
     </div>
 
+    <!-- Backorder Items Modal -->
+    <div id="backorder-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-truck-ramp-box text-amber-500 mr-2"></i>Backorder &mdash; <span id="bo-order-number"></span></h3>
+                <button onclick="cancelBackorderModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-3">Pick which item(s) shipped short, and how many. Matching this to the AccountEdge invoice means the shop's record and CHC's always agree.</p>
+            <div id="bo-items-list" class="space-y-2 mb-4" data-count="0"></div>
+            <div class="flex justify-end gap-2">
+                <button onclick="cancelBackorderModal()" class="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100">Cancel</button>
+                <button onclick="saveBackorder()" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Save &amp; Mark Backorder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notes Inbox Modal -->
+    <div id="notes-inbox-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-bell text-blue-500 mr-2"></i>Messages</h3>
+                <button onclick="hideModal('notes-inbox-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-3">Every company's messages that aren't about a specific order — a product to quote, a shop closing early, a general question. Opening one marks it read.</p>
+            <div id="notes-inbox-list" class="space-y-2"></div>
+        </div>
+    </div>
+
+    <!-- Company Message Thread Modal (opened from the inbox) -->
+    <div id="company-notes-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-comments text-blue-500 mr-2"></i><span id="cn-company-name"></span></h3>
+                <button onclick="hideModal('company-notes-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="cn-list" class="max-h-80 overflow-y-auto mb-3 space-y-2"></div>
+            <div class="flex items-end gap-2">
+                <textarea id="cn-reply-text" rows="2" placeholder="Reply — the customer will be emailed." class="flex-1 px-3 py-2 border rounded-lg text-sm"></textarea>
+                <button onclick="sendCompanyNoteReply()" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">Send</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Upload Catalog Modal -->
     <div id="upload-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
@@ -1953,6 +2001,7 @@
 
         loadPlatformLogo();
         loadOrderStatusOptions();
+        checkNotesInboxBadge();
 
         // Order-desk accounts are isolated to a single Orders page. Hide every
         // other nav item and boot straight into Orders. The backend enforces the
@@ -5614,9 +5663,12 @@
                         ${statusOpts.map(sv => `<option value="${sv}" ${sv === o.status ? 'selected' : ''}>${sv === 'out_on_delivery' && o.is_partial_shipment ? PARTIAL_SHIPMENT_LABEL : (ORDER_STATUS_LABEL[sv] || sv)}</option>`).join('')}
                     </select>
                     ${o.status === 'out_on_delivery' ? `<label class="flex items-center gap-1 mt-1 text-xs text-amber-700 cursor-pointer" title="Not everything shipped -- the rest is on backorder">
-                        <input type="checkbox" ${o.is_partial_shipment ? 'checked' : ''} onchange="updateOrderStatus('${o.id}', 'out_on_delivery', this.checked)">
+                        <input type="checkbox" ${o.is_partial_shipment ? 'checked' : ''} onchange="onPartialCheckboxChange('${o.id}', '${o.company_id}', this.checked)">
                         Partial / backorder
-                    </label>` : ''}
+                    </label>
+                    ${o.is_partial_shipment && (o.backorder_items || []).length ? `<button type="button" onclick="openBackorderModal('${o.id}', '${o.company_id}')" class="block text-left text-xs text-amber-600 hover:text-amber-800 hover:underline mt-0.5" title="Edit which items are backordered">
+                        <i class="fas fa-pen mr-0.5"></i>${o.backorder_items.length} item${o.backorder_items.length === 1 ? '' : 's'} short
+                    </button>` : ''}` : ''}
                     ${invMeta}
                 </td>
                 <td class="px-4 py-3 text-sm text-gray-500 align-top">${new Date(o.created_at).toLocaleDateString()}</td>
@@ -5697,6 +5749,196 @@
             });
             loadAdminOrders();
         } catch (err) { alert('Failed to update status.'); loadAdminOrders(); }
+    }
+
+    // Checking "Partial / backorder" opens the item picker rather than
+    // saving immediately -- there's no useful "partial" with nothing named
+    // as short, and the whole point is picking exactly what matches the
+    // AccountEdge invoice. Unchecking needs no picker: it just clears both
+    // the flag and whatever was picked.
+    function onPartialCheckboxChange(orderId, companyId, checked) {
+        if (checked) {
+            openBackorderModal(orderId, companyId);
+        } else {
+            updateOrderStatus(orderId, 'out_on_delivery', false);
+        }
+    }
+
+    // ============================================================
+    // BACKORDER ITEM PICKER
+    //
+    // Which line(s) on a partial shipment are actually short, and by how
+    // much -- so the portal matches what the branch already writes on the
+    // AccountEdge invoice, rather than a flag with nothing behind it.
+    // ============================================================
+    let backorderCtx = null; // { orderId, companyId }
+
+    function openBackorderModal(orderId, companyId) {
+        const o = (currentAdminOrders || []).find(x => x.id === orderId);
+        if (!o) return;
+        backorderCtx = { orderId, companyId };
+        document.getElementById('bo-order-number').textContent = o.order_number;
+
+        const existing = new Map((o.backorder_items || []).map(i => [i.product_id || i.sku || i.name, i.quantity]));
+        const items = o.items || [];
+        const rows = items.map((item, idx) => {
+            const key = item.product_id || item.sku || item.name;
+            const already = existing.get(key);
+            return `
+            <label class="flex items-center gap-3 border rounded-lg px-3 py-2 ${already ? 'bg-amber-50 border-amber-200' : ''}">
+                <input type="checkbox" ${already ? 'checked' : ''} onchange="toggleBackorderRow(${idx}, this.checked)" id="bo-check-${idx}">
+                <span class="flex-1 text-sm">${esc(item.name)}${item.sku ? ` <span class="text-xs text-gray-400">(${esc(item.sku)})</span>` : ''}
+                    <div class="text-xs text-gray-400">Ordered ${item.quantity}</div>
+                </span>
+                <input type="number" min="1" max="${item.quantity}" step="1" value="${already || item.quantity}"
+                       id="bo-qty-${idx}" class="w-20 px-2 py-1 border rounded text-sm text-right" ${already ? '' : 'disabled'}>
+            </label>`;
+        }).join('');
+        const list = document.getElementById('bo-items-list');
+        list.innerHTML = rows || '<p class="text-sm text-gray-400">No items on this order.</p>';
+        list.dataset.count = items.length;
+        showModal('backorder-modal');
+    }
+
+    function toggleBackorderRow(idx, checked) {
+        const qtyInput = document.getElementById(`bo-qty-${idx}`);
+        if (qtyInput) qtyInput.disabled = !checked;
+    }
+
+    // Closing without saving must not leave the row's checkbox showing
+    // "checked" when nothing was actually saved -- reload restores it to
+    // whatever the order's real is_partial_shipment still is.
+    function cancelBackorderModal() {
+        hideModal('backorder-modal');
+        loadAdminOrders();
+    }
+
+    async function saveBackorder() {
+        if (!backorderCtx) return;
+        const o = (currentAdminOrders || []).find(x => x.id === backorderCtx.orderId);
+        const count = parseInt(document.getElementById('bo-items-list').dataset.count || '0', 10);
+        const backorderItems = [];
+        for (let i = 0; i < count; i++) {
+            const cb = document.getElementById(`bo-check-${i}`);
+            if (!cb || !cb.checked) continue;
+            const item = o?.items?.[i];
+            if (!item) continue;
+            const qty = parseInt(document.getElementById(`bo-qty-${i}`).value, 10);
+            if (!Number.isInteger(qty) || qty <= 0 || qty > Number(item.quantity)) {
+                alert(`${item.name}: enter a whole number between 1 and ${item.quantity}.`);
+                return;
+            }
+            backorderItems.push({ product_id: item.product_id || null, sku: item.sku || '', name: item.name, quantity: qty });
+        }
+        if (!backorderItems.length) {
+            alert('Select at least one item that shipped short, or uncheck "Partial / backorder" instead.');
+            return;
+        }
+        try {
+            const resp = await adminFetch(`/orders/${backorderCtx.orderId}/status`, {
+                method: 'PUT',
+                body: JSON.stringify({ status: 'out_on_delivery', is_partial_shipment: true, backorder_items: backorderItems })
+            });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to save the backorder.'); return; }
+            hideModal('backorder-modal');
+            loadAdminOrders();
+        } catch (err) { alert('Failed to save the backorder.'); loadAdminOrders(); }
+    }
+
+    // ============================================================
+    // CONTACT NOTES INBOX
+    //
+    // Company-wide messages that aren't about any one order (product to
+    // quote, a shop closing early, a general question) -- see
+    // routes/contact-notes-admin.js. The bell in the header is every
+    // company's thread in one place; clicking an entry opens that one
+    // company's thread, the same per-company GET/POST as the order-desk
+    // allow-list already covers.
+    // ============================================================
+    let companyNotesCtx = null; // { companyId, companyName }
+
+    async function checkNotesInboxBadge() {
+        try {
+            const resp = await adminFetch('/notes/inbox');
+            const data = await resp.json();
+            if (resp.ok) updateNotesInboxBadge(data.unread_count || 0);
+        } catch (err) { /* non-fatal -- the bell just won't show a count */ }
+    }
+
+    function updateNotesInboxBadge(count) {
+        const badge = document.getElementById('notes-inbox-badge');
+        if (!badge) return;
+        if (count > 0) { badge.textContent = count > 99 ? '99+' : String(count); badge.classList.remove('hidden'); }
+        else { badge.classList.add('hidden'); }
+    }
+
+    async function openNotesInbox() {
+        try {
+            const resp = await adminFetch('/notes/inbox');
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to load messages.'); return; }
+            const list = document.getElementById('notes-inbox-list');
+            const notes = data.notes || [];
+            list.innerHTML = notes.length ? notes.map(n => `
+                <button type="button" onclick="openCompanyNotesThread('${n.company_id}', '${esc(n.company_name).replace(/'/g, "\\'")}')"
+                    class="w-full text-left border rounded-lg px-3 py-2 hover:bg-gray-50 ${!n.read_at && n.author_type === 'customer' ? 'bg-blue-50 border-blue-200' : ''}">
+                    <div class="flex justify-between text-xs text-gray-500">
+                        <span class="font-semibold text-gray-700">${esc(n.company_name)}</span>
+                        <span>${new Date(n.created_at).toLocaleString()}</span>
+                    </div>
+                    <div class="text-sm text-gray-800 mt-0.5 truncate">${n.author_type === 'staff' ? '<i class="fas fa-user-tie mr-1 text-gray-400"></i>' : ''}${esc(n.text)}</div>
+                </button>`).join('') : '<p class="text-sm text-gray-400 text-center py-6">No messages yet.</p>';
+            updateNotesInboxBadge(data.unread_count || 0);
+            showModal('notes-inbox-modal');
+        } catch (err) { alert('Failed to load messages.'); }
+    }
+
+    async function openCompanyNotesThread(companyId, companyName) {
+        companyNotesCtx = { companyId, companyName };
+        document.getElementById('cn-company-name').textContent = companyName;
+        document.getElementById('cn-reply-text').value = '';
+        hideModal('notes-inbox-modal');
+        await loadCompanyNotesThread();
+        showModal('company-notes-modal');
+    }
+
+    async function loadCompanyNotesThread() {
+        if (!companyNotesCtx) return;
+        try {
+            const resp = await adminFetch(`/companies/${companyNotesCtx.companyId}/notes`);
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to load messages.'); return; }
+            const notes = data.notes || [];
+            document.getElementById('cn-list').innerHTML = notes.length
+                ? notes.slice().reverse().map(n => `
+                    <div class="p-2 rounded-lg ${n.author_type === 'staff' ? 'bg-blue-50' : 'bg-gray-50'}">
+                        <div class="text-xs text-gray-500 flex justify-between">
+                            <span class="font-semibold">${n.author_type === 'staff' ? 'CHC' : esc(n.author_name || 'Customer')}</span>
+                            <span>${new Date(n.created_at).toLocaleString()}</span>
+                        </div>
+                        <div class="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap">${esc(n.text)}</div>
+                    </div>`).join('')
+                : '<p class="text-sm text-gray-400">No messages yet.</p>';
+            // Opening the thread marks any unread customer message read
+            // server-side (see contact-notes-admin.js) — reflect that here.
+            checkNotesInboxBadge();
+        } catch (err) { alert('Failed to load messages.'); }
+    }
+
+    async function sendCompanyNoteReply() {
+        if (!companyNotesCtx) return;
+        const text = document.getElementById('cn-reply-text').value.trim();
+        if (!text) return;
+        try {
+            const resp = await adminFetch(`/companies/${companyNotesCtx.companyId}/notes`, {
+                method: 'POST', body: JSON.stringify({ text })
+            });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to send message.'); return; }
+            document.getElementById('cn-reply-text').value = '';
+            loadCompanyNotesThread();
+        } catch (err) { alert('Failed to send message.'); }
     }
 
     // ============================================================
