@@ -1372,6 +1372,7 @@
                 </p>
 
                 <div class="space-y-2" id="po-modes"></div>
+                <p id="po-save-note" class="hidden mt-2 text-sm text-green-600"><i class="fas fa-check mr-1"></i><span></span></p>
 
                 <div id="po-sequence-setup" class="hidden mt-3 bg-gray-50 rounded-lg p-4">
                     <div class="grid grid-cols-3 gap-3">
@@ -4382,6 +4383,22 @@
         }
     }
 
+    let poSaveNoteTimer = null;
+
+    // A radio click that auto-saves (off/manual) had no confirmation at all --
+    // the only feedback was the highlight moving, which a person mid-click
+    // easily misses, and it then reads as "did that even save?" every time.
+    // 'generated' keeps its own alert() below since it already confirms via
+    // the prefix/example it shows.
+    function flashPoSaveNote(message) {
+        const note = document.getElementById('po-save-note');
+        if (!note) return;
+        note.querySelector('span').textContent = message;
+        note.classList.remove('hidden');
+        clearTimeout(poSaveNoteTimer);
+        poSaveNoteTimer = setTimeout(() => note.classList.add('hidden'), 4000);
+    }
+
     async function savePoSettings(forcedMode) {
         const mode = forcedMode
             || document.querySelector('input[name="po-mode"]:checked')?.value
@@ -4403,6 +4420,7 @@
             const data = await resp.json();
             if (!resp.ok) { alert(data.error || 'Failed to save purchase order settings.'); return; }
             if (mode === 'generated') alert(data.message);
+            else flashPoSaveNote(data.message || 'Saved.');
             await loadPoSettings();
         } catch (err) {
             alert('Failed to save purchase order settings.');
