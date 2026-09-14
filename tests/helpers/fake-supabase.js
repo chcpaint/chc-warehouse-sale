@@ -53,11 +53,20 @@ const KNOWN_COLUMNS = {
         // with Backorder" flag on out_on_delivery, a running notes/messages
         // log distinct from the original checkout `notes`, and who adjusted
         // pricing on an order after it was placed, when, and why.
-        'is_partial_shipment', 'notes_log', 'price_edited_at', 'price_edited_by', 'price_edit_reason'
+        'is_partial_shipment', 'notes_log', 'price_edited_at', 'price_edited_by', 'price_edit_reason',
+        // Added by migration 040: which line(s) are short on a partial
+        // shipment, and by how much, so it can match AccountEdge.
+        'backorder_items'
     ]),
     company_po_sequences: new Set([
         'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',
         'created_at', 'updated_at', 'updated_by'
+    ]),
+    // Added by migration 039: a company-wide message thread not tied to any
+    // one order (product-not-in-catalogue requests, a shop closing early).
+    company_notes: new Set([
+        'id', 'company_id', 'location_id', 'author_type', 'author_name', 'author_email',
+        'admin_id', 'text', 'read_at', 'read_by', 'created_at'
     ]),
     stock_movements: new Set([
         'id', 'company_id', 'location_id', 'product_id', 'qty_change', 'movement_type',
@@ -308,6 +317,8 @@ class Query {
                 } else if (rel === 'repair_kits' && (r.kit_id || r.id)) {
                     // company_kit_access embeds by kit_id; kit_items by kit_id too.
                     out.repair_kits = clone((this.db.repair_kits || []).find(k => k.id === (r.kit_id || r.id))) || null;
+                } else if (rel === 'companies' && r.company_id) {
+                    out.companies = clone((this.db.companies || []).find(c => c.id === r.company_id)) || null;
                 }
             }
             return out;

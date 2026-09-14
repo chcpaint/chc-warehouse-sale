@@ -41,6 +41,7 @@ const stubs = {
         restrictOrderDesk: (req, res, next) => next(),
         requirePasswordCurrent: (req, res, next) => next(),
         requireOrderAccess: (req, res, next) => next(),
+        requireCompanyNotesAccess: (req, res, next) => { req.admin = authAdmin; next(); },
         ORDER_ONLY_ROLES: ['order_desk', 'order_manager']
     },
     [path.join(ROOT, 'utils/sanitize.js')]: {
