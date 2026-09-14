@@ -443,14 +443,14 @@
                             <span id="cart-total">$0.00</span>
                         </div>
                         <p id="cart-delivery-fee-note" class="hidden text-xs text-blue-700 -mt-3 mb-4"></p>
-                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-800">
+                        <div id="cart-po-step-note" class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-800">
                             <b>Step 1 &mdash; Get it approved.</b> Download this as a quote to send for approval and to get your PO number. Nothing is ordered yet.
                         </div>
                         <button onclick="downloadQuote()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors mb-3">
                             <i class="fas fa-file-arrow-down mr-2"></i>Download Quote (PDF)
                         </button>
                         <button onclick="showCheckout()" class="w-full border-2 border-green-600 text-green-700 hover:bg-green-50 font-semibold py-3 rounded-lg transition-colors">
-                            <i class="fas fa-arrow-right mr-2"></i>Convert to Order &mdash; enter PO
+                            <i class="fas fa-arrow-right mr-2"></i><span id="cart-convert-btn-label">Convert to Order &mdash; enter PO</span>
                         </button>
                     </div>
                 </div>
@@ -1088,6 +1088,7 @@
         loadPromotions();
         loadTaxConfig();
         loadDeliveryFeeConfig();
+        loadPoConfig();
         // Reflect the location chosen at login in the checkout form
         if (state.location && document.getElementById('checkout-location-name')) {
             document.getElementById('checkout-location-name').textContent = state.location.name;
@@ -2603,32 +2604,51 @@
         const input = document.getElementById('checkout-po');
         const label = document.getElementById('checkout-po-label');
         const hint  = document.getElementById('checkout-po-hint');
-        if (!wrap || !input) return;
 
-        wrap.classList.toggle('hidden', poConfig.mode === 'off');
-        input.required = poConfig.mode === 'manual';
+        if (wrap && input) {
+            wrap.classList.toggle('hidden', poConfig.mode === 'off');
+            input.required = poConfig.mode === 'manual';
 
-        if (poConfig.mode === 'manual') {
-            label.textContent = 'PO Number *';
-            input.disabled = false;
-            input.placeholder = 'Enter your Purchase Order number';
-            hint.classList.add('hidden');
-            return;
+            if (poConfig.mode === 'manual') {
+                label.textContent = 'PO Number *';
+                input.disabled = false;
+                input.placeholder = 'Enter your Purchase Order number';
+                hint.classList.add('hidden');
+            } else if (poConfig.mode === 'generated') {
+                label.textContent = 'PO Number';
+                input.disabled = true;
+                input.value = '';
+                input.placeholder = poConfig.next_example
+                    ? `${poConfig.next_example} — assigned when you submit`
+                    : 'Assigned by CHC when you submit';
+                hint.textContent = poConfig.configured
+                    ? 'CHC assigns this number, so it is never reused. It appears on your confirmation.'
+                    : 'Purchase order numbering is not set up for this account yet — contact CHC before ordering.';
+                hint.className = poConfig.configured
+                    ? 'text-xs text-blue-700 mt-1'
+                    : 'text-xs text-amber-700 mt-1';
+            }
         }
 
-        if (poConfig.mode === 'generated') {
-            label.textContent = 'PO Number';
-            input.disabled = true;
-            input.value = '';
-            input.placeholder = poConfig.next_example
-                ? `${poConfig.next_example} — assigned when you submit`
-                : 'Assigned by CHC when you submit';
-            hint.textContent = poConfig.configured
-                ? 'CHC assigns this number, so it is never reused. It appears on your confirmation.'
-                : 'Purchase order numbering is not set up for this account yet — contact CHC before ordering.';
-            hint.className = poConfig.configured
-                ? 'text-xs text-blue-700 mt-1'
-                : 'text-xs text-amber-700 mt-1';
+        // The cart tab's own "get a PO before ordering" framing, one step
+        // before the checkout form above even opens. 'manual' is left exactly
+        // as it always read, since that is what every account already sees;
+        // 'off' and 'generated' stop promising a PO the customer never types.
+        const note = document.getElementById('cart-po-step-note');
+        const convertLabel = document.getElementById('cart-convert-btn-label');
+        if (note && convertLabel) {
+            if (poConfig.mode === 'off') {
+                note.classList.add('hidden');
+                convertLabel.textContent = 'Place Order';
+            } else if (poConfig.mode === 'generated') {
+                note.innerHTML = '<b>Step 1 &mdash; Get it approved.</b> Download this as a quote to send for approval. Nothing is ordered yet &mdash; your PO number is assigned automatically when you convert it to an order.';
+                note.classList.remove('hidden');
+                convertLabel.textContent = 'Convert to Order';
+            } else {
+                note.innerHTML = '<b>Step 1 &mdash; Get it approved.</b> Download this as a quote to send for approval and to get your PO number. Nothing is ordered yet.';
+                note.classList.remove('hidden');
+                convertLabel.textContent = 'Convert to Order — enter PO';
+            }
         }
     }
 
@@ -2699,7 +2719,12 @@
         doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(20,20,20);
         doc.text('Total: $' + (total + tax + deliveryFee).toFixed(2), 140, y);
         doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(120,120,120);
-        doc.text('This is a quote, not an invoice. Prices, and tax, are subject to change and final confirmation. To place the order, return to the store, click "Convert to Order", and enter your PO number.', 14, y + 12, { maxWidth: 182 });
+        const closingLine = poConfig.mode === 'off'
+            ? 'This is a quote, not an invoice. Prices, and tax, are subject to change and final confirmation. To place the order, return to the store and click "Place Order".'
+            : poConfig.mode === 'generated'
+                ? 'This is a quote, not an invoice. Prices, and tax, are subject to change and final confirmation. To place the order, return to the store and click "Convert to Order" — your PO number is assigned automatically.'
+                : 'This is a quote, not an invoice. Prices, and tax, are subject to change and final confirmation. To place the order, return to the store, click "Convert to Order", and enter your PO number.';
+        doc.text(closingLine, 14, y + 12, { maxWidth: 182 });
         doc.save(qnum + '.pdf');
     }
 
