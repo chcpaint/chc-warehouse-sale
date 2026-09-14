@@ -618,6 +618,18 @@
                 <h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-address-book mr-2"></i>Contact CHC</h2>
                 <p class="text-gray-500 mb-5">Reach CHC head office or your servicing branch.</p>
 
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Send CHC a Message</h3>
+                <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+                    <p class="text-sm text-gray-500 mb-3">Not about a specific order — a product to quote that isn't in the catalogue, a heads-up that you're closing early, a general question. Goes straight to your servicing branch.</p>
+                    <div class="flex flex-col sm:flex-row items-start gap-2">
+                        <textarea id="contact-note-text" rows="2" placeholder="Type a message for CHC..." class="flex-1 w-full px-3 py-2 border rounded-lg text-sm"></textarea>
+                        <button onclick="sendContactNote()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">
+                            <i class="fas fa-paper-plane mr-1"></i>Send
+                        </button>
+                    </div>
+                    <div id="contact-notes-list" class="mt-4 space-y-2"></div>
+                </div>
+
                 <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Head Office</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                     <div class="bg-white rounded-xl shadow-sm border p-5">
@@ -1451,6 +1463,7 @@
         if (tab === 'cart') renderCart();
         if (tab === 'orders') loadOrders();
         if (tab === 'reports') loadReports();
+        if (tab === 'contact') loadContactNotes();
 
         // Landing back on Products -- from the drawer, "Continue shopping" in
         // the cart, or "Back to cart" then away again -- should drop the
@@ -2955,6 +2968,13 @@
                     </tr>
                 `).join('');
 
+                const backorderItems = o.backorder_items || [];
+                const backorderHtml = (o.is_partial_shipment && backorderItems.length) ? `
+                    <div class="mx-4 mt-2 mb-1 p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                        <span class="font-semibold"><i class="fas fa-truck-ramp-box mr-1"></i>On backorder:</span>
+                        ${backorderItems.map(i => `${escapeHtml(i.name)} &times;${i.quantity}`).join(', ')}
+                    </div>` : '';
+
                 const notesLog = o.notes_log || [];
                 const notesHtml = notesLog.map(n => `
                     <div class="p-2 rounded-lg ${n.from === 'staff' ? 'bg-blue-50' : 'bg-gray-50'} mb-2">
@@ -2986,6 +3006,7 @@
                             </div>
                         </div>
                     </div>
+                    ${backorderHtml}
                     <div id="order-detail-${idx}" class="hidden border-t">
                         <div class="overflow-x-auto">
                             <table class="w-full">
@@ -3073,6 +3094,53 @@
             }
         } catch (err) {
             alert('Failed to add note.');
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Contact notes -- a message to CHC that isn't about any one order. See
+    // the per-order notes above for the order-attached version of this same
+    // idea; this is the Contact tab's own thread.
+    // ------------------------------------------------------------
+    async function loadContactNotes() {
+        const list = document.getElementById('contact-notes-list');
+        if (!list) return;
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/contact-notes`);
+            const data = await resp.json();
+            if (!resp.ok) return;
+            const notes = data.notes || [];
+            list.innerHTML = notes.length
+                ? notes.map(n => `
+                    <div class="p-2 rounded-lg ${n.author_type === 'staff' ? 'bg-blue-50' : 'bg-gray-50'}">
+                        <div class="text-xs text-gray-500 flex justify-between">
+                            <span class="font-semibold">${n.author_type === 'staff' ? 'CHC' : escapeHtml(n.author_name || 'You')}</span>
+                            <span>${new Date(n.created_at).toLocaleString()}</span>
+                        </div>
+                        <div class="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap">${escapeHtml(n.text)}</div>
+                    </div>`).join('')
+                : '<p class="text-sm text-gray-400">No messages yet.</p>';
+        } catch (err) {
+            // Leave whatever was already shown — a failed refresh here is not
+            // worth interrupting the tab over.
+        }
+    }
+
+    async function sendContactNote() {
+        const input = document.getElementById('contact-note-text');
+        const text = input ? input.value.trim() : '';
+        if (!text) return;
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/contact-notes`, {
+                method: 'POST',
+                body: JSON.stringify({ text, location_id: state.location?.id })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to send message.'); return; }
+            input.value = '';
+            loadContactNotes();
+        } catch (err) {
+            alert('Failed to send message.');
         }
     }
 
