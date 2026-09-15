@@ -240,7 +240,10 @@ test('setting Out for Delivery with the partial-shipment flag labels and stores 
     reset();
     const res = await request(adminApp())
         .put(`/api/admin/orders/${ORDER}/status`)
-        .send({ status: 'out_on_delivery', is_partial_shipment: true, note: 'two cases short' });
+        .send({
+            status: 'out_on_delivery', is_partial_shipment: true, note: 'two cases short',
+            backorder_items: [{ product_id: PRODUCT, quantity: 2 }]
+        });
     assert.equal(res.status, 200);
     assert.equal(res.body.order.is_partial_shipment, true);
     assert.equal(res.body.order.status_label, 'Partial Shipment with Backorder');
@@ -251,6 +254,21 @@ test('setting Out for Delivery with the partial-shipment flag labels and stores 
     // Both the orderer and the servicing branch are on the recipient list.
     assert.ok(sentEmails.status[0].to.includes('pat@example.invalid'));
     assert.ok(sentEmails.status[0].to.includes('markham@chc.example'));
+});
+
+test('a partial shipment with no backordered items at all is refused -- there must always be something to show', async () => {
+    reset();
+    const noKey = await request(adminApp())
+        .put(`/api/admin/orders/${ORDER}/status`)
+        .send({ status: 'out_on_delivery', is_partial_shipment: true });
+    assert.equal(noKey.status, 400);
+    assert.match(noKey.body.error, /at least one backordered item/);
+
+    const emptyArray = await request(adminApp())
+        .put(`/api/admin/orders/${ORDER}/status`)
+        .send({ status: 'out_on_delivery', is_partial_shipment: true, backorder_items: [] });
+    assert.equal(emptyArray.status, 400);
+    assert.equal(sentEmails.status.length, 0, 'a refused save must not have emailed anyone');
 });
 
 test('closing an order emails "Closed" and does not carry the partial flag', async () => {
