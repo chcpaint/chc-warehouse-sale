@@ -1637,13 +1637,16 @@ router.get('/reports/orders', async (req, res) => {
  * yet clears the flag going forward, since a shipment can't be "partial" once
  * it isn't the delivery step.
  *
- * `backorder_items` (optional): which line(s) are actually short, and by how
- * much — [{ product_id?, sku?, name, quantity }]. Only meaningful alongside
- * is_partial_shipment; sent any other time it is silently dropped, the same
- * way is_partial_shipment itself is. Each line is checked against the
- * order's own items so the console can never save a backorder against
- * something that wasn't ordered, or for more than was ordered — the whole
- * point is that this matches the branch's AccountEdge invoice exactly.
+ * `backorder_items` — which line(s) are actually short, and by how much —
+ * [{ product_id?, sku?, name, quantity }]. Required, and required non-empty,
+ * whenever is_partial_shipment is true: a shipment can't be "partial" with
+ * nothing on backorder, and the point of this field is that the portal
+ * matches the branch's AccountEdge invoice exactly, which a blank list
+ * can't do. Sent any other time (is_partial_shipment not true) it is
+ * silently dropped, the same way is_partial_shipment itself is. Each line
+ * is checked against the order's own items so the console can never save a
+ * backorder against something that wasn't ordered, or for more than was
+ * ordered.
  */
 router.put('/orders/:orderId/status', async (req, res) => {
     try {
@@ -1670,6 +1673,13 @@ router.put('/orders/:orderId/status', async (req, res) => {
             .single();
 
         const partial = is_partial_shipment === true && status === 'out_on_delivery';
+
+        // A partial shipment with nothing recorded as short is exactly the
+        // gap that let one order's status email go out with an empty
+        // backorder box -- require at least one item, every time.
+        if (partial && (!Array.isArray(req.body?.backorder_items) || req.body.backorder_items.length === 0)) {
+            return res.status(400).json({ error: 'Select at least one backordered item and quantity before saving a partial shipment.' });
+        }
 
         let backorderItems = [];
         if (partial && Array.isArray(req.body?.backorder_items)) {
