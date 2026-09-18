@@ -664,6 +664,30 @@ test('the billing document itemizes every line actually billed, by brand and par
     assert.match(doc.text, /\$7\.00/);
 });
 
+test('the billing document carries a ready-to-paste line note, since insurers only ever see the note text on an attachment, never the file', async () => {
+    reset();
+    mapKit();
+    const consumed = await request(storeApp()).post(`${S}/${KIT}/consume`).send({
+        location_id: LOC, job_ref: 'RO-3005', actor_label: 'Sam'
+    });
+
+    const doc = await request(storeApp()).get(`${S}/consumptions/${consumed.body.consumption.id}/billing-doc`);
+    assert.match(doc.text, /id="suggested-note"/);
+    assert.match(doc.text, /Non-included materials — Door Skin — itemized backup attached \(RO RO-3005\)/);
+});
+
+test('the billing document leaves a field for the OEM procedure reference that actually gets a materials line approved', async () => {
+    reset();
+    mapKit();
+    const consumed = await request(storeApp()).post(`${S}/${KIT}/consume`).send({
+        location_id: LOC, job_ref: 'RO-3006', actor_label: 'Sam'
+    });
+
+    const doc = await request(storeApp()).get(`${S}/consumptions/${consumed.body.consumption.id}/billing-doc`);
+    assert.match(doc.text, /id="oem-ref"/);
+    assert.match(doc.text, /OEM repair procedure/);
+});
+
 test('the billing document is frozen at consume time — a later price or name change does not reach it', async () => {
     reset();
     mapKit();
