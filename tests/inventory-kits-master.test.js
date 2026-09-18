@@ -376,3 +376,153 @@ test('bulk access is refused on a company-owned kit', async () => {
     const res = await request(app()).put(`/api/admin/kits/${ownKit.id}/access/bulk`).send({ company_ids: [CO_B], enabled: true });
     assert.equal(res.status, 400);
 });
+
+// ==================================================================
+// SAVE AS NEW KIT — brand-substituted variants (POST /kits/:kitId/clone)
+//
+// A shop that only stocks 3M/MMM adhesives wants the same kit as one built
+// on Fusor, same steps and component count, priced and billed at 3M part
+// numbers. Cloning builds exactly that: a new, independent master kit,
+// leaving the source kit and everyone already using it untouched.
+// ==================================================================
+
+async function buildPillarKit() {
+    const created = await request(app()).post('/api/admin/kits').send({
+        name: 'Pillar Repair — Fusor',
+        lines: [{ sku: 'FUS208B', quantity: 1 }, { sku: 'MMM08852', quantity: 0.3 }]
+    });
+    const kitId = created.body.kit.id;
+    const detail = await request(app()).get(`/api/admin/kits/${kitId}`);
+    const [bondLine, otherLine] = detail.body.lines;
+
+    const threeM = await request(app()).post(`/api/admin/kits/${kitId}/lines/${bondLine.id}/alternatives`)
+        .send({ brand: '3M', brand_part_number: '08115', brand_name: 'Panel Bonding Adhesive' });
+    const norton = await request(app()).post(`/api/admin/kits/${kitId}/lines/${bondLine.id}/alternatives`)
+        .send({ brand: 'Norton', brand_part_number: '06421', brand_name: 'Multi-Purpose Panel Bond' });
+
+    return { kitId, bondLineId: bondLine.id, otherLineId: otherLine.id, threeMAltId: threeM.body.alternative.id, nortonAltId: norton.body.alternative.id };
+}
+
+test('cloning with no substitutions copies every line unchanged onto a new, independent master kit', async () => {
+    reset();
+    const { kitId } = await buildPillarKit();
+
+    const res = await request(app()).post(`/api/admin/kits/${kitId}/clone`).send({ name: 'Pillar Repair — Copy' });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.kit.line_count, 2);
+    assert.equal(res.body.kit.parent_kit_id, kitId);
+
+    const newKit = fake.db.repair_kits.find(k => k.id === res.body.kit.id);
+    assert.equal(newKit.company_id, null, 'a clone is still a CHC master kit, not private to one company');
+    assert.equal(newKit.parent_kit_id, kitId);
+
+    const newLines = fake.db.kit_items.filter(i => i.kit_id === res.body.kit.id).sort((a, b) => a.sort_order - b.sort_order);
+    assert.deepEqual(newLines.map(l => l.sku), ['FUS208B', 'MMM08852']);
+    assert.deepEqual(newLines.map(l => Number(l.quantity)), [1, 0.3]);
+
+    // The original kit's own lines are untouched.
+    const sourceLines = fake.db.kit_items.filter(i => i.kit_id === kitId);
+    assert.equal(sourceLines.length, 2);
+});
+
+test('a substituted line becomes the alternative\'s part number, same quantity and unit, flagged for review', async () => {
+    reset();
+    const { kitId, bondLineId, threeMAltId } = await buildPillarKit();
+
+    const res = await request(app()).post(`/api/admin/kits/${kitId}/clone`).send({
+        name: 'Pillar Repair — 3M/MMM',
+        substitutions: [{ kit_item_id: bondLineId, alternative_id: threeMAltId }]
+    });
+    assert.equal(res.status, 201);
+
+    const newLines = fake.db.kit_items.filter(i => i.kit_id === res.body.kit.id).sort((a, b) => a.sort_order - b.sort_order);
+    const bondNew = newLines.find(l => l.sort_order === fake.db.kit_items.find(i => i.id === bondLineId).sort_order);
+    assert.equal(bondNew.sku, '08115', 'the new line IS the 3M part number now');
+    assert.equal(Number(bondNew.quantity), 1, 'quantity is the same repair, not a different one');
+    assert.equal(bondNew.unit, 'each');
+    assert.equal(bondNew.needs_review, true, 'nobody has mapped this new part for any company yet');
+
+    // The source kit's own Fusor line is unaffected.
+    const sourceBond = fake.db.kit_items.find(i => i.id === bondLineId);
+    assert.equal(sourceBond.sku, 'FUS208B');
+});
+
+test('a substituted line carries its other alternatives forward and gains the original part as a way back', async () => {
+    reset();
+    const { kitId, bondLineId, threeMAltId } = await buildPillarKit();
+
+    const res = await request(app()).post(`/api/admin/kits/${kitId}/clone`).send({
+        name: 'Pillar Repair — 3M/MMM',
+        substitutions: [{ kit_item_id: bondLineId, alternative_id: threeMAltId }]
+    });
+
+    const newBondLine = fake.db.kit_items.find(i =>
+        i.kit_id === res.body.kit.id && i.sort_order === fake.db.kit_items.find(x => x.id === bondLineId).sort_order);
+    const newAlts = fake.db.kit_item_alternatives.filter(a => a.kit_item_id === newBondLine.id);
+
+    assert.ok(newAlts.some(a => a.brand === 'Norton' && a.brand_part_number === '06421'), 'the OTHER alternative (Norton) carries forward');
+    assert.ok(newAlts.some(a => a.brand_part_number === 'FUS208B'), 'the original Fusor part is attached as a way back');
+    assert.ok(!newAlts.some(a => a.brand_part_number === '08115'), 'the chosen alternative (3M) is not re-attached to itself');
+});
+
+test('an unsubstituted line still carries its existing alternatives forward untouched', async () => {
+    reset();
+    const { kitId, bondLineId, threeMAltId, otherLineId } = await buildPillarKit();
+
+    // Substitute the bond line only; otherLine keeps its own alternatives (none here),
+    // but the bond line's alternatives, when NOT chosen as the substitution target of
+    // a different clone, should still carry forward on an unsubstituted clone.
+    const res = await request(app()).post(`/api/admin/kits/${kitId}/clone`).send({ name: 'Pillar Repair — Copy' });
+
+    const newBondLine = fake.db.kit_items.find(i =>
+        i.kit_id === res.body.kit.id && i.sort_order === fake.db.kit_items.find(x => x.id === bondLineId).sort_order);
+    const newAlts = fake.db.kit_item_alternatives.filter(a => a.kit_item_id === newBondLine.id);
+    assert.equal(newAlts.length, 2, 'both existing alternatives (3M and Norton) carry forward when the line is not substituted');
+});
+
+test('the new kit starts with no customers assigned, even if the source kit had some', async () => {
+    reset();
+    const { kitId } = await buildPillarKit();
+    await request(app()).put(`/api/admin/kits/${kitId}/access/bulk`).send({ company_ids: [CO_A, CO_B], enabled: true });
+
+    const res = await request(app()).post(`/api/admin/kits/${kitId}/clone`).send({ name: 'Pillar Repair — Copy' });
+    const access = fake.db.company_kit_access.filter(a => a.kit_id === res.body.kit.id);
+    assert.equal(access.length, 0);
+});
+
+test('a name is required to clone a kit', async () => {
+    reset();
+    const { kitId } = await buildPillarKit();
+    const res = await request(app()).post(`/api/admin/kits/${kitId}/clone`).send({});
+    assert.equal(res.status, 400);
+});
+
+test('cloning a kit that does not exist is a 404', async () => {
+    reset();
+    const res = await request(app()).post('/api/admin/kits/99999999-9999-4999-8999-999999999999/clone').send({ name: 'X' });
+    assert.equal(res.status, 404);
+});
+
+test('an alternative that belongs to a different line cannot be used as a substitution', async () => {
+    reset();
+    const { kitId, otherLineId, threeMAltId } = await buildPillarKit();
+    const res = await request(app()).post(`/api/admin/kits/${kitId}/clone`).send({
+        name: 'Pillar Repair — Bad',
+        substitutions: [{ kit_item_id: otherLineId, alternative_id: threeMAltId }]
+    });
+    assert.equal(res.status, 400);
+    assert.ok(!fake.db.repair_kits.some(k => k.name === 'Pillar Repair — Bad'), 'nothing is left behind on a rejected clone');
+});
+
+test('the list and the detail screen both show which kit a variant was cloned from', async () => {
+    reset();
+    const { kitId } = await buildPillarKit();
+    const cloned = await request(app()).post(`/api/admin/kits/${kitId}/clone`).send({ name: 'Pillar Repair — 3M/MMM' });
+
+    const list = await request(app()).get('/api/admin/kits');
+    const row = list.body.kits.find(k => k.id === cloned.body.kit.id);
+    assert.equal(row.parent_kit_name, 'Pillar Repair — Fusor');
+
+    const detail = await request(app()).get(`/api/admin/kits/${cloned.body.kit.id}`);
+    assert.equal(detail.body.kit.parent_kit_name, 'Pillar Repair — Fusor');
+});
