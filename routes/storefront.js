@@ -344,6 +344,192 @@ router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
     }
 });
 
+// ------------------------------------------------------------
+// Cart
+//
+// One shared cart per customer account (company_id), not per login -- see
+// migrations/043_shared_cart.sql for why. Only product_id and quantity are
+// stored; the client re-prices each line itself from the product/promotion
+// data it already has, exactly like the catalogue view does, so nothing
+// here can disagree with what checkout will actually charge.
+// ------------------------------------------------------------
+
+/**
+ * GET /api/store/:slug/cart
+ */
+router.get('/:slug/cart', requireCompanyAuth, async (req, res) => {
+    try {
+        // Product fields come back joined, not just product_id -- the
+        // storefront's product list is paginated/filtered, so a cart line
+        // for a product that is not on the currently loaded page would
+        // otherwise have nothing to display itself with.
+        const { data, error } = await supabaseAdmin
+            .from('cart_items')
+            .select('product_id, quantity, added_by_name, updated_at, products(name, brand, sku, price, price_on_request)')
+            .eq('company_id', req.company.id)
+            .order('created_at', { ascending: true });
+        if (error) throw error;
+
+        const items = (data || [])
+            // A product deleted after being carted leaves an orphaned line --
+            // drop it rather than show a blank row the customer can't act on.
+            .filter(i => i.products)
+            .map(i => ({
+                product_id: i.product_id,
+                quantity: i.quantity,
+                added_by_name: i.added_by_name,
+                updated_at: i.updated_at,
+                name: i.products.name,
+                brand: i.products.brand,
+                sku: i.products.sku,
+                price: i.products.price,
+                price_on_request: i.products.price_on_request === true
+            }));
+        res.json({ items });
+    } catch (err) {
+        console.error('[Storefront] GET cart failed:', err);
+        res.status(500).json({ error: 'Could not load your cart.' });
+    }
+});
+
+/**
+ * POST /api/store/:slug/cart/items
+ * "Add to cart" (a product click) and "scan to cart" both land here: bump
+ * an existing line's quantity by one, or start a new line at one.
+ */
+router.post('/:slug/cart/items', requireCompanyAuth, async (req, res) => {
+    try {
+        const { product_id } = sanitizeObject(req.body);
+        if (!product_id || !isValidUUID(product_id)) {
+            return res.status(400).json({ error: 'Invalid product.' });
+        }
+
+        const { data: product } = await supabaseAdmin
+            .from('products').select('id').eq('id', product_id).eq('company_id', req.company.id).maybeSingle();
+        if (!product) return res.status(404).json({ error: 'Product not found for this account.' });
+
+        const addedByName = req.companyUser ? req.companyUser.name : null;
+        const addedByUserId = req.companyUser ? req.companyUser.id : null;
+
+        const { data: existing } = await supabaseAdmin
+            .from('cart_items').select('id, quantity')
+            .eq('company_id', req.company.id).eq('product_id', product_id).maybeSingle();
+
+        let row, error;
+        if (existing) {
+            ({ data: row, error } = await supabaseAdmin
+                .from('cart_items')
+                .update({
+                    quantity: Math.min(existing.quantity + 1, 9999),
+                    added_by_user_id: addedByUserId, added_by_name: addedByName,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', existing.id)
+                .select('product_id, quantity, added_by_name, updated_at')
+                .single());
+        } else {
+            ({ data: row, error } = await supabaseAdmin
+                .from('cart_items')
+                .insert({
+                    company_id: req.company.id, product_id, quantity: 1,
+                    added_by_user_id: addedByUserId, added_by_name: addedByName
+                })
+                .select('product_id, quantity, added_by_name, updated_at')
+                .single());
+        }
+        if (error) throw error;
+        res.json({ item: row });
+    } catch (err) {
+        console.error('[Storefront] POST cart item failed:', err);
+        res.status(500).json({ error: 'Could not add item to cart.' });
+    }
+});
+
+/**
+ * PUT /api/store/:slug/cart/items/:productId
+ * Set a line to an exact quantity -- the +/- stepper. Zero or less removes
+ * the line, same as it always meant when the cart lived in the browser.
+ */
+router.put('/:slug/cart/items/:productId', requireCompanyAuth, async (req, res) => {
+    try {
+        const { productId } = req.params;
+        if (!isValidUUID(productId)) return res.status(400).json({ error: 'Invalid product.' });
+        const quantity = parseInt(sanitizeObject(req.body).quantity, 10);
+
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+            const { error } = await supabaseAdmin
+                .from('cart_items').delete().eq('company_id', req.company.id).eq('product_id', productId);
+            if (error) throw error;
+            return res.json({ removed: true });
+        }
+        if (quantity > 9999) return res.status(400).json({ error: 'Quantities must be 9999 or fewer.' });
+
+        const { data: product } = await supabaseAdmin
+            .from('products').select('id').eq('id', productId).eq('company_id', req.company.id).maybeSingle();
+        if (!product) return res.status(404).json({ error: 'Product not found for this account.' });
+
+        const addedByName = req.companyUser ? req.companyUser.name : null;
+        const addedByUserId = req.companyUser ? req.companyUser.id : null;
+
+        const { data: row, error } = await supabaseAdmin
+            .from('cart_items')
+            .upsert({
+                company_id: req.company.id, product_id: productId, quantity,
+                added_by_user_id: addedByUserId, added_by_name: addedByName,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'company_id,product_id' })
+            .select('product_id, quantity, added_by_name, updated_at')
+            .single();
+        if (error) throw error;
+        res.json({ item: row });
+    } catch (err) {
+        console.error('[Storefront] PUT cart item failed:', err);
+        res.status(500).json({ error: 'Could not update your cart.' });
+    }
+});
+
+/**
+ * DELETE /api/store/:slug/cart/items/:productId
+ * One-click removal -- the trash icon.
+ */
+router.delete('/:slug/cart/items/:productId', requireCompanyAuth, async (req, res) => {
+    try {
+        const { productId } = req.params;
+        if (!isValidUUID(productId)) return res.status(400).json({ error: 'Invalid product.' });
+        const { error } = await supabaseAdmin
+            .from('cart_items').delete().eq('company_id', req.company.id).eq('product_id', productId);
+        if (error) throw error;
+        res.json({ removed: true });
+    } catch (err) {
+        console.error('[Storefront] DELETE cart item failed:', err);
+        res.status(500).json({ error: 'Could not remove that item.' });
+    }
+});
+
+/**
+ * DELETE /api/store/:slug/cart
+ * Clears the whole cart (after a successful order) or, with a
+ * `product_ids` array, just the selected lines (the bulk "Delete
+ * Selected" action).
+ */
+router.delete('/:slug/cart', requireCompanyAuth, async (req, res) => {
+    try {
+        const { product_ids } = sanitizeObject(req.body || {});
+        let query = supabaseAdmin.from('cart_items').delete().eq('company_id', req.company.id);
+        if (Array.isArray(product_ids) && product_ids.length) {
+            const validIds = product_ids.filter(isValidUUID);
+            if (!validIds.length) return res.status(400).json({ error: 'No valid product ids given.' });
+            query = query.in('product_id', validIds);
+        }
+        const { error } = await query;
+        if (error) throw error;
+        res.json({ cleared: true });
+    } catch (err) {
+        console.error('[Storefront] DELETE cart failed:', err);
+        res.status(500).json({ error: 'Could not clear your cart.' });
+    }
+});
+
 /**
  * POST /api/store/:slug/orders
  * Submit a new order

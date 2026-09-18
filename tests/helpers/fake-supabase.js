@@ -184,7 +184,14 @@ const KNOWN_COLUMNS = {
     admin_user_branches: new Set(['admin_user_id', 'branch_id', 'created_at']),
     admin_user_companies: new Set(['admin_user_id', 'company_id', 'created_at']),
     supplier_branches: new Set(['id', 'name', 'emails', 'city', 'is_active', 'created_at', 'updated_at']),
-    audit_log: new Set(['id', 'admin_id', 'action', 'entity_type', 'entity_id', 'details', 'ip_address', 'created_at'])
+    audit_log: new Set(['id', 'admin_id', 'action', 'entity_type', 'entity_id', 'details', 'ip_address', 'created_at']),
+    // Added by migration 043: the shared storefront cart, one row per
+    // (company_id, product_id) -- see that migration for why price is
+    // deliberately not a column here.
+    cart_items: new Set([
+        'id', 'company_id', 'product_id', 'quantity', 'added_by_user_id', 'added_by_name',
+        'created_at', 'updated_at'
+    ])
 };
 
 function assertKnownColumns(table, payload) {
@@ -427,6 +434,8 @@ function createFakeSupabase(seed = {}) {
         scheduler_runs: [], inventory_status: [], company_po_sequences: [],
         // Added by migration 041: multi-branch / multi-company staff assignment.
         admin_users: [], admin_user_branches: [], admin_user_companies: [],
+        // Added by migration 043: the shared storefront cart.
+        cart_items: [],
         ...clone(seed)
     };
 

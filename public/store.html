@@ -1091,13 +1091,14 @@
             document.getElementById('header-logo-divider').style.display = 'block';
         }
 
-        // Load cart from sessionStorage
-        const savedCart = sessionStorage.getItem('chc_cart');
-        if (savedCart) state.cart = JSON.parse(savedCart);
+        // Cart is shared with everyone else signed in to this account (see
+        // migrations/043_shared_cart.sql) -- loaded from the server, not a
+        // per-browser sessionStorage key.
         updateCartBadge();
 
         loadProducts();
         loadPromotions();
+        loadCart();
         loadTaxConfig();
         loadDeliveryFeeConfig();
         loadPoConfig();
@@ -1460,7 +1461,10 @@
         const tabBtn = document.querySelector(`[data-tab="${tab}"]`);
         if (tabBtn) tabBtn.classList.add('tab-active');
 
-        if (tab === 'cart') renderCart();
+        // Show what's cached immediately, then refresh -- a teammate signed
+        // into the same account may have changed the shared cart since this
+        // browser last saw it.
+        if (tab === 'cart') { renderCart(); loadCart(); }
         if (tab === 'orders') loadOrders();
         if (tab === 'reports') loadReports();
         if (tab === 'contact') loadContactNotes();
@@ -1790,6 +1794,9 @@
             const data = await resp.json();
             state.promotions = data.promotions || [];
             renderPromotions();
+            // The cart may have already loaded (and built its lines with no
+            // promo known yet) before this resolved -- reconcile now.
+            applyPromosToCart();
         } catch (err) {
             console.error('Failed to load promotions:', err);
         }
@@ -1858,8 +1865,13 @@
      * (a barcode or typed part number, possibly for a product never loaded
      * into state.products at all) both end here, so "the same item again
      * adds another" is one rule, not two implementations of it.
+     *
+     * Updates state.cart immediately so the click feels instant, then tells
+     * the server -- the cart is shared with anyone else signed in to this
+     * account, so the server call is the part that actually matters, not
+     * just a background sync of this browser's own copy.
      */
-    function addProductToCart(product, promo) {
+    async function addProductToCart(product, promo) {
         const existing = state.cart.find(c => c.product_id === product.id);
         if (existing) {
             existing.quantity++;
@@ -1873,10 +1885,33 @@
                 original_price: parseFloat(product.price),
                 price_on_request: product.price_on_request === true,
                 is_promo: !!promo,
-                quantity: 1
+                quantity: 1,
+                added_by_name: state.companyUser ? state.companyUser.name : null
             });
         }
-        saveCart();
+        updateCartBadge();
+        renderCart();
+
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/cart/items`, {
+                method: 'POST',
+                body: JSON.stringify({ product_id: product.id })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Add to cart failed');
+            const line = state.cart.find(c => c.product_id === product.id);
+            if (line) {
+                line.quantity = data.item.quantity;
+                line.added_by_name = data.item.added_by_name || null;
+            }
+        } catch (err) {
+            console.error('[Cart] add failed, re-syncing from server:', err);
+            loadCart();
+            return;
+        }
+        updateCartBadge();
+        renderProducts();
+        renderCart();
     }
 
     // ------------------------------------------------------------
@@ -2299,21 +2334,82 @@
         wedgeBuffer += e.key;
     });
 
-    function updateCart(productId, qty) {
+    async function updateCart(productId, qty) {
         if (qty <= 0) {
             state.cart = state.cart.filter(c => c.product_id !== productId);
         } else {
             const item = state.cart.find(c => c.product_id === productId);
             if (item) item.quantity = qty;
         }
-        saveCart();
+        updateCartBadge();
+        renderProducts();
+        renderCart();
+
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/cart/items/${productId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ quantity: qty })
+            });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                throw new Error(data.error || 'Cart update failed');
+            }
+        } catch (err) {
+            console.error('[Cart] update failed, re-syncing from server:', err);
+            loadCart();
+        }
+    }
+
+    /**
+     * The shared cart itself (see migrations/043_shared_cart.sql). Pulled
+     * fresh whenever it matters that it's current -- on login, on switching
+     * to the Cart tab, and right before checkout opens -- since a teammate
+     * signed in to the same account may have changed it in the meantime.
+     */
+    async function loadCart() {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/cart`);
+            if (!resp.ok) throw new Error('Cart load failed');
+            const data = await resp.json();
+            state.cart = (data.items || []).map(cartLineFromServer);
+        } catch (err) {
+            console.error('[Cart] load failed, keeping last known cart:', err);
+        }
+        updateCartBadge();
         renderProducts();
         renderCart();
     }
 
-    function saveCart() {
-        sessionStorage.setItem('chc_cart', JSON.stringify(state.cart));
-        updateCartBadge();
+    /** Server sends product_id/quantity/name/brand/sku/price -- this lays a
+     *  promotion (if any) on top, the same way addProductToCart does for a
+     *  freshly-added line. */
+    function cartLineFromServer(item) {
+        const promo = state.promotions.find(p => p.products?.id === item.product_id);
+        const original = parseFloat(item.price);
+        return {
+            product_id: item.product_id,
+            name: item.name,
+            brand: item.brand,
+            sku: item.sku,
+            price: promo ? parseFloat(promo.promo_price) : original,
+            original_price: original,
+            price_on_request: item.price_on_request === true,
+            is_promo: !!promo,
+            quantity: item.quantity,
+            added_by_name: item.added_by_name || null
+        };
+    }
+
+    /** Re-applies current promotions to whatever is already in state.cart --
+     *  called once promotions finish loading, in case the cart itself loaded
+     *  first and built its lines before any promo was known about. */
+    function applyPromosToCart() {
+        state.cart.forEach(item => {
+            const promo = state.promotions.find(p => p.products?.id === item.product_id);
+            item.is_promo = !!promo;
+            item.price = promo ? parseFloat(promo.promo_price) : item.original_price;
+        });
+        renderCart();
     }
 
     function updateCartBadge() {
@@ -2389,26 +2485,46 @@
 
     /** One-click removal from the trash icon on a single line -- no confirm,
      *  same as letting the "-" stepper reach zero did before. */
-    function removeCartItem(productId) {
+    async function removeCartItem(productId) {
         state.cart = state.cart.filter(c => c.product_id !== productId);
         cartSelection.delete(productId);
-        saveCart();
+        updateCartBadge();
         renderProducts();
         renderCart();
+
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/cart/items/${productId}`, { method: 'DELETE' });
+            if (!resp.ok) throw new Error('Remove failed');
+        } catch (err) {
+            console.error('[Cart] remove failed, re-syncing from server:', err);
+            loadCart();
+        }
     }
 
     /** The bulk action: everything checked, gone in one click. Confirmed
      *  first since, unlike the per-line trash icon, this can clear the
      *  whole cart in one shot. */
-    function deleteSelectedCartItems() {
+    async function deleteSelectedCartItems() {
         const count = cartSelection.size;
         if (count === 0) return;
         if (!confirm(`Remove ${count} item${count === 1 ? '' : 's'} from the cart?`)) return;
+        const productIds = Array.from(cartSelection);
         state.cart = state.cart.filter(c => !cartSelection.has(c.product_id));
         cartSelection.clear();
-        saveCart();
+        updateCartBadge();
         renderProducts();
         renderCart();
+
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/cart`, {
+                method: 'DELETE',
+                body: JSON.stringify({ product_ids: productIds })
+            });
+            if (!resp.ok) throw new Error('Bulk remove failed');
+        } catch (err) {
+            console.error('[Cart] bulk remove failed, re-syncing from server:', err);
+            loadCart();
+        }
     }
 
     function renderCart() {
@@ -2449,6 +2565,7 @@
                     <div class="flex-1 min-w-0">
                         <h4 class="font-semibold text-gray-800">${escapeHtml(item.name)}</h4>
                         <p class="text-sm text-gray-400">${escapeHtml(item.brand)} ${item.sku ? '| ' + escapeHtml(item.sku) : ''}</p>
+                        ${item.added_by_name ? `<p class="text-xs text-gray-400 mt-0.5"><i class="fas fa-user mr-1"></i>Added by ${escapeHtml(item.added_by_name)}</p>` : ''}
                         <div class="flex items-baseline gap-2 mt-1">
                             ${isPriceOnRequest(item)
                                 ? `<span class="text-sm font-semibold text-blue-700">${PRICE_ON_REQUEST_LABEL}</span>`
@@ -2536,6 +2653,10 @@
         }
         loadPaymentConfig();
         loadPoConfig();
+        // One more pull of the shared cart right before the review step —
+        // whoever is about to submit should see exactly what a teammate
+        // last left in it, not a stale copy from when this tab was opened.
+        loadCart();
         document.getElementById('checkout-name').focus();
     }
 
@@ -2817,10 +2938,17 @@
 
             document.getElementById('order-success-modal').classList.remove('hidden');
 
-            // Clear cart
+            // Clear the shared cart server-side -- the order already
+            // succeeded, so this is cleanup, not something worth blocking
+            // the confirmation on. Clearing it locally too means a teammate
+            // who is still looking at the same account gets it next time
+            // they're refreshed, not carried forward into their next order.
             state.cart = [];
-            saveCart();
+            updateCartBadge();
             renderCart();
+            apiFetch(`/store/${state.slug}/cart`, { method: 'DELETE' }).catch(err => {
+                console.error('[Cart] clear-after-order failed (order itself still succeeded):', err);
+            });
 
         } catch (err) {
             alert('Connection error. Please try again.');
