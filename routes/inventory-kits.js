@@ -755,13 +755,22 @@ function billingDocHtml({ company, header, lines }) {
     const total = lines.reduce((s, l) => s + Number(l.line_cost || 0), 0);
     const createdAt = header.created_at ? new Date(header.created_at) : new Date();
 
+    // What actually gets an adjuster to look at the attachment at all: CCC
+    // ONE (the dominant estimating platform) attaches a file to the whole
+    // workfile, not to one estimate line, and the insurer sees ONLY the text
+    // typed into that attachment's Notes field -- never the filename, never
+    // anything on the page itself. Without a line to paste there, this
+    // itemization sits in the file unseen. Short by design: that Notes field
+    // is a single line in every platform that has one.
+    const suggestedNote = `Non-included materials — ${header.kit_name} — itemized backup attached (RO ${header.job_ref})`;
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Materials itemization — ${escapeHtml(header.job_ref)}</title>
 <style>
-  :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#1d4ed8; }
+  :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#1d4ed8; --accent-bg:#eff6ff; }
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: var(--ink); max-width: 820px; margin: 0 auto; padding: 32px 24px 60px; }
   header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom: 2px solid var(--ink); padding-bottom: 16px; margin-bottom: 24px; }
@@ -769,21 +778,31 @@ function billingDocHtml({ company, header, lines }) {
   .sub { color: var(--muted); font-size: 12px; }
   .meta { text-align: right; font-size: 12px; color: var(--muted); line-height: 1.6; }
   .meta b { color: var(--ink); }
-  .fields { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 22px; }
+  .fields { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
   .field { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
   .field .k { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   .field .v { font-size: 13px; font-weight: 600; margin-top: 2px; }
+  .callout { background: var(--accent-bg); border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; margin-bottom: 22px; display:flex; align-items:center; justify-content:space-between; gap: 12px; flex-wrap: wrap; }
+  .callout .k { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #1d4ed8; font-weight: 700; }
+  .callout .v { font-size: 12.5px; font-family: ui-monospace, Menlo, monospace; color: var(--ink); margin-top: 2px; }
+  .callout button { background: #fff; border: 1px solid #bfdbfe; color: var(--accent); border-radius: 6px; padding: 5px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 18px; }
   th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1px solid var(--ink); padding: 6px 8px; }
   td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
   .mono { font-family: ui-monospace, Menlo, monospace; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   tfoot td { border-bottom: none; border-top: 2px solid var(--ink); font-weight: 700; padding-top: 10px; }
-  .note { font-size: 11.5px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 14px; margin-top: 8px; }
+  .procedure { margin: 20px 0 6px; }
+  .procedure label { display:block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
+  .procedure input { width: 100%; border: none; border-bottom: 1px solid var(--ink); padding: 4px 2px; font-size: 12.5px; font-family: inherit; color: var(--ink); }
+  .procedure input:focus { outline: none; border-bottom-color: var(--accent); }
+  .procedure .hint { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+  .note { font-size: 11.5px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 14px; margin-top: 18px; }
   .actions { margin-bottom: 18px; }
   button.primary { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
   @media print {
-    .actions { display: none; }
+    .actions, .callout button { display: none; }
+    .procedure input { border-bottom: 1px solid #000; }
     body { padding: 0 8px; }
     @page { margin: 14mm; }
   }
@@ -807,6 +826,13 @@ function billingDocHtml({ company, header, lines }) {
     <div class="field"><div class="k">Quantity applied</div><div class="v">${Number(header.multiplier) !== 1 ? `&times;${escapeHtml(String(header.multiplier))}` : '1'}</div></div>
     <div class="field"><div class="k">Line items</div><div class="v">${lines.length}</div></div>
   </div>
+  <div class="callout">
+    <div>
+      <div class="k">Paste into the estimate's line note</div>
+      <div class="v" id="suggested-note">${escapeHtml(suggestedNote)}</div>
+    </div>
+    <button type="button" onclick="copyNote(this)">Copy</button>
+  </div>
   <table>
     <thead>
       <tr><th>Brand</th><th>Part number</th><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Extended</th></tr>
@@ -816,11 +842,30 @@ function billingDocHtml({ company, header, lines }) {
       <tr><td colspan="5">Total</td><td class="num">${money(total)}</td></tr>
     </tfoot>
   </table>
+  <div class="procedure">
+    <label for="oem-ref">OEM repair procedure / position statement referenced</label>
+    <input type="text" id="oem-ref" placeholder="e.g. OEM body repair manual, panel replacement — structural adhesive bonding">
+    <div class="hint">What usually settles a materials line isn't this itemization on its own — it's this, paired with it.</div>
+  </div>
   <p class="note">
     This is an itemized breakdown of the materials applied to ${escapeHtml(header.job_ref)} under the "${escapeHtml(header.kit_name)}" kit,
     provided as backup documentation for the corresponding materials line on the shop's estimate or invoice.
     Figures reflect what was actually charged for this job and do not change if a part, brand or price is later updated in the catalogue.
   </p>
+  <script>
+    function copyNote(btn) {
+      var text = document.getElementById('suggested-note').textContent;
+      var done = function () { var t = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = t; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta); done();
+      }
+    }
+  </script>
 </body>
 </html>`;
 }
