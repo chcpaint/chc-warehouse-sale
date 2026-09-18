@@ -173,7 +173,18 @@ const KNOWN_COLUMNS = {
         'id', 'name', 'slug', 'custom_domain', 'logo_url', 'contact_email', 'contact_phone',
         'settings', 'stripe_account_id', 'stripe_connect_status', 'is_active', 'is_default',
         'created_at', 'updated_at'
-    ])
+    ]),
+    admin_users: new Set([
+        'id', 'email', 'password_hash', 'name', 'role', 'company_id', 'is_active', 'last_login',
+        'created_at', 'updated_at', 'branch_id', 'invite_token', 'invite_expires_at', 'created_by',
+        'must_change_password', 'is_branch_manager', 'distributor_id'
+    ]),
+    // Added by migration 041: multi-branch / multi-company staff assignment,
+    // generalizing the single admin_users.branch_id column above.
+    admin_user_branches: new Set(['admin_user_id', 'branch_id', 'created_at']),
+    admin_user_companies: new Set(['admin_user_id', 'company_id', 'created_at']),
+    supplier_branches: new Set(['id', 'name', 'emails', 'city', 'is_active', 'created_at', 'updated_at']),
+    audit_log: new Set(['id', 'admin_id', 'action', 'entity_type', 'entity_id', 'details', 'ip_address', 'created_at'])
 };
 
 function assertKnownColumns(table, payload) {
@@ -319,6 +330,8 @@ class Query {
                     out.repair_kits = clone((this.db.repair_kits || []).find(k => k.id === (r.kit_id || r.id))) || null;
                 } else if (rel === 'companies' && r.company_id) {
                     out.companies = clone((this.db.companies || []).find(c => c.id === r.company_id)) || null;
+                } else if (rel === 'supplier_branches' && r.branch_id) {
+                    out.supplier_branches = clone((this.db.supplier_branches || []).find(b => b.id === r.branch_id)) || null;
                 }
             }
             return out;
@@ -412,6 +425,8 @@ function createFakeSupabase(seed = {}) {
         kit_product_map: [], kit_consumptions: [], order_receipts: [],
         kit_item_alternatives: [], product_crossover_reference: [],
         scheduler_runs: [], inventory_status: [], company_po_sequences: [],
+        // Added by migration 041: multi-branch / multi-company staff assignment.
+        admin_users: [], admin_user_branches: [], admin_user_companies: [],
         ...clone(seed)
     };
 

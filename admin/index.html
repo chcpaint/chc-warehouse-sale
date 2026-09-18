@@ -1175,7 +1175,7 @@
 
                 <section id="section-admins" class="hidden fade-in">
                     <div class="flex justify-between items-center mb-4">
-                        <p class="text-gray-500">CHC staff accounts. Order-desk staff are limited to their branch's orders and nothing else.</p>
+                        <p class="text-gray-500">CHC staff accounts. Order-desk staff see orders only for the branches (and, if set, the specific customers) they're assigned to below.</p>
                         <button onclick="openAdminUserModal()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">
                             <i class="fas fa-user-plus mr-1"></i> Invite staff
                         </button>
@@ -1187,7 +1187,7 @@
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Name</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Email</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Role</th>
-                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Branch</th>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Access</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                                 </tr>
@@ -1843,13 +1843,38 @@
                         <option value="order_manager">Order manager (all branches, orders only)</option>
                         <option value="super_admin">Super admin (full access)</option>
                     </select></div>
-                <div id="new-admin-branch-wrap"><label class="block text-sm font-medium text-gray-700 mb-1">Branch *</label>
-                    <select id="new-admin-branch" class="w-full px-3 py-2 border rounded-lg">
-                        <option value="">Select a branch…</option>
-                    </select>
-                    <p class="text-xs text-gray-400 mt-1">Order-desk staff only see and work orders routed to this branch.</p></div>
+                <div id="new-admin-access-wrap">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Branches</label>
+                    <div id="new-admin-branch-list" class="border rounded-lg p-2 max-h-36 overflow-y-auto text-sm space-y-1"></div>
+                    <p class="text-xs text-gray-400 mt-1 mb-3">They'll see orders for every branch checked here. Leave all unchecked and they'll see nothing until you assign one — the account still saves, and the Users list will flag it.</p>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Customers <span class="font-normal text-gray-400">(optional)</span></label>
+                    <div id="new-admin-company-list" class="border rounded-lg p-2 max-h-36 overflow-y-auto text-sm space-y-1"></div>
+                    <p class="text-xs text-gray-400 mt-1">Leave unchecked to see every customer the checked branches serve. Check specific customers to narrow it down to just those, even within a branch that serves more.</p>
+                </div>
+                <p id="new-admin-manager-note" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">Order managers see every branch and every customer — there's nothing to assign.</p>
                 <p class="text-xs text-gray-500">No password is set here — the person gets an email invite to choose their own.</p>
                 <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Send invite</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Access Modal (which branches/customers an existing order-desk account can work from) -->
+    <div id="admin-access-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Edit access — <span id="access-admin-name"></span></h3>
+                <button onclick="hideModal('admin-access-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="saveAdminAccess(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Branches</label>
+                    <div id="access-branch-list" class="border rounded-lg p-2 max-h-40 overflow-y-auto text-sm space-y-1"></div>
+                    <p class="text-xs text-gray-400 mt-1 mb-3">They'll see orders for every branch checked here.</p>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Customers <span class="font-normal text-gray-400">(optional)</span></label>
+                    <div id="access-company-list" class="border rounded-lg p-2 max-h-40 overflow-y-auto text-sm space-y-1"></div>
+                    <p class="text-xs text-gray-400 mt-1">Leave unchecked to see every customer the checked branches serve.</p>
+                </div>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Save access</button>
             </form>
         </div>
     </div>
@@ -6186,9 +6211,19 @@
     const STATUS_BADGE = {
         active: 'bg-green-100 text-green-800',
         invited: 'bg-yellow-100 text-yellow-800',
+        invite_expired: 'bg-red-100 text-red-800',
+        password_reset_pending: 'bg-orange-100 text-orange-800',
         disabled: 'bg-gray-200 text-gray-600'
     };
+    const STATUS_LABEL = {
+        active: 'Active',
+        invited: 'Invited',
+        invite_expired: 'Invite expired',
+        password_reset_pending: 'Reset pending',
+        disabled: 'Disabled'
+    };
     let adminBranches = [];
+    let adminCompanies = [];
 
     async function loadAdminBranches() {
         if (adminBranches.length) return adminBranches;
@@ -6200,11 +6235,38 @@
         return adminBranches;
     }
 
+    // Every customer CHC has, for the optional narrowing picker — reuses the
+    // existing company-management listing rather than a second endpoint.
+    async function loadAdminCompanies() {
+        if (adminCompanies.length) return adminCompanies;
+        try {
+            const resp = await adminFetch('/companies');
+            const data = await resp.json();
+            adminCompanies = data.companies || [];
+        } catch (err) { console.error('Company load failed:', err); }
+        return adminCompanies;
+    }
+
+    /** Renders a scrollable checkbox list into `elId`, checking whatever ids are in `checked`. */
+    function renderCheckList(elId, items, checked) {
+        const checkedSet = new Set(checked || []);
+        const el = document.getElementById(elId);
+        el.innerHTML = items.length
+            ? items.map(it => `
+                <label class="flex items-center gap-2 py-0.5">
+                    <input type="checkbox" value="${it.id}" ${checkedSet.has(it.id) ? 'checked' : ''} class="rounded border-gray-300">
+                    <span>${esc(it.name)}</span>
+                </label>`).join('')
+            : '<p class="text-xs text-gray-400 py-1">None set up yet.</p>';
+    }
+    function checkedValues(elId) {
+        return [...document.querySelectorAll(`#${elId} input[type=checkbox]:checked`)].map(el => el.value);
+    }
+
     async function openAdminUserModal() {
-        await loadAdminBranches();
-        const sel = document.getElementById('new-admin-branch');
-        sel.innerHTML = '<option value="">Select a branch…</option>' +
-            adminBranches.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+        await Promise.all([loadAdminBranches(), loadAdminCompanies()]);
+        renderCheckList('new-admin-branch-list', adminBranches, []);
+        renderCheckList('new-admin-company-list', adminCompanies, []);
         document.getElementById('new-admin-name').value = '';
         document.getElementById('new-admin-email').value = '';
         document.getElementById('new-admin-role').value = 'order_desk';
@@ -6214,9 +6276,23 @@
 
     function onAdminRoleChange() {
         const role = document.getElementById('new-admin-role').value;
-        // Only a single-branch desk needs a branch. An order manager spans all of
-        // them, and giving one a branch would imply a limit that does not apply.
-        document.getElementById('new-admin-branch-wrap').style.display = role === 'order_desk' ? '' : 'none';
+        // Only order_desk has anything to assign — order_manager and
+        // super_admin already see everything the console offers, by role.
+        document.getElementById('new-admin-access-wrap').style.display = role === 'order_desk' ? '' : 'none';
+        document.getElementById('new-admin-manager-note').classList.toggle('hidden', role !== 'order_manager');
+    }
+
+    /** A short "who can they see" summary for the Access column — the whole point of this screen. */
+    function accessSummary(a) {
+        if (a.role === 'super_admin') return '<span class="text-gray-400">Full console access</span>';
+        if (a.role === 'order_manager') return '<span class="text-gray-500">All branches &amp; customers</span>';
+        if (a.role !== 'order_desk') return '<span class="text-gray-400">—</span>';
+        if (!a.branches.length) return '<span class="text-red-600 font-medium">No branches assigned</span>';
+        const branchChips = a.branches.map(b => `<span class="inline-block bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 text-xs mr-1 mb-1">${esc(b.name)}</span>`).join('');
+        const companyNote = a.companies.length
+            ? `<div class="text-xs text-gray-400 mt-0.5">Narrowed to ${a.companies.length} customer${a.companies.length === 1 ? '' : 's'}</div>`
+            : '<div class="text-xs text-gray-400 mt-0.5">Every customer these branches serve</div>';
+        return branchChips + companyNote;
     }
 
     async function loadAdminUsers() {
@@ -6228,11 +6304,16 @@
             tbody.innerHTML = (data.users || []).map(a => {
                 const isSelf = a.id === me;
                 const actions = [];
-                if (a.status === 'invited') actions.push(`<button onclick="resendAdminInvite('${a.id}')" class="text-blue-600 hover:text-blue-800" title="Resend invite"><i class="fas fa-paper-plane"></i></button>`);
-                if (a.status === 'active') actions.push(`<button onclick="resendAdminInvite('${a.id}', true)" class="text-orange-500 hover:text-orange-700" title="Send password-reset link"><i class="fas fa-key"></i></button>`);
+                if (a.role === 'order_desk') actions.push(`<button onclick="openAdminAccessModal('${a.id}', '${esc(a.name).replace(/'/g, "\\'")}')" class="text-blue-600 hover:text-blue-800" title="Edit which branches/customers they can work from"><i class="fas fa-map-marker-alt"></i></button>`);
+                if (a.status === 'invited' || a.status === 'invite_expired') actions.push(`<button onclick="resendAdminInvite('${a.id}')" class="text-blue-600 hover:text-blue-800" title="Resend invite"><i class="fas fa-paper-plane"></i></button>`);
+                if (a.status === 'active' || a.status === 'password_reset_pending') actions.push(`<button onclick="resendAdminInvite('${a.id}', true)" class="text-orange-500 hover:text-orange-700" title="Send password-reset link"><i class="fas fa-key"></i></button>`);
+                if (a.status !== 'invited') actions.push(`<button onclick="resetAdminPassword('${a.id}', '${esc(a.email)}')" class="text-purple-600 hover:text-purple-800" title="Set a password for them right now — for when they're on the phone and can't wait on an email"><i class="fas fa-unlock-keyhole"></i></button>`);
                 if (!isSelf) actions.push(a.is_active
                     ? `<button onclick="setAdminActive('${a.id}', false)" class="text-red-500 hover:text-red-700" title="Deactivate"><i class="fas fa-user-slash"></i></button>`
                     : `<button onclick="setAdminActive('${a.id}', true)" class="text-green-600 hover:text-green-800" title="Reactivate"><i class="fas fa-user-check"></i></button>`);
+                const warningIcon = a.warning
+                    ? `<i class="fas fa-triangle-exclamation text-amber-500 ml-1.5" title="${esc(a.warning)}"></i>`
+                    : '';
                 return `
                 <tr class="border-b hover:bg-gray-50">
                     <td class="px-4 py-3 font-medium">${esc(a.name)}${isSelf ? ' <span class="text-xs text-gray-400">(you)</span>' : ''}</td>
@@ -6247,8 +6328,8 @@
                                 ${a.is_branch_manager ? '<i class="fas fa-star mr-1"></i>Manager' : 'Manager?'}
                             </button>` : ''}
                     </td>
-                    <td class="px-4 py-3 text-sm text-gray-500">${esc(a.branch_name || '—')}</td>
-                    <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${STATUS_BADGE[a.status] || ''}">${a.status}</span></td>
+                    <td class="px-4 py-3 text-sm">${accessSummary(a)}</td>
+                    <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${STATUS_BADGE[a.status] || ''}">${STATUS_LABEL[a.status] || a.status}</span>${warningIcon}</td>
                     <td class="px-4 py-3 text-sm text-gray-400 space-x-3">${actions.join('') || '—'}</td>
                 </tr>`;
             }).join('') || '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No staff yet.</td></tr>';
@@ -6258,8 +6339,8 @@
     async function createAdminUser(e) {
         e.preventDefault();
         const role = document.getElementById('new-admin-role').value;
-        const branchId = document.getElementById('new-admin-branch').value || null;
-        if (role === 'order_desk' && !branchId) { alert('Please choose a branch for order-desk staff.'); return; }
+        const branchIds = role === 'order_desk' ? checkedValues('new-admin-branch-list') : [];
+        const companyIds = role === 'order_desk' ? checkedValues('new-admin-company-list') : [];
         try {
             const resp = await adminFetch('/users', {
                 method: 'POST',
@@ -6267,16 +6348,52 @@
                     name: document.getElementById('new-admin-name').value,
                     email: document.getElementById('new-admin-email').value,
                     role,
-                    branch_id: role === 'order_desk' ? branchId : null
+                    branch_ids: branchIds,
+                    company_ids: companyIds
                 })
             });
             const d = await resp.json();
             if (resp.ok) {
                 hideModal('admin-user-modal');
                 loadAdminUsers();
-                alert(d.email_sent ? `Invite sent to ${document.getElementById('new-admin-email').value}.` : 'User created, but the invite email could not be sent — use the resend button.');
+                const warned = role === 'order_desk' && !branchIds.length
+                    ? ' They aren’t assigned to a branch yet, so they won’t see any orders until you add one.'
+                    : '';
+                alert((d.email_sent ? `Invite sent to ${document.getElementById('new-admin-email').value}.` : 'User created, but the invite email could not be sent — use the resend button.') + warned);
             } else { alert(d.error); }
         } catch (err) { alert('Failed to invite staff.'); }
+    }
+
+    // ---- Edit access (branches/customers) for an existing order-desk account ----
+    let accessAdminId = null;
+    async function openAdminAccessModal(id, name) {
+        accessAdminId = id;
+        document.getElementById('access-admin-name').textContent = name;
+        await Promise.all([loadAdminBranches(), loadAdminCompanies()]);
+        try {
+            const resp = await adminFetch(`/users/${id}/assignments`);
+            const data = await resp.json();
+            renderCheckList('access-branch-list', adminBranches, data.branch_ids || []);
+            renderCheckList('access-company-list', adminCompanies, data.company_ids || []);
+            showModal('admin-access-modal');
+        } catch (err) { alert('Failed to load their current access.'); }
+    }
+
+    async function saveAdminAccess(e) {
+        e.preventDefault();
+        try {
+            const resp = await adminFetch(`/users/${accessAdminId}/assignments`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    branch_ids: checkedValues('access-branch-list'),
+                    company_ids: checkedValues('access-company-list')
+                })
+            });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to save access.'); return; }
+            hideModal('admin-access-modal');
+            loadAdminUsers();
+        } catch (err) { alert('Failed to save access.'); }
     }
 
     async function toggleBranchManager(id, makeManager) {
@@ -6293,6 +6410,7 @@
             const resp = await adminFetch(`/users/${id}/resend-invite`, { method: 'POST' });
             const d = await resp.json();
             alert(resp.ok ? (d.message || 'Invite sent.') : (d.error || 'Failed.'));
+            if (resp.ok) loadAdminUsers();
         } catch (err) { alert('Failed to send invite.'); }
     }
 
@@ -6453,6 +6571,7 @@
             const d = await resp.json();
             if (!resp.ok) { alert(d.error || 'Failed to reset password.'); return; }
             alert(d.message || 'Password reset.');
+            loadAdminUsers();
         } catch (err) { alert('Failed to reset password.'); }
     }
 
