@@ -1907,6 +1907,15 @@
         if (saved && savedUser) {
             admin.token = saved;
             admin.user = JSON.parse(savedUser);
+            // A reload (or reopening a bookmarked tab) before the forced
+            // change is done must land back on that screen, not the console
+            // -- the login/setup handlers already do this check, but this
+            // restore path was skipping straight to showAdminApp(), which
+            // then quietly failed to load anything (orders included): every
+            // API call still gets refused server-side (requirePasswordCurrent),
+            // but adminFetch never throws on a non-2xx response, so the
+            // screen just looked empty instead of explaining why.
+            if (admin.user.must_change_password) { showForcedPasswordChange(); return; }
             showAdminApp();
         }
     });
@@ -2099,6 +2108,26 @@
                 'Authorization': `Bearer ${admin.token}`,
                 ...(options.headers || {})
             }
+        }).then(async resp => {
+            // Belt-and-suspenders alongside the two places that already check
+            // must_change_password at login/restore time: adminFetch never
+            // throws on a non-2xx response, and most callers only look at the
+            // fields they expect back, so a 403 here could otherwise fail
+            // silently -- a screen with nothing on it and no clue why. Peeking
+            // at a clone (so the caller still gets an unread body to parse)
+            // catches every such case in one place, including the flag
+            // flipping mid-session on a tab left open.
+            if (resp.status === 403 && admin.user && !admin.user.must_change_password) {
+                try {
+                    const peek = await resp.clone().json();
+                    if (peek && peek.must_change_password) {
+                        admin.user.must_change_password = true;
+                        sessionStorage.setItem('chc_admin_user', JSON.stringify(admin.user));
+                        showForcedPasswordChange();
+                    }
+                } catch (_) { /* not JSON -- not this case */ }
+            }
+            return resp;
         });
     }
 
