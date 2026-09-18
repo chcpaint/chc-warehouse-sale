@@ -6,6 +6,41 @@ function validEmails(list) {
 }
 
 /**
+ * Every active order_desk staff email assigned to a branch -- legacy
+ * admin_users.branch_id UNION admin_user_branches (migration 041) -- so
+ * assigning someone to a branch in the Users admin screen puts them on that
+ * branch's order emails automatically, without touching supplier_branches.emails
+ * (which stays exactly what it always was: a manually-curated list, for a
+ * shared inbox or a person who isn't a console user at all). A disabled
+ * account's email is dropped even if the assignment row is still there --
+ * nobody should keep getting order mail after being deactivated.
+ */
+async function branchStaffEmails(branchId) {
+    if (!branchId) return [];
+    const { data: assigned } = await supabaseAdmin
+        .from('admin_user_branches')
+        .select('admin_user_id')
+        .eq('branch_id', branchId);
+    const assignedIds = (assigned || []).map(r => r.admin_user_id);
+
+    // Legacy single-branch accounts (branch_id set, no admin_user_branches
+    // row yet -- shouldn't happen after migration 041's backfill, but a
+    // manual DB edit could still produce one) are still honoured here.
+    const { data: legacy } = await supabaseAdmin
+        .from('admin_users')
+        .select('id')
+        .eq('branch_id', branchId);
+    const ids = [...new Set([...assignedIds, ...(legacy || []).map(r => r.id)])];
+    if (!ids.length) return [];
+
+    const { data: staff } = await supabaseAdmin
+        .from('admin_users')
+        .select('email, is_active')
+        .in('id', ids);
+    return (staff || []).filter(s => s.is_active).map(s => s.email);
+}
+
+/**
  * Resolve who should be emailed for an order and who replies go to.
  * TO: the person who placed the order (order.contact_email) + the company's
  *     contact email (if set) + the company's manager/general group (optional,
@@ -40,7 +75,13 @@ async function resolveOrderRecipients(order) {
             if (loc.supplier_branch_id) {
                 const { data: branch } = await supabaseAdmin
                     .from('supplier_branches').select('emails, is_active').eq('id', loc.supplier_branch_id).single();
-                if (branch && branch.is_active !== false && Array.isArray(branch.emails)) branchEmails = branch.emails;
+                if (branch && branch.is_active !== false) {
+                    // Manually-curated branch list UNION whichever active staff are
+                    // now assigned to this branch in the Users admin screen -- see
+                    // branchStaffEmails above.
+                    const staffEmails = await branchStaffEmails(loc.supplier_branch_id);
+                    branchEmails = [...(Array.isArray(branch.emails) ? branch.emails : []), ...staffEmails];
+                }
             }
         }
     }
@@ -58,4 +99,4 @@ async function resolveOrderRecipients(order) {
     return { to, replyTo, staffTo, customerTo };
 }
 
-module.exports = { resolveOrderRecipients, validEmails };
+module.exports = { resolveOrderRecipients, validEmails, branchStaffEmails };

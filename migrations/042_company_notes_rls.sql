@@ -1,0 +1,13 @@
+-- 042_company_notes_rls.sql
+--
+-- company_notes (migration 039) was created without row level security,
+-- unlike every other table added since -- supplier_branches, company_users,
+-- admin_user_branches/admin_user_companies (migration 041) all enable it
+-- "service-role only" as a matter of course. The app only ever reaches this
+-- table through the Express API's service-role client, so this closes a real
+-- gap (anyone with the anon key could otherwise read or write every
+-- customer's contact notes directly against Supabase, bypassing every access
+-- check in routes/contact-notes-admin.js and companyInScope) with no change
+-- in application behaviour -- there are no policies to write because nothing
+-- legitimate reaches this table any other way.
+alter table public.company_notes enable row level security;

@@ -9,7 +9,7 @@ const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/uplo
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed, sendOrderStatusUpdate, sendOrderNoteAdded } = require('../utils/email');
-const { orderScopeIds, applyOrderScope, orderInScope, branchLocationIds } = require('../utils/order-scope');
+const { orderScopeIds, applyOrderScope, orderInScope, staffLocationIds } = require('../utils/order-scope');
 const { redactSecrets } = require('../utils/audit');
 const { ALL_STATUSES, statusOptionsFor, labelFor, isSimplified } = require('../utils/order-status');
 const { hidePricingEnabled } = require('../utils/pricing-visibility');
@@ -67,8 +67,10 @@ router.get('/whoami', (req, res) => {
  * in one list, newest first — so a message doesn't only exist if a staff
  * member happens to open that one company's record. Scoped the same way as
  * everything else: super_admin and order_manager (head office) see every
- * company; order_desk sees only companies with a location its branch
- * serves; a company-scoped admin sees only its own company.
+ * company; order_desk sees only companies with a location one of its
+ * assigned branches serves (narrowed further if it also has a customer
+ * assignment — see utils/order-scope.js); a company-scoped admin sees only
+ * its own company.
  */
 router.get('/notes/inbox', async (req, res) => {
     try {
@@ -80,7 +82,7 @@ router.get('/notes/inbox', async (req, res) => {
 
         const role = req.admin.role;
         if (role === 'order_desk') {
-            const locIds = await branchLocationIds(req.admin.branch_id);
+            const locIds = await staffLocationIds(req.admin);
             if (!locIds.length) return res.json({ notes: [], unread_count: 0 });
             const { data: locs } = await supabaseAdmin
                 .from('company_locations').select('company_id').in('id', locIds);
