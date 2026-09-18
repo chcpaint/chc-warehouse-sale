@@ -43,7 +43,7 @@ async function loadKit(kitId) {
     if (!isValidUUID(kitId)) return null;
     const { data } = await supabaseAdmin
         .from('repair_kits')
-        .select('id, name, description, source, sort_order, is_active, company_id, updated_at')
+        .select('id, name, description, source, sort_order, is_active, company_id, parent_kit_id, updated_at')
         .eq('id', kitId).maybeSingle();
     return data || null;
 }
@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
     try {
         const [{ data: kits }, { data: items }, { data: access }, { data: companies }] = await Promise.all([
             supabaseAdmin.from('repair_kits')
-                .select('id, name, description, source, sort_order, is_active, company_id, updated_at')
+                .select('id, name, description, source, sort_order, is_active, company_id, parent_kit_id, updated_at')
                 .order('company_id', { ascending: true, nullsFirst: true })
                 .order('name', { ascending: true }),
             supabaseAdmin.from('kit_items').select('id, kit_id'),
@@ -77,6 +77,9 @@ router.get('/', async (req, res) => {
         for (const a of access || []) enabledCountByKit.set(a.kit_id, (enabledCountByKit.get(a.kit_id) || 0) + 1);
 
         const ownerName = new Map((companies || []).map(c => [c.id, c.name]));
+        // Every kit's own name, so a variant can show "Variant of X" without a
+        // second round trip per row.
+        const nameById = new Map((kits || []).map(k => [k.id, k.name]));
 
         const out = (kits || []).map(k => ({
             id: k.id,
@@ -87,6 +90,8 @@ router.get('/', async (req, res) => {
             is_master: k.company_id === null,
             owner_company_id: k.company_id,
             owner_company_name: k.company_id ? (ownerName.get(k.company_id) || null) : null,
+            parent_kit_id: k.parent_kit_id || null,
+            parent_kit_name: k.parent_kit_id ? (nameById.get(k.parent_kit_id) || null) : null,
             line_count: lineCountByKit.get(k.id) || 0,
             companies_enabled: k.company_id === null ? (enabledCountByKit.get(k.id) || 0) : null,
             updated_at: k.updated_at
@@ -232,9 +237,16 @@ router.get('/:kitId', async (req, res) => {
             };
         });
 
+        let parentKitName = null;
+        if (kit.parent_kit_id) {
+            const { data: parent } = await supabaseAdmin
+                .from('repair_kits').select('name').eq('id', kit.parent_kit_id).maybeSingle();
+            parentKitName = parent?.name || null;
+        }
+
         const pricedLines = lines.filter(l => l.ref_line_total !== null);
         res.json({
-            kit: { ...kit, is_master: kit.company_id === null },
+            kit: { ...kit, is_master: kit.company_id === null, parent_kit_name: parentKitName },
             lines,
             reference_total: pricedLines.length === lines.length && lines.length > 0
                 ? Number(pricedLines.reduce((s, l) => s + l.ref_line_total, 0).toFixed(4))
@@ -303,6 +315,182 @@ router.delete('/:kitId', async (req, res) => {
     } catch (err) {
         console.error('Master kit delete error:', err);
         res.status(500).json({ error: 'Failed to delete that kit.' });
+    }
+});
+
+/**
+ * POST /kits/:kitId/clone
+ * Body: { name, description?, substitutions: [{ kit_item_id, alternative_id }] }
+ *
+ * "Save as a new kit" — a shop only stocking 3M/MMM adhesives wants the same
+ * Pillar Repair kit, same steps, same component count, priced and billed at
+ * 3M part numbers instead of Fusor's. This builds exactly that: a brand-new
+ * CHC master kit (parent_kit_id points back here for provenance only — see
+ * migration 044), one line per source line, with `substitutions` swapping in
+ * an already-attached brand alternative on whichever lines change and
+ * everything else — quantity, unit, unresubstituted lines — copied through
+ * unchanged.
+ *
+ * The ORIGINAL kit is never touched. Neither are its customers: the new kit
+ * starts with nobody assigned, the same as any freshly created master kit —
+ * CHC grants it to the shops that asked for it via the existing
+ * customer-access screen, exactly like any other master kit.
+ *
+ * A substituted line is flagged needs_review, the same signal an imported
+ * kit line gets: it is a part number nobody has mapped for any company yet,
+ * and the mapping screen is where a person confirms it before it is billed.
+ */
+router.post('/:kitId/clone', async (req, res) => {
+    let newKitId = null;
+    try {
+        const kit = await loadKit(req.params.kitId);
+        if (!kit) return res.status(404).json({ error: 'Kit not found.' });
+
+        const name = text(req.body?.name, 120);
+        if (!name) return res.status(400).json({ error: 'A name is required for the new kit.' });
+
+        const { data: items } = await supabaseAdmin
+            .from('kit_items')
+            .select('id, sku, quantity, unit, sort_order, needs_review, ref_unit_price, ref_line_total, ref_source')
+            .eq('kit_id', kit.id)
+            .order('sort_order', { ascending: true });
+        const sourceItems = items || [];
+        if (sourceItems.length === 0) return res.status(400).json({ error: 'That kit has no lines to copy.' });
+
+        const { data: alternatives } = await supabaseAdmin
+            .from('kit_item_alternatives')
+            .select('id, kit_item_id, brand, brand_part_number, brand_name, speed, size, notes, is_active, sort_order, crossover_reference_id')
+            .in('kit_item_id', sourceItems.map(i => i.id))
+            .eq('is_active', true);
+        const altsByItem = new Map();
+        for (const a of alternatives || []) {
+            if (!altsByItem.has(a.kit_item_id)) altsByItem.set(a.kit_item_id, []);
+            altsByItem.get(a.kit_item_id).push(a);
+        }
+
+        // Which line gets swapped, and to which of ITS OWN already-attached
+        // alternatives — never an id belonging to some other line, the same
+        // tenancy discipline kit_product_map enforces for a company's choice.
+        const rawSubs = Array.isArray(req.body?.substitutions) ? req.body.substitutions : [];
+        const subByItem = new Map();
+        for (const raw of rawSubs) {
+            if (!raw || !isValidUUID(raw.kit_item_id) || !raw.alternative_id) continue;
+            if (!isValidUUID(raw.alternative_id)) {
+                return res.status(400).json({ error: 'Invalid alternative id in substitutions.' });
+            }
+            const candidates = altsByItem.get(raw.kit_item_id) || [];
+            const alt = candidates.find(a => a.id === raw.alternative_id);
+            if (!alt) {
+                return res.status(400).json({ error: 'One of the chosen alternatives does not belong to that line.' });
+            }
+            subByItem.set(raw.kit_item_id, alt);
+        }
+
+        const { data: newKit, error: kitError } = await supabaseAdmin
+            .from('repair_kits')
+            .insert({
+                company_id: null,
+                name,
+                description: text(req.body?.description, 500) || `Variant of ${kit.name}.`,
+                source: 'chc',
+                is_active: true,
+                sort_order: Number(req.body?.sort_order) || 500,
+                parent_kit_id: kit.id
+            })
+            .select('id, name')
+            .single();
+        if (kitError) throw kitError;
+        newKitId = newKit.id;
+
+        // Inserted one at a time, in source order, so each new line's id is
+        // read straight back from its own insert — never inferred from
+        // sort_order, which the per-line editor (PUT /lines/:lineId) lets an
+        // admin set to any value and is not unique-constrained.
+        const newAlternativeRows = [];
+        let insertedCount = 0;
+        for (const item of sourceItems) {
+            const sub = subByItem.get(item.id);
+
+            const row = sub
+                // Substituted: the new line IS the alternative's part number
+                // now. Quantity and unit stay exactly as the master kit
+                // specifies — this is a brand swap, not a different repair.
+                // There is no reference price for a brand nobody has priced
+                // yet, and the line needs a person to map it for the first
+                // company that uses it.
+                ? {
+                    kit_id: newKit.id, sku: sub.brand_part_number,
+                    quantity: item.quantity, unit: item.unit, sort_order: item.sort_order,
+                    needs_review: true, ref_unit_price: null, ref_line_total: null, ref_source: null
+                }
+                : {
+                    kit_id: newKit.id, sku: item.sku,
+                    quantity: item.quantity, unit: item.unit, sort_order: item.sort_order,
+                    needs_review: item.needs_review,
+                    ref_unit_price: item.ref_unit_price, ref_line_total: item.ref_line_total, ref_source: item.ref_source
+                };
+
+            const { data: newItem, error: lineError } = await supabaseAdmin
+                .from('kit_items').insert(row).select('id').single();
+            if (lineError) throw lineError;
+            insertedCount += 1;
+
+            const existingAlts = altsByItem.get(item.id) || [];
+
+            if (sub) {
+                // Carry the line's OTHER alternatives forward untouched, so the
+                // new kit can still be re-cloned or re-mapped to a third brand
+                // later, and attach the kit's original part as an alternative
+                // on the new line — the way back, if a shop changes its mind.
+                for (const other of existingAlts) {
+                    if (other.id === sub.id) continue;
+                    newAlternativeRows.push({
+                        kit_item_id: newItem.id,
+                        brand: other.brand, brand_part_number: other.brand_part_number,
+                        brand_name: other.brand_name, speed: other.speed, size: other.size,
+                        notes: other.notes, crossover_reference_id: other.crossover_reference_id,
+                        sort_order: other.sort_order, created_by: req.admin.id
+                    });
+                }
+                newAlternativeRows.push({
+                    kit_item_id: newItem.id,
+                    brand: kit.source === 'chc' ? 'Original' : 'Original line',
+                    brand_part_number: item.sku,
+                    brand_name: null, speed: null, size: null,
+                    notes: `The part this line used on ${kit.name}, before this variant.`,
+                    crossover_reference_id: null,
+                    sort_order: 0, created_by: req.admin.id
+                });
+            } else {
+                for (const other of existingAlts) {
+                    newAlternativeRows.push({
+                        kit_item_id: newItem.id,
+                        brand: other.brand, brand_part_number: other.brand_part_number,
+                        brand_name: other.brand_name, speed: other.speed, size: other.size,
+                        notes: other.notes, crossover_reference_id: other.crossover_reference_id,
+                        sort_order: other.sort_order, created_by: req.admin.id
+                    });
+                }
+            }
+        }
+        if (newAlternativeRows.length) {
+            const { error: altError } = await supabaseAdmin.from('kit_item_alternatives').insert(newAlternativeRows);
+            if (altError) throw altError;
+        }
+
+        await logAction(req.admin.id, 'master_kit_cloned', 'kit', newKit.id, {
+            kit: newKit.name, cloned_from: kit.id, cloned_from_name: kit.name,
+            lines: insertedCount, substitutions: subByItem.size
+        }, req.ip);
+
+        res.status(201).json({
+            message: `${newKit.name} created from ${kit.name}.`,
+            kit: { id: newKit.id, name: newKit.name, line_count: insertedCount, parent_kit_id: kit.id }
+        });
+    } catch (err) {
+        console.error('Master kit clone error:', err);
+        if (newKitId) { try { await supabaseAdmin.from('repair_kits').delete().eq('id', newKitId); } catch (_) { /* noop */ } }
+        res.status(500).json({ error: 'Failed to create that kit variant.' });
     }
 });
 

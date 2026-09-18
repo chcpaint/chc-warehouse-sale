@@ -613,6 +613,7 @@
                                             <p id="kt-detail-meta" class="text-xs text-gray-500 mt-1"></p>
                                         </div>
                                         <div class="flex gap-3 text-sm">
+                                            <button onclick="ktToggleCloneForm()" class="text-indigo-600 hover:text-indigo-800 font-semibold"><i class="fas fa-code-branch mr-1"></i>Save as new kit</button>
                                             <button onclick="ktToggleEditKit()" class="text-blue-600 hover:text-blue-800 font-semibold"><i class="fas fa-pen mr-1"></i>Edit</button>
                                             <button onclick="ktDeleteKit()" class="text-red-500 hover:text-red-700 font-semibold"><i class="fas fa-trash mr-1"></i>Delete</button>
                                         </div>
@@ -628,6 +629,23 @@
                                         <div class="flex items-center gap-3">
                                             <button onclick="ktSaveKit()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">Save</button>
                                             <button onclick="ktToggleEditKit()" class="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                                        </div>
+                                    </div>
+                                    <div id="kt-clone-kit-form" class="hidden mt-4 pt-4 border-t">
+                                        <p class="text-xs text-gray-500 mb-3">
+                                            Builds a brand-new master kit with the same lines and quantities as <span id="kt-clone-source-name" class="font-semibold"></span> —
+                                            pick a brand alternative for any line that should change, and leave the rest on "Keep original".
+                                            The original kit and everyone already using it are untouched. The new kit starts with no customers assigned.
+                                        </p>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                            <input id="kt-clone-name" placeholder="New kit name (e.g. Pillar Repair — 3M/MMM)" class="border rounded-lg px-3 py-2 text-sm">
+                                            <input id="kt-clone-description" placeholder="Description (optional)" class="border rounded-lg px-3 py-2 text-sm">
+                                        </div>
+                                        <div id="kt-clone-lines" class="space-y-2 mb-3"></div>
+                                        <div class="flex items-center gap-3">
+                                            <button onclick="ktCloneKit()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Create variant</button>
+                                            <button onclick="ktToggleCloneForm()" class="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                                            <span id="kt-clone-error" class="text-sm text-red-600"></span>
                                         </div>
                                     </div>
                                 </div>
@@ -3929,6 +3947,7 @@
                     ${k.is_master ? '<span class="text-gray-500">CHC master</span>' : `<span class="text-indigo-600">${esc(k.owner_company_name || 'Company kit')}</span>`}
                     &middot; ${k.line_count} line${k.line_count === 1 ? '' : 's'}
                     ${k.is_master ? ` &middot; ${k.companies_enabled} customer${k.companies_enabled === 1 ? '' : 's'} on` : ''}
+                    ${k.parent_kit_name ? ` &middot; <span class="text-indigo-500">variant of ${esc(k.parent_kit_name)}</span>` : ''}
                 </p>
             </button>
         `).join('');
@@ -3985,8 +4004,9 @@
 
             document.getElementById('kt-detail-name').textContent = data.kit.name;
             document.getElementById('kt-detail-meta').textContent =
-                `${data.kit.is_master ? 'CHC master kit' : 'Company kit'}${data.kit.description ? ' — ' + data.kit.description : ''}${data.kit.source ? ' · source: ' + data.kit.source : ''}`;
+                `${data.kit.is_master ? 'CHC master kit' : 'Company kit'}${data.kit.parent_kit_name ? ' · variant of ' + data.kit.parent_kit_name : ''}${data.kit.description ? ' — ' + data.kit.description : ''}${data.kit.source ? ' · source: ' + data.kit.source : ''}`;
 
+            document.getElementById('kt-clone-kit-form').classList.add('hidden');
             ktRenderLines();
 
             const accessPanel = document.getElementById('kt-access-panel');
@@ -4213,6 +4233,83 @@
             await ktSelectKit(ktState.selectedKitId);
         } catch (err) {
             alert('Failed to save that kit.');
+        }
+    }
+
+    // ------------------------------------------------------------
+    // "Save as new kit" — brand-substituted variants (routes/inventory-
+    // kits-master.js POST /kits/:kitId/clone). Every line keeps its own
+    // quantity and unit; a line only changes if one of ITS OWN attached
+    // alternatives is picked from the dropdown, exactly the brand list
+    // ktRenderLines already builds above.
+    // ------------------------------------------------------------
+
+    function ktToggleCloneForm() {
+        const form = document.getElementById('kt-clone-kit-form');
+        form.classList.toggle('hidden');
+        document.getElementById('kt-edit-kit-form').classList.add('hidden');
+        if (!form.classList.contains('hidden')) {
+            document.getElementById('kt-clone-source-name').textContent = ktState.detail.kit.name;
+            document.getElementById('kt-clone-name').value = '';
+            document.getElementById('kt-clone-description').value = '';
+            document.getElementById('kt-clone-error').textContent = '';
+            ktRenderCloneForm();
+        }
+    }
+
+    function ktRenderCloneForm() {
+        const host = document.getElementById('kt-clone-lines');
+        const lines = ktState.detail?.lines || [];
+        host.innerHTML = lines.map(line => {
+            const options = (line.alternatives || []).map(a =>
+                `<option value="${a.id}">${esc(a.brand)} ${esc(a.brand_part_number)}${a.brand_name ? ' — ' + esc(a.brand_name) : ''}</option>`
+            ).join('');
+            return `
+            <div class="flex flex-wrap items-center gap-3 border rounded-lg px-3 py-2">
+                <div class="w-40 shrink-0">
+                    <p class="font-mono text-xs font-semibold text-gray-800">${esc(line.sku)}</p>
+                    <p class="text-xs text-gray-400">${line.quantity} ${esc(line.unit)}</p>
+                </div>
+                ${options
+                    ? `<select id="kt-clone-line-${line.id}" class="border rounded-lg px-2 py-1.5 text-sm flex-1 min-w-[220px] bg-white">
+                          <option value="">Keep original — ${esc(line.sku)}</option>
+                          ${options}
+                       </select>`
+                    : `<span class="text-xs text-gray-400 flex-1">No brand alternatives attached to this line yet — it will be copied as-is.</span>`}
+            </div>`;
+        }).join('');
+    }
+
+    async function ktCloneKit() {
+        const errEl = document.getElementById('kt-clone-error');
+        errEl.textContent = '';
+        const name = document.getElementById('kt-clone-name').value.trim();
+        if (!name) { errEl.textContent = 'A name is required for the new kit.'; return; }
+
+        const lines = ktState.detail?.lines || [];
+        const substitutions = [];
+        for (const line of lines) {
+            const select = document.getElementById(`kt-clone-line-${line.id}`);
+            if (select && select.value) substitutions.push({ kit_item_id: line.id, alternative_id: select.value });
+        }
+
+        try {
+            const resp = await adminFetch(`/kits/${ktState.selectedKitId}/clone`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    description: document.getElementById('kt-clone-description').value.trim(),
+                    substitutions
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { errEl.textContent = data.error || 'Failed to create that kit variant.'; return; }
+
+            ktToggleCloneForm();
+            await ktLoadKits();
+            await ktSelectKit(data.kit.id);
+        } catch (err) {
+            errEl.textContent = 'Failed to create that kit variant.';
         }
     }
 

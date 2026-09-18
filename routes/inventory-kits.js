@@ -118,7 +118,7 @@ async function resolveKitLines(companyId, kitId) {
     if (productIds.length) {
         const { data: rows } = await supabaseAdmin
             .from('products')
-            .select('id, name, sku, price, category, is_active')
+            .select('id, name, sku, brand, price, category, is_active')
             .eq('company_id', companyId)          // tenancy re-checked, never assumed
             .in('id', productIds);
         for (const p of rows || []) products.set(p.id, p);
@@ -183,6 +183,7 @@ async function resolveKitLines(companyId, kitId) {
             product_id: product.id,
             sku: product.sku,
             name: product.name,
+            brand: product.brand || null,
             category: product.category || null,
             unit: item.unit || 'each',
             quantity,
@@ -389,6 +390,75 @@ router.get('/consumptions/:id', async (req, res) => {
     }
 });
 
+/**
+ * GET /kits/consumptions/:id/billing-doc
+ *
+ * A materials itemization for one job, formatted the way collision-repair
+ * billing already works: the estimate/invoice submitted to the insurer
+ * carries one line for the materials, and a shop backs that line with an
+ * itemized breakdown — vendor, part number, description, quantity, unit
+ * cost, extended cost — the same "cost itemize and attach" practice bodies
+ * shops are advised to follow for anything beyond a flat paint-materials
+ * allowance. This is that attachment: printable, or Save-as-PDF from the
+ * browser's print dialog, ready to go alongside the shop's own quote or
+ * invoice for the repair order named on it.
+ *
+ * Self-contained HTML with a print stylesheet, the same convention
+ * routes/inventory-labels.js uses for its print sheets, rather than a
+ * generated PDF: no library to keep current, and the browser's own
+ * @page/print handling is easier to get right than reproducing it.
+ *
+ * Falls back to stock_movements for a consumption written before migration
+ * 044 added lines_snapshot — every historical job still produces a document,
+ * just without a per-line brand (movements do not carry one).
+ */
+router.get('/consumptions/:id/billing-doc', async (req, res) => {
+    try {
+        if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid consumption id.' });
+
+        const { data: header } = await supabaseAdmin
+            .from('kit_consumptions')
+            .select('*')
+            .eq('id', req.params.id)
+            .eq('company_id', req.company.id)
+            .maybeSingle();
+        if (!header) return res.status(404).json({ error: 'Consumption not found.' });
+
+        let lines = Array.isArray(header.lines_snapshot) ? header.lines_snapshot : null;
+
+        if (!lines) {
+            const { data: movements } = await supabaseAdmin
+                .from('stock_movements')
+                .select('product_id, qty_change, products(sku, name, brand, price)')
+                .eq('company_id', req.company.id)
+                .eq('source_doc_type', 'kit_consume')
+                .eq('source_doc_id', header.id)
+                .order('created_at', { ascending: true });
+
+            lines = (movements || []).map(m => {
+                const qty = Math.abs(Number(m.qty_change || 0));
+                const price = Number(m.products?.price ?? 0);
+                return {
+                    kit_sku: null,
+                    sku: m.products?.sku || null,
+                    brand: m.products?.brand || null,
+                    name: m.products?.name || 'Item',
+                    unit: 'each',
+                    quantity: qty,
+                    unit_price: price,
+                    line_cost: round4(qty * price)
+                };
+            });
+        }
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(billingDocHtml({ company: req.company, header, lines }));
+    } catch (err) {
+        console.error('Kit billing document error:', err);
+        res.status(500).json({ error: 'Failed to build that document.' });
+    }
+});
+
 // ============================================================
 // WRITE
 // ============================================================
@@ -494,6 +564,23 @@ router.post('/:kitId/consume', async (req, res) => {
 
         const totalCost = round4(planned.reduce((s, l) => s + l.quantity * l.unit_price, 0));
 
+        // What was actually billed, one row per line, frozen at this exact
+        // moment — see migration 044. A product's name, brand or price can all
+        // change later, and a company can re-map this same kit line to a
+        // different product tomorrow; none of that may reach back and change
+        // what a billing document for THIS job shows.
+        const linesSnapshot = planned.map(l => ({
+            kit_sku: l.kit_sku,
+            sku: l.sku,
+            brand: l.brand || null,
+            name: l.name,
+            category: l.category || null,
+            unit: l.unit,
+            quantity: l.quantity,
+            unit_price: l.unit_price,
+            line_cost: round4(l.quantity * l.unit_price)
+        }));
+
         const { data: created, error: headerError } = await supabaseAdmin
             .from('kit_consumptions')
             .insert({
@@ -506,7 +593,8 @@ router.post('/:kitId/consume', async (req, res) => {
                 line_count: planned.length,
                 total_cost: totalCost,
                 actor_label: actor,
-                actor_type: 'store'
+                actor_type: 'store',
+                lines_snapshot: linesSnapshot
             })
             .select('id, created_at')
             .single();
@@ -643,6 +731,115 @@ function blockedReason({ priced, unresolved, blockingLines, allowNegative }) {
     return null;
 }
 
+/**
+ * The billing backup document itself — one job, one kit, itemized.
+ *
+ * Deliberately modelled on a vendor materials invoice, not on the shop's own
+ * order invoice: an insurance estimator reviewing a "Paint & Materials" or
+ * "Bonding/Adhesive Kit" line on a CCC ONE / Mitchell / Audatex estimate is
+ * looking for exactly this shape — brand, part number, description, quantity,
+ * unit cost, extended cost, total — as the backup for that one line, the same
+ * way a sublet or towing charge is backed by that vendor's own invoice.
+ */
+function billingDocHtml({ company, header, lines }) {
+    const rows = lines.map(l => `
+        <tr>
+          <td>${escapeHtml(l.brand || '—')}</td>
+          <td class="mono">${escapeHtml(l.sku || l.kit_sku || '—')}</td>
+          <td>${escapeHtml(l.name || '')}</td>
+          <td class="num">${money2(l.quantity)} ${escapeHtml(l.unit || 'each')}</td>
+          <td class="num">${money(l.unit_price)}</td>
+          <td class="num">${money(l.line_cost)}</td>
+        </tr>`).join('');
+
+    const total = lines.reduce((s, l) => s + Number(l.line_cost || 0), 0);
+    const createdAt = header.created_at ? new Date(header.created_at) : new Date();
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Materials itemization — ${escapeHtml(header.job_ref)}</title>
+<style>
+  :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#1d4ed8; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: var(--ink); max-width: 820px; margin: 0 auto; padding: 32px 24px 60px; }
+  header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom: 2px solid var(--ink); padding-bottom: 16px; margin-bottom: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .meta { text-align: right; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .meta b { color: var(--ink); }
+  .fields { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 22px; }
+  .field { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  .field .k { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .field .v { font-size: 13px; font-weight: 600; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 18px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1px solid var(--ink); padding: 6px 8px; }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  .mono { font-family: ui-monospace, Menlo, monospace; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { border-bottom: none; border-top: 2px solid var(--ink); font-weight: 700; padding-top: 10px; }
+  .note { font-size: 11.5px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 14px; margin-top: 8px; }
+  .actions { margin-bottom: 18px; }
+  button.primary { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  @media print {
+    .actions { display: none; }
+    body { padding: 0 8px; }
+    @page { margin: 14mm; }
+  }
+</style>
+</head>
+<body>
+  <div class="actions"><button class="primary" onclick="window.print()">Print / Save as PDF</button></div>
+  <header>
+    <div>
+      <h1>Materials itemization</h1>
+      <div class="sub">Backup for the materials/kit line on this repair order's estimate or invoice</div>
+    </div>
+    <div class="meta">
+      <div><b>${escapeHtml(company?.name || 'Shop')}</b></div>
+      <div>${createdAt.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+    </div>
+  </header>
+  <div class="fields">
+    <div class="field"><div class="k">Repair order</div><div class="v">${escapeHtml(header.job_ref)}</div></div>
+    <div class="field"><div class="k">Kit</div><div class="v">${escapeHtml(header.kit_name)}</div></div>
+    <div class="field"><div class="k">Quantity applied</div><div class="v">${Number(header.multiplier) !== 1 ? `&times;${escapeHtml(String(header.multiplier))}` : '1'}</div></div>
+    <div class="field"><div class="k">Line items</div><div class="v">${lines.length}</div></div>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Brand</th><th>Part number</th><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Extended</th></tr>
+    </thead>
+    <tbody>${rows}</tbody>
+    <tfoot>
+      <tr><td colspan="5">Total</td><td class="num">${money(total)}</td></tr>
+    </tfoot>
+  </table>
+  <p class="note">
+    This is an itemized breakdown of the materials applied to ${escapeHtml(header.job_ref)} under the "${escapeHtml(header.kit_name)}" kit,
+    provided as backup documentation for the corresponding materials line on the shop's estimate or invoice.
+    Figures reflect what was actually charged for this job and do not change if a part, brand or price is later updated in the catalogue.
+  </p>
+</body>
+</html>`;
+}
+
+function money(n) {
+    return `$${Number(n || 0).toFixed(2)}`;
+}
+
+function money2(n) {
+    const v = Number(n || 0);
+    return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function escapeHtml(s) {
+    return String(s === null || s === undefined ? '' : s)
+        .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 module.exports = router;
 module.exports.resolveKitLines = resolveKitLines;
 module.exports.kitsForCompany = kitsForCompany;
+module.exports.billingDocHtml = billingDocHtml;

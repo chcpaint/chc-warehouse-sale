@@ -75,7 +75,10 @@ const KNOWN_COLUMNS = {
     ]),
     kit_consumptions: new Set([
         'id', 'company_id', 'location_id', 'kit_id', 'kit_name', 'job_ref', 'multiplier',
-        'line_count', 'total_cost', 'actor_label', 'actor_type', 'created_by', 'created_at'
+        'line_count', 'total_cost', 'actor_label', 'actor_type', 'created_by', 'created_at',
+        // Added by migration 044: the itemized lines as actually billed, frozen
+        // at consume time, for the billing-backup document.
+        'lines_snapshot'
     ]),
     order_receipts: new Set([
         'id', 'company_id', 'order_id', 'location_id', 'product_id', 'sku', 'name',
@@ -133,7 +136,10 @@ const KNOWN_COLUMNS = {
         'resolved_at', 'resolved_by', 'created_at'
     ]),
     repair_kits: new Set([
-        'id', 'company_id', 'name', 'description', 'source', 'sort_order', 'is_active', 'updated_at'
+        'id', 'company_id', 'name', 'description', 'source', 'sort_order', 'is_active', 'updated_at',
+        // Added by migration 044: which master kit this one was cloned from as
+        // a brand variant (provenance/display only).
+        'parent_kit_id'
     ]),
     kit_items: new Set([
         'id', 'kit_id', 'sku', 'product_id', 'quantity', 'unit', 'sort_order', 'needs_review',
@@ -443,6 +449,13 @@ function createFakeSupabase(seed = {}) {
         }
         if (table === 'scheduler_runs' && row.started_at === undefined) {
             row.started_at = new Date().toISOString();
+        }
+        // migration 033: kit_item_alternatives.is_active defaults true in the
+        // real schema. routes/inventory-kits-master.js relies on reading that
+        // default back (it never sets is_active on create), so without this
+        // every alternative would look inactive to any query that filters on it.
+        if (table === 'kit_item_alternatives' && row.is_active === undefined) {
+            row.is_active = true;
         }
 
         // Reproduce the apply_stock_movement trigger: on-hand is the running sum

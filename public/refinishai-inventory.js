@@ -3359,6 +3359,7 @@
                                 <th class="py-2 pr-3 text-right">Cost</th>
                                 <th class="py-2 pr-3">By</th>
                                 <th class="py-2 pr-3">When</th>
+                                <th class="py-2 pr-3"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -3370,6 +3371,11 @@
                                 <td class="py-2 pr-3 text-right text-gray-700">${RAI.money(r.total_cost)}</td>
                                 <td class="py-2 pr-3 text-gray-500">${RAI.esc(r.actor_label || '')}</td>
                                 <td class="py-2 pr-3 text-gray-400">${new Date(r.created_at).toLocaleString()}</td>
+                                <td class="py-2 pr-3 text-right">
+                                    <button onclick="RAI.openKitBillingDoc('${r.id}')" class="text-xs text-blue-600 hover:text-blue-800 font-semibold whitespace-nowrap">
+                                        <i class="fas fa-file-invoice mr-1"></i>Billing backup
+                                    </button>
+                                </td>
                             </tr>`).join('')}
                         </tbody>
                     </table>
@@ -3377,6 +3383,34 @@
             </div>`;
         } catch (err) {
             host.innerHTML = '';
+        }
+    };
+
+    /**
+     * The itemized materials backup for one kit job — a document formatted to
+     * attach alongside the shop's own quote or invoice when submitting to an
+     * insurance company, so the materials line on that estimate has something
+     * to point to. Opened in a new tab; printing it or using the browser's
+     * "Save as PDF" is the shop's own next step.
+     *
+     * Fetched with the console's own auth (RAI.api adds the bearer token,
+     * which a plain link could not) and handed to the browser as a blob URL
+     * rather than document.write, so the new tab gets a real, printable page.
+     */
+    RAI.openKitBillingDoc = async function (consumptionId) {
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/kits/consumptions/${consumptionId}/billing-doc`);
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                alert(data.error || 'Failed to build that document.');
+                return;
+            }
+            const html = await resp.text();
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+        } catch (err) {
+            alert('Failed to build that document.');
         }
     };
 

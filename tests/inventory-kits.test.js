@@ -638,6 +638,81 @@ test('the kit name on a consumption is a snapshot, not a live reference', async 
 });
 
 // ==================================================================
+// BILLING BACKUP DOCUMENT — itemized materials, formatted to attach to an
+// insurance quote/invoice alongside the estimate's own materials line.
+// ==================================================================
+
+test('the billing document itemizes every line actually billed, by brand and part number', async () => {
+    reset();
+    mapKit();
+    // Give CLEAR a brand so the document has something to show in that column.
+    fake.db.products.find(p => p.id === CLEAR).brand = 'ProForm';
+
+    const consumed = await request(storeApp()).post(`${S}/${KIT}/consume`).send({
+        location_id: LOC, job_ref: 'RO-3001', actor_label: 'Sam'
+    });
+
+    const doc = await request(storeApp()).get(`${S}/consumptions/${consumed.body.consumption.id}/billing-doc`);
+    assert.equal(doc.status, 200);
+    assert.match(doc.headers['content-type'], /text\/html/);
+    assert.match(doc.text, /RO-3001/);
+    assert.match(doc.text, /Door Skin/);
+    assert.match(doc.text, /ProForm/);
+    assert.match(doc.text, /PRF611N/);
+    assert.match(doc.text, /MMM06334/);
+    // 0.02 x $200 + 0.3 x $10 = $4 + $3 = $7 total, matching the consumption itself.
+    assert.match(doc.text, /\$7\.00/);
+});
+
+test('the billing document is frozen at consume time — a later price or name change does not reach it', async () => {
+    reset();
+    mapKit();
+    const consumed = await request(storeApp()).post(`${S}/${KIT}/consume`).send({
+        location_id: LOC, job_ref: 'RO-3002', actor_label: 'Sam'
+    });
+
+    fake.db.products.find(p => p.id === CLEAR).price = 9999;
+    fake.db.products.find(p => p.id === CLEAR).name = 'Renamed later';
+
+    const doc = await request(storeApp()).get(`${S}/consumptions/${consumed.body.consumption.id}/billing-doc`);
+    assert.match(doc.text, /\$7\.00/, 'still the price at the time of the job, not the catalogue price today');
+    assert.doesNotMatch(doc.text, /Renamed later/);
+});
+
+test('a consumption written before lines_snapshot existed still produces a document, from the movements', async () => {
+    reset();
+    mapKit();
+    const consumed = await request(storeApp()).post(`${S}/${KIT}/consume`).send({
+        location_id: LOC, job_ref: 'RO-3003', actor_label: 'Sam'
+    });
+    // Simulate a pre-migration-044 row: no snapshot was ever written for it.
+    fake.db.kit_consumptions.find(c => c.id === consumed.body.consumption.id).lines_snapshot = null;
+
+    const doc = await request(storeApp()).get(`${S}/consumptions/${consumed.body.consumption.id}/billing-doc`);
+    assert.equal(doc.status, 200);
+    assert.match(doc.text, /RO-3003/);
+    assert.match(doc.text, /PRF611N/, 'reconstructed from stock_movements when no snapshot is present');
+});
+
+test('the billing document cannot be pulled for another company\'s consumption', async () => {
+    reset();
+    mapKit();
+    const consumed = await request(storeApp()).post(`${S}/${KIT}/consume`).send({
+        location_id: LOC, job_ref: 'RO-3004', actor_label: 'Sam'
+    });
+
+    authCompany = { id: OTHER_CO, name: 'Other Shop', slug: 'other' };
+    const doc = await request(storeApp()).get(`${S}/consumptions/${consumed.body.consumption.id}/billing-doc`);
+    assert.equal(doc.status, 404);
+});
+
+test('an unknown consumption id on the billing document is a 404, not a crash', async () => {
+    reset();
+    const doc = await request(storeApp()).get(`${S}/consumptions/99999999-9999-4999-8999-999999999999/billing-doc`);
+    assert.equal(doc.status, 404);
+});
+
+// ==================================================================
 // ADMIN: MAPPING
 // ==================================================================
 
