@@ -25,5 +25,8 @@
     "multer": "^2.0.2",
     "nodemailer": "^6.9.8",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "supertest": "^7.3.0"
   }
 }
