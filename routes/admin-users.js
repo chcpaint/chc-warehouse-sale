@@ -332,6 +332,14 @@ router.put('/:id', async (req, res) => {
 
         const patch = {};
         if (req.body.name !== undefined) patch.name = stripHtml(req.body.name).trim();
+        if (req.body.email !== undefined) {
+            const email = stripHtml(req.body.email).trim().toLowerCase();
+            if (!validateEmail(email)) return res.status(400).json({ error: 'A valid email is required.' });
+            const { data: existing } = await supabaseAdmin
+                .from('admin_users').select('id').eq('email', email).neq('id', id).maybeSingle();
+            if (existing) return res.status(409).json({ error: 'Another account already uses that email.' });
+            patch.email = email;
+        }
         if (req.body.is_active !== undefined) patch.is_active = req.body.is_active === true;
         let roleChangedAwayFromAssignable = false;
         if (req.body.role !== undefined) {
@@ -357,7 +365,10 @@ router.put('/:id', async (req, res) => {
         const { data, error } = await supabaseAdmin
             .from('admin_users').update(patch).eq('id', id)
             .select('id, email, name, role, branch_id, is_active, is_branch_manager').single();
-        if (error) throw error;
+        if (error) {
+            if (error.code === '23505') return res.status(409).json({ error: 'Another account already uses that email.' });
+            throw error;
+        }
 
         // Moving off order_desk (e.g. promoted to super_admin) — a role that no
         // longer has a picker shouldn't keep stale assignment rows sitting
@@ -403,7 +414,57 @@ router.post('/:id/resend-invite', async (req, res) => {
     }
 });
 
-/** Deactivate (soft). Accounts are never hard-deleted — audit trails reference them. */
+/**
+ * Whether this account is the recorded actor on an audit-log entry or a
+ * catalogue import. Both columns have no ON DELETE clause (deliberately —
+ * see the file header), so a hard delete would fail here anyway; checking
+ * first lets us give a clear reason instead of a raw constraint error. Every
+ * other attribution column this account could hold (who handled an order,
+ * uploaded an invoice, imported the master file, ...) is ON DELETE SET NULL,
+ * and in practice an account that did any of that has also logged at least
+ * one audit-log action — so this is also a reasonable proxy for "this
+ * account never did anything worth keeping a record of."
+ */
+async function hasProtectedHistory(adminUserId) {
+    const [{ count: auditCount }, { count: uploadCount }] = await Promise.all([
+        supabaseAdmin.from('audit_log').select('id', { count: 'exact', head: true }).eq('admin_id', adminUserId),
+        supabaseAdmin.from('catalog_uploads').select('id', { count: 'exact', head: true }).eq('admin_id', adminUserId)
+    ]);
+    return (auditCount || 0) > 0 || (uploadCount || 0) > 0;
+}
+
+/**
+ * Permanently remove an account — only once it is already deactivated, so
+ * nobody can skip the safer, reversible step by mistake. Refused if this
+ * account has any recorded history (see hasProtectedHistory): it stays
+ * deactivated instead, same as today, with a clear reason why.
+ */
+router.delete('/:id/purge', async (req, res) => {
+    try {
+        const id = req.params.id;
+        if (!isValidUUID(id)) return res.status(400).json({ error: 'Invalid user id.' });
+        if (id === req.admin.id) return res.status(400).json({ error: 'You cannot delete your own account.' });
+
+        const { data: user } = await supabaseAdmin.from('admin_users').select('id, email, is_active').eq('id', id).maybeSingle();
+        if (!user) return res.status(404).json({ error: 'User not found.' });
+        if (user.is_active) return res.status(400).json({ error: 'Deactivate this account before deleting it.' });
+
+        if (await hasProtectedHistory(id)) {
+            return res.status(409).json({ error: 'This account has activity on record, so it can’t be permanently deleted — it stays deactivated.' });
+        }
+
+        const { error } = await supabaseAdmin.from('admin_users').delete().eq('id', id);
+        if (error) throw error;
+
+        await logAction(req.admin.id, 'admin_user_deleted', id, { email: user.email }, req.ip);
+        res.json({ message: 'Account permanently deleted.' });
+    } catch (err) {
+        console.error('Admin user purge error:', err);
+        res.status(500).json({ error: 'Failed to delete that user.' });
+    }
+});
+
+/** Deactivate (soft). Accounts are never hard-deleted while active — audit trails reference them; see DELETE /:id/purge for the gated, permanent version. */
 router.delete('/:id', async (req, res) => {
     try {
         const id = req.params.id;

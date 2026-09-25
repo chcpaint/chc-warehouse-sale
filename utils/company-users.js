@@ -103,6 +103,14 @@ async function updateUser({ company, userId, patch, actorUserId }) {
 
     const update = { updated_at: new Date().toISOString() };
     if (patch.name !== undefined) update.name = stripHtml(patch.name).trim();
+    if (patch.email !== undefined) {
+        const email = stripHtml(patch.email).trim().toLowerCase();
+        if (!validateEmail(email)) return { status: 400, body: { error: 'A valid email is required.' } };
+        const { data: existing } = await supabaseAdmin
+            .from('company_users').select('id').eq('company_id', company.id).ilike('email', email).neq('id', userId).maybeSingle();
+        if (existing) return { status: 409, body: { error: 'A user with that email already exists for this company.' } };
+        update.email = email;
+    }
     if (patch.is_active !== undefined) update.is_active = patch.is_active === true;
     if (patch.role !== undefined) {
         if (!ROLES.includes(patch.role)) return { status: 400, body: { error: 'Invalid role.' } };
@@ -156,4 +164,27 @@ async function deactivateUser({ company, userId, actorUserId }) {
     return { status: 200, body: { message: 'User deactivated.' } };
 }
 
-module.exports = { ROLES, listUsers, createUser, updateUser, resendInvite, deactivateUser };
+/**
+ * Permanently remove a customer user — only once already deactivated, so
+ * nobody can skip the safer, reversible step by mistake. Unlike CHC staff
+ * (admin_users), every foreign key onto company_users (an order's
+ * placed_by_user_id, a shared-cart line's added_by_user_id) is already
+ * ON DELETE SET NULL by design, so this never fails on referenced history —
+ * it just unattributes those old records, which is the schema's own existing
+ * trade-off, not a new one made here.
+ */
+async function purgeUser({ company, userId, actorUserId }) {
+    if (!isValidUUID(userId)) return { status: 400, body: { error: 'Invalid user id.' } };
+    if (userId === actorUserId) return { status: 400, body: { error: 'You cannot delete your own account.' } };
+
+    const { data: user } = await supabaseAdmin
+        .from('company_users').select('id, is_active').eq('id', userId).eq('company_id', company.id).maybeSingle();
+    if (!user) return { status: 404, body: { error: 'User not found.' } };
+    if (user.is_active) return { status: 400, body: { error: 'Deactivate this user before deleting them.' } };
+
+    const { error } = await supabaseAdmin.from('company_users').delete().eq('id', userId).eq('company_id', company.id);
+    if (error) throw error;
+    return { status: 200, body: { message: 'User permanently deleted.' } };
+}
+
+module.exports = { ROLES, listUsers, createUser, updateUser, resendInvite, deactivateUser, purgeUser };

@@ -337,3 +337,93 @@ test('GET /:id/assignments returns the union used for scoping, including a legac
     assert.deepEqual(resp.body.branch_ids, [bl]);
     assert.equal(resp.body.assignable, true);
 });
+
+// ----------------------------------------------------------------------
+// 4. Editing name/email and permanently deleting a staff account (the
+//    admin-panel additions alongside deactivate/reactivate, which already
+//    existed). A hard delete is only ever reachable once an account is
+//    already deactivated, and is refused -- deactivating it instead -- if
+//    it is the recorded actor on an audit-log entry or a catalogue import,
+//    since those two columns have no ON DELETE clause on purpose.
+// ----------------------------------------------------------------------
+
+test('PUT edits name and email', async () => {
+    asSuperAdmin();
+    const id = uid('staff-edit');
+    seedStaff(id, { name: 'Old Name', email: 'old-edit@chcpaint.com' });
+
+    const resp = await request(app).put(`/api/admin/users/${id}`).send({ name: 'New Name', email: 'new-edit@chcpaint.com' });
+    assert.equal(resp.status, 200);
+    assert.equal(resp.body.user.email, 'new-edit@chcpaint.com');
+    assert.equal(fake.db.admin_users.find(u => u.id === id).email, 'new-edit@chcpaint.com');
+});
+
+test('PUT refuses an email already used by another staff account', async () => {
+    asSuperAdmin();
+    const id1 = uid('staff-dupe-1'), id2 = uid('staff-dupe-2');
+    seedStaff(id1, { email: 'taken@chcpaint.com' });
+    seedStaff(id2, { email: 'free@chcpaint.com' });
+
+    const resp = await request(app).put(`/api/admin/users/${id2}`).send({ email: 'taken@chcpaint.com' });
+    assert.equal(resp.status, 409);
+    assert.equal(fake.db.admin_users.find(u => u.id === id2).email, 'free@chcpaint.com');
+});
+
+test('PUT refuses a malformed email', async () => {
+    asSuperAdmin();
+    const id = uid('staff-bad-email');
+    seedStaff(id, { email: 'ok@chcpaint.com' });
+    const resp = await request(app).put(`/api/admin/users/${id}`).send({ email: 'not-an-email' });
+    assert.equal(resp.status, 400);
+});
+
+test('DELETE /:id/purge refuses on a still-active account', async () => {
+    asSuperAdmin();
+    const id = uid('staff-purge-active');
+    seedStaff(id, { is_active: true });
+    const resp = await request(app).delete(`/api/admin/users/${id}/purge`);
+    assert.equal(resp.status, 400);
+    assert.ok(fake.db.admin_users.find(u => u.id === id), 'row must still exist');
+});
+
+test('DELETE /:id/purge removes the row once deactivated with no recorded history', async () => {
+    asSuperAdmin();
+    const id = uid('staff-purge-clean');
+    seedStaff(id, { is_active: false });
+    const resp = await request(app).delete(`/api/admin/users/${id}/purge`);
+    assert.equal(resp.status, 200);
+    assert.equal(fake.db.admin_users.find(u => u.id === id), undefined);
+});
+
+test('DELETE /:id/purge is refused, and the account stays deactivated, when it is the actor on an audit-log entry', async () => {
+    asSuperAdmin();
+    const id = uid('staff-purge-audited');
+    seedStaff(id, { is_active: false });
+    fake.db.audit_log.push({ id: uid('audit-row'), admin_id: id, action: 'something_they_did', entity_type: 'company', entity_id: null, details: {}, created_at: new Date().toISOString() });
+
+    const resp = await request(app).delete(`/api/admin/users/${id}/purge`);
+    assert.equal(resp.status, 409);
+    const stored = fake.db.admin_users.find(u => u.id === id);
+    assert.ok(stored, 'the account was not removed');
+    assert.equal(stored.is_active, false);
+});
+
+test('DELETE /:id/purge is refused when it is the actor on a catalogue import', async () => {
+    asSuperAdmin();
+    const id = uid('staff-purge-imported');
+    seedStaff(id, { is_active: false });
+    fake.db.catalog_uploads = fake.db.catalog_uploads || [];
+    fake.db.catalog_uploads.push({ id: uid('upload-row'), company_id: uid('some-company'), admin_id: id, filename: 'x.csv', file_type: 'csv', row_count: 1, status: 'completed', created_at: new Date().toISOString() });
+
+    const resp = await request(app).delete(`/api/admin/users/${id}/purge`);
+    assert.equal(resp.status, 409);
+    assert.ok(fake.db.admin_users.find(u => u.id === id), 'the account was not removed');
+});
+
+test('DELETE /:id/purge refuses to delete your own account', async () => {
+    asSuperAdmin();
+    // The self-check runs before the row is even looked up, so this refuses
+    // regardless of whether authAdmin.id has a matching admin_users row.
+    const resp = await request(app).delete(`/api/admin/users/${authAdmin.id}/purge`);
+    assert.equal(resp.status, 400);
+});

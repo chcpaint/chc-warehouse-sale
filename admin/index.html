@@ -1897,6 +1897,23 @@
         </div>
     </div>
 
+    <!-- Edit Staff Modal (name/email of an existing CHC staff account) -->
+    <div id="admin-edit-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Edit staff account</h3>
+                <button onclick="hideModal('admin-edit-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="saveAdminEdit(event)" class="space-y-4">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input type="text" id="edit-admin-name" required class="w-full px-3 py-2 border rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                    <input type="email" id="edit-admin-email" required class="w-full px-3 py-2 border rounded-lg"></div>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Save changes</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Company Customer Users Modal (CHC seeds a company's ordering users) -->
     <div id="company-users-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
@@ -1931,6 +1948,23 @@
                     <tbody id="company-users-tbody"></tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <!-- Edit Customer User Modal (name/email of an existing company-seeded user) -->
+    <div id="company-user-edit-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Edit customer user</h3>
+                <button onclick="hideModal('company-user-edit-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form onsubmit="saveCompanyUserEdit(event)" class="space-y-4">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input type="text" id="edit-cu-name" required class="w-full px-3 py-2 border rounded-lg"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                    <input type="email" id="edit-cu-email" required class="w-full px-3 py-2 border rounded-lg"></div>
+                <button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white font-semibold py-3 rounded-lg">Save changes</button>
+            </form>
         </div>
     </div>
 
@@ -6401,6 +6435,7 @@
             tbody.innerHTML = (data.users || []).map(a => {
                 const isSelf = a.id === me;
                 const actions = [];
+                actions.push(`<button onclick="openEditAdminModal('${a.id}', '${esc(a.name).replace(/'/g, "\\'")}', '${esc(a.email)}')" class="text-gray-500 hover:text-gray-800" title="Edit name/email"><i class="fas fa-pen"></i></button>`);
                 if (a.role === 'order_desk') actions.push(`<button onclick="openAdminAccessModal('${a.id}', '${esc(a.name).replace(/'/g, "\\'")}')" class="text-blue-600 hover:text-blue-800" title="Edit which branches/customers they can work from"><i class="fas fa-map-marker-alt"></i></button>`);
                 if (a.status === 'invited' || a.status === 'invite_expired') actions.push(`<button onclick="resendAdminInvite('${a.id}')" class="text-blue-600 hover:text-blue-800" title="Resend invite"><i class="fas fa-paper-plane"></i></button>`);
                 if (a.status === 'active' || a.status === 'password_reset_pending') actions.push(`<button onclick="resendAdminInvite('${a.id}', true)" class="text-orange-500 hover:text-orange-700" title="Send password-reset link"><i class="fas fa-key"></i></button>`);
@@ -6408,6 +6443,7 @@
                 if (!isSelf) actions.push(a.is_active
                     ? `<button onclick="setAdminActive('${a.id}', false)" class="text-red-500 hover:text-red-700" title="Deactivate"><i class="fas fa-user-slash"></i></button>`
                     : `<button onclick="setAdminActive('${a.id}', true)" class="text-green-600 hover:text-green-800" title="Reactivate"><i class="fas fa-user-check"></i></button>`);
+                if (!isSelf && !a.is_active) actions.push(`<button onclick="purgeAdminUser('${a.id}', '${esc(a.name).replace(/'/g, "\\'")}')" class="text-red-700 hover:text-red-900" title="Permanently delete — cannot be undone"><i class="fas fa-trash"></i></button>`);
                 const warningIcon = a.warning
                     ? `<i class="fas fa-triangle-exclamation text-amber-500 ml-1.5" title="${esc(a.warning)}"></i>`
                     : '';
@@ -6520,6 +6556,45 @@
         } catch (err) { alert('Failed to update account.'); }
     }
 
+    // ---- Edit name/email for an existing CHC staff account ----
+    let editAdminId = null;
+    function openEditAdminModal(id, name, email) {
+        editAdminId = id;
+        document.getElementById('edit-admin-name').value = name;
+        document.getElementById('edit-admin-email').value = email;
+        showModal('admin-edit-modal');
+    }
+
+    async function saveAdminEdit(e) {
+        e.preventDefault();
+        try {
+            const resp = await adminFetch(`/users/${editAdminId}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    name: document.getElementById('edit-admin-name').value,
+                    email: document.getElementById('edit-admin-email').value
+                })
+            });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to save.'); return; }
+            hideModal('admin-edit-modal');
+            loadAdminUsers();
+        } catch (err) { alert('Failed to save.'); }
+    }
+
+    // ---- Permanently delete a staff account. Only reachable once already
+    // deactivated (see the pencil/deactivate flow above) -- the server
+    // refuses this on an active account, and refuses it again if the
+    // account has any activity on record, deactivating it instead. ----
+    async function purgeAdminUser(id, name) {
+        if (!confirm(`Permanently delete ${name}? This cannot be undone. If they have any activity on record, they'll stay deactivated instead.`)) return;
+        try {
+            const resp = await adminFetch(`/users/${id}/purge`, { method: 'DELETE' });
+            const d = await resp.json();
+            if (resp.ok) loadAdminUsers(); else alert(d.error || 'Failed to delete.');
+        } catch (err) { alert('Failed to delete.'); }
+    }
+
     // ---- Company customer users (CHC seeds who can order for a company) ----
     let cuCompanyId = null;
     async function openCompanyUsers(companyId, companyName) {
@@ -6549,11 +6624,13 @@
             const tbody = document.getElementById('company-users-tbody');
             tbody.innerHTML = (data.users || []).map(u => {
                 const actions = [];
+                actions.push(`<button onclick="openEditCompanyUserModal('${u.id}', '${esc(u.name).replace(/'/g, "\\'")}', '${esc(u.email)}')" class="text-gray-500 hover:text-gray-800" title="Edit name/email"><i class="fas fa-pen"></i></button>`);
                 if (u.status === 'invited') actions.push(`<button onclick="resendCompanyInvite('${u.id}')" class="text-blue-600 hover:text-blue-800" title="Resend invite"><i class="fas fa-paper-plane"></i></button>`);
                 if (u.status === 'active') actions.push(`<button onclick="resendCompanyInvite('${u.id}')" class="text-orange-500 hover:text-orange-700" title="Send password-reset link"><i class="fas fa-key"></i></button>`);
                 actions.push(u.is_active
                     ? `<button onclick="setCompanyUserActive('${u.id}', false)" class="text-red-500 hover:text-red-700" title="Deactivate"><i class="fas fa-user-slash"></i></button>`
                     : `<button onclick="setCompanyUserActive('${u.id}', true)" class="text-green-600 hover:text-green-800" title="Reactivate"><i class="fas fa-user-check"></i></button>`);
+                if (!u.is_active) actions.push(`<button onclick="purgeCompanyUser('${u.id}', '${esc(u.name).replace(/'/g, "\\'")}')" class="text-red-700 hover:text-red-900" title="Permanently delete — cannot be undone"><i class="fas fa-trash"></i></button>`);
                 return `<tr class="border-b hover:bg-gray-50">
                     <td class="px-3 py-2 font-medium">${esc(u.name)}</td>
                     <td class="px-3 py-2 text-gray-500">${esc(u.email)}</td>
@@ -6599,6 +6676,43 @@
             const d = await resp.json();
             if (resp.ok) loadCompanyUsers(); else alert(d.error || 'Failed.');
         } catch (err) { alert('Failed to update user.'); }
+    }
+
+    // ---- Edit name/email for an existing customer user ----
+    let editCompanyUserId = null;
+    function openEditCompanyUserModal(id, name, email) {
+        editCompanyUserId = id;
+        document.getElementById('edit-cu-name').value = name;
+        document.getElementById('edit-cu-email').value = email;
+        showModal('company-user-edit-modal');
+    }
+
+    async function saveCompanyUserEdit(e) {
+        e.preventDefault();
+        try {
+            const resp = await adminFetch(`/companies/${cuCompanyId}/users/${editCompanyUserId}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    name: document.getElementById('edit-cu-name').value,
+                    email: document.getElementById('edit-cu-email').value
+                })
+            });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed to save.'); return; }
+            hideModal('company-user-edit-modal');
+            loadCompanyUsers();
+        } catch (err) { alert('Failed to save.'); }
+    }
+
+    // ---- Permanently delete a customer user. Only reachable once already
+    // deactivated -- the server refuses this on an active account. ----
+    async function purgeCompanyUser(id, name) {
+        if (!confirm(`Permanently delete ${name}? This cannot be undone.`)) return;
+        try {
+            const resp = await adminFetch(`/companies/${cuCompanyId}/users/${id}/purge`, { method: 'DELETE' });
+            const d = await resp.json();
+            if (resp.ok) loadCompanyUsers(); else alert(d.error || 'Failed to delete.');
+        } catch (err) { alert('Failed to delete.'); }
     }
 
     function showForcedPasswordChange() {

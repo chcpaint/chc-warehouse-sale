@@ -48,7 +48,10 @@ router.put('/:id', async (req, res) => {
     try {
         const result = await cu.updateUser({
             company: req.targetCompany, userId: req.params.id,
-            patch: { name: req.body.name, role: req.body.role, location_id: req.body.location_id, is_active: req.body.is_active },
+            patch: {
+                name: req.body.name, email: req.body.email, role: req.body.role,
+                location_id: req.body.location_id, is_active: req.body.is_active
+            },
             actorUserId: null
         });
         res.status(result.status).json(result.body);
@@ -67,6 +70,13 @@ router.delete('/:id', async (req, res) => {
         const result = await cu.deactivateUser({ company: req.targetCompany, userId: req.params.id, actorUserId: null });
         res.status(result.status).json(result.body);
     } catch (err) { console.error('CHC deactivate company user:', err); res.status(500).json({ error: 'Failed to deactivate that user.' }); }
+});
+
+router.delete('/:id/purge', async (req, res) => {
+    try {
+        const result = await cu.purgeUser({ company: req.targetCompany, userId: req.params.id, actorUserId: null });
+        res.status(result.status).json(result.body);
+    } catch (err) { console.error('CHC purge company user:', err); res.status(500).json({ error: 'Failed to delete that user.' }); }
 });
 
 module.exports = router;
