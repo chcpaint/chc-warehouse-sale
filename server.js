@@ -146,6 +146,7 @@ app.use('/assets', express.static(path.join(__dirname, 'public', 'assets')));
 app.use('/api/', resolveDistributor);
 
 app.use('/api/auth', authRoutes);
+app.use('/api/store', require('./routes/shopsafe-launch'));
 app.use('/api/store', storefrontRoutes);
 app.use('/api/admin', adminRoutes);
 

@@ -293,6 +293,10 @@
                         <i class="fas fa-boxes-stacked mr-1"></i> Inventory
                         <span id="inv-low-badge" class="hidden absolute -top-1 -right-1 bg-amber-500 text-white text-xs rounded-full w-5 h-5 items-center justify-center">0</span>
                     </button>
+                    <button onclick="openShopSafe()" id="nav-shopsafe" title="Opens RefinishAI ShopSafe in a new tab"
+                        class="hidden px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-shield-halved mr-1"></i> ShopSafe
+                    </button>
                     <button onclick="showTab('reports')" data-tab="reports"
                         class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
                         <i class="fas fa-chart-line mr-1"></i> Reports
@@ -1276,6 +1280,9 @@
         { group: 'Inventory', requires: 'inventory', items: [
             { tab: 'inventory',  label: 'Stock on Hand', icon: 'fa-boxes-stacked', badge: 'lowstock' }
         ]},
+        { group: 'Compliance', requires: 'shopsafe', items: [
+            { tab: 'shopsafe',   label: 'ShopSafe',      icon: 'fa-shield-halved' }
+        ]},
         { group: 'Account', items: [
             { tab: 'reports',    label: 'Reports',       icon: 'fa-chart-line' },
             { tab: 'contact',    label: 'Contact CHC',   icon: 'fa-address-book' }
@@ -1299,6 +1306,10 @@
     function navModuleOn(name) {
         if (name === 'inventory') {
             const btn = document.getElementById('nav-inventory');
+            return !!btn && !btn.classList.contains('hidden');
+        }
+        if (name === 'shopsafe') {
+            const btn = document.getElementById('nav-shopsafe');
             return !!btn && !btn.classList.contains('hidden');
         }
         return true;
@@ -1386,6 +1397,8 @@
     }
 
     function drawerGo(tab) {
+        // ShopSafe is a separate app in its own tab, not a panel in this page.
+        if (tab === 'shopsafe') { closeDrawer(); openShopSafe(); return; }
         showTab(tab);
         closeDrawer();
     }
@@ -3288,6 +3301,12 @@
             if (!resp.ok) return;
 
             const { company } = await resp.json();
+            // RefinishAI ShopSafe is independent of inventory: reveal its
+            // button whenever the module is on, before the inventory check
+            // below can return early.
+            if (company && company.settings && company.settings.shopsafe && company.settings.shopsafe.enabled) {
+                document.getElementById('nav-shopsafe')?.classList.remove('hidden');
+            }
             const settings = (company && company.settings && company.settings.inventory) || {};
             if (!settings.enabled) return;          // ordering portal only — nothing more loads
 
@@ -3316,6 +3335,29 @@
         } catch (err) {
             // The ordering portal must keep working whatever happens here.
             console.error('[refinishAI Inventory] unavailable:', err);
+        }
+    }
+
+    // ============================================================
+    // RefinishAI ShopSafe (optional module, separate app)
+    //
+    // Asks the portal for a one-time sign-in link and opens ShopSafe in a
+    // new tab. The window is opened synchronously on the click so popup
+    // blockers allow it, then pointed at the link once it arrives.
+    // ============================================================
+    async function openShopSafe() {
+        const win = window.open('', '_blank');
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/shopsafe/launch`, {
+                method: 'POST',
+                body: JSON.stringify({ location_id: state.location && state.location.id })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.url) throw new Error(data.error || 'Could not open ShopSafe.');
+            if (win) { win.opener = null; win.location.href = data.url; } else { window.location.href = data.url; }
+        } catch (err) {
+            if (win) win.close();
+            alert(err.message);
         }
     }
 

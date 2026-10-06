@@ -100,6 +100,17 @@ const MODULES = {
         }
     },
 
+    shopsafe: {
+        name: 'shopsafe',
+        label: 'RefinishAI ShopSafe',
+        blurb: 'Health, safety and environmental compliance records, with an SDS library filled from this customer\'s orders. Opens the separate ShopSafe app.',
+        requires: [],
+        released: true,
+        defaults: {
+            enabled: false
+        }
+    },
+
     insurance: {
         name: 'insurance',
         label: 'Insurance billing',
