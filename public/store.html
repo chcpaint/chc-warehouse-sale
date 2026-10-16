@@ -158,6 +158,8 @@
                     <input type="password" id="user-password" placeholder="Your password"
                         class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-lg" required>
                 </div>
+                <p class="text-right -mt-2"><button type="button" id="forgot-password-link" onclick="forgotPassword()" class="text-sm text-blue-700 hover:text-blue-900 hover:underline">Forgot password?</button></p>
+                <p id="forgot-password-msg" class="hidden text-sm rounded-lg px-3 py-2" role="status"></p>
                 <button type="submit" id="user-login-btn"
                     class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition-colors">
                     <span id="user-login-btn-text">Sign in</span>
@@ -978,6 +980,30 @@
             spinner.classList.add('hidden'); btnText.textContent = 'Sign in'; btn.disabled = false;
         }
     });
+
+    async function forgotPassword() {
+        const msg = document.getElementById('forgot-password-msg');
+        const email = document.getElementById('user-email').value.trim();
+        const show = (text, ok) => {
+            msg.textContent = text;
+            msg.className = 'text-sm rounded-lg px-3 py-2 ' + (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
+        };
+        if (!email) { show('Type your email address above first, then click Forgot password.', false); document.getElementById('user-email').focus(); return; }
+        const link = document.getElementById('forgot-password-link');
+        link.disabled = true;
+        try {
+            const resp = await fetch(`${API_BASE}/auth/company-user-forgot`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug: state.slug, email })
+            });
+            const data = await resp.json().catch(() => ({}));
+            show(data.message || data.error || 'Something went wrong. Please try again.', resp.ok);
+        } catch (err) {
+            show('Connection error. Please try again.', false);
+        } finally {
+            link.disabled = false;
+        }
+    }
 
     // ---- Owner team management ----
     function teamEsc(s){ const d=document.createElement('div'); d.textContent=(s==null?'':s); return d.innerHTML; }

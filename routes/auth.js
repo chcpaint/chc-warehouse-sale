@@ -338,6 +338,34 @@ router.post('/company-user-login', async (req, res) => {
 });
 
 /**
+ * POST /api/auth/company-user-forgot   Body: { slug, email }
+ * "Forgot password?" on the customer sign-in. Always answers the same way, so
+ * it cannot be used to discover which emails have accounts; /api/auth/ is
+ * already rate-limited per IP in server.js.
+ */
+router.post('/company-user-forgot', async (req, res) => {
+    const generic = { message: 'If that email belongs to an account, a password-reset link is on its way. It can take a few minutes to arrive.' };
+    try {
+        const slug = stripHtml(req.body.slug || '');
+        const email = req.body.email;
+        if (!slug || !email) return res.status(400).json({ error: 'Enter your email address.' });
+
+        const { data: company } = await scopedBySlug(supabaseAdmin
+            .from('companies')
+            .select('id, name, slug, is_active, settings, distributor_id')
+            .eq('slug', slug), req)
+            .maybeSingle();
+
+        const result = await require('../utils/company-users').requestPasswordReset({ company, email });
+        if (result.reason === 'email_failed') console.error('Password reset email failed for', stripHtml(email));
+        res.json(generic);
+    } catch (err) {
+        console.error('Company user forgot error:', err);
+        res.json(generic);   // do not let an error reveal anything either
+    }
+});
+
+/**
  * POST /api/auth/company-accept-invite   Body: { token, password }
  * A customer user sets their password from an invite and is logged in.
  */

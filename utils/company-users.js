@@ -137,7 +137,7 @@ async function updateUser({ company, userId, patch, actorUserId }) {
 async function resendInvite({ company, userId }) {
     if (!isValidUUID(userId)) return { status: 400, body: { error: 'Invalid user id.' } };
     const { data: user } = await supabaseAdmin
-        .from('company_users').select('id, email, name').eq('id', userId).eq('company_id', company.id).maybeSingle();
+        .from('company_users').select('id, email, name, password_hash').eq('id', userId).eq('company_id', company.id).maybeSingle();
     if (!user) return { status: 404, body: { error: 'User not found.' } };
 
     const { token, expires } = newInvite();
@@ -149,9 +149,54 @@ async function resendInvite({ company, userId }) {
         to: user.email, name: user.name,
         inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`,
         context: company.name,
-        expiresText: `${INVITE_TTL_DAYS} days`
+        expiresText: `${INVITE_TTL_DAYS} days`,
+        reset: !!user.password_hash
     });
-    return { status: 200, body: { message: `Invite re-sent to ${user.email}.`, email_sent: invite.sent } };
+    return { status: 200, body: { message: `${user.password_hash ? 'Password-reset link' : 'Invite'} sent to ${user.email}.`, email_sent: invite.sent } };
+}
+
+/**
+ * Self-service "forgot password" for a customer user.
+ *
+ * Says nothing about whether the address exists: the caller always gives the
+ * same answer, so this cannot be used to find out who has an account. Sends a
+ * reset link only to an active user of an active company that has individual
+ * logins on, and at most once every RESET_COOLDOWN_MINUTES per user — the age
+ * of the last link is read from its expiry, so no extra column is needed.
+ *
+ * @returns {{sent:boolean, reason?:string}}  (for tests and logs; never shown to the requester)
+ */
+const RESET_COOLDOWN_MINUTES = 10;
+async function requestPasswordReset({ company, email }) {
+    email = stripHtml(email || '').trim().toLowerCase();
+    if (!company || !company.is_active) return { sent: false, reason: 'company_inactive' };
+    if (company.settings?.users?.enabled !== true) return { sent: false, reason: 'users_off' };
+    if (!validateEmail(email)) return { sent: false, reason: 'bad_email' };
+
+    const { data: user } = await supabaseAdmin
+        .from('company_users')
+        .select('id, email, name, is_active, password_hash, invite_expires_at')
+        .eq('company_id', company.id).ilike('email', email).maybeSingle();
+    if (!user || !user.is_active) return { sent: false, reason: 'no_user' };
+
+    if (user.invite_expires_at) {
+        const issuedAt = new Date(user.invite_expires_at).getTime() - INVITE_TTL_DAYS * 24 * 60 * 60 * 1000;
+        if (Date.now() - issuedAt < RESET_COOLDOWN_MINUTES * 60 * 1000) return { sent: false, reason: 'cooldown' };
+    }
+
+    const { token, expires } = newInvite();
+    await supabaseAdmin.from('company_users')
+        .update({ invite_token: token, invite_expires_at: expires, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+
+    const mail = await sendInvite({
+        to: user.email, name: user.name,
+        inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`,
+        context: company.name,
+        expiresText: `${INVITE_TTL_DAYS} days`,
+        reset: !!user.password_hash
+    });
+    return { sent: !!mail.sent, reason: mail.sent ? undefined : 'email_failed' };
 }
 
 async function deactivateUser({ company, userId, actorUserId }) {
@@ -187,4 +232,4 @@ async function purgeUser({ company, userId, actorUserId }) {
     return { status: 200, body: { message: 'User permanently deleted.' } };
 }
 
-module.exports = { ROLES, listUsers, createUser, updateUser, resendInvite, deactivateUser, purgeUser };
+module.exports = { ROLES, listUsers, createUser, updateUser, resendInvite, requestPasswordReset, deactivateUser, purgeUser };

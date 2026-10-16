@@ -670,6 +670,7 @@ function escHtml(str) {
  * @param {string} o.context      short label, e.g. 'CHC order desk' or a company name
  * @param {string} [o.invitedBy]  who invited them (name)
  * @param {string} [o.expiresText] e.g. '7 days'
+ * @param {boolean} [o.reset]    true when the person already has a password (reset, not first invite)
  */
 async function sendInvite(o) {
     if (!ensureInit()) {
@@ -686,12 +687,21 @@ async function sendInvite(o) {
     const expires = escHtml(o.expiresText || '7 days');
     const url = o.inviteUrl;
 
+    // A reset goes to someone who already has a working password, so it must not
+    // read like a first invitation ("you've been invited... activate").
+    const isReset = o.reset === true;
+    const heading = isReset ? `Reset your ${context} password` : `You've been invited to ${context}`;
+    const intro = isReset
+        ? `Hi ${name}, a password reset was requested for your ${context} account. Click below to choose a new password. Your current password keeps working until you do. If you didn't expect this, you can ignore this email.`
+        : `Hi ${name}, you've been invited ${invitedBy} to access ${context}. Click below to set your password and activate your account.`;
+    const button = isReset ? 'Choose a new password' : 'Set your password';
+
     const html = `
         <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1f2937">
-          <h2 style="color:#111827">You've been invited to ${context}</h2>
-          <p>Hi ${name}, you've been invited ${invitedBy} to access ${context}. Click below to set your password and activate your account.</p>
+          <h2 style="color:#111827">${heading}</h2>
+          <p>${intro}</p>
           <p style="margin:28px 0">
-            <a href="${url}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Set your password</a>
+            <a href="${url}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">${button}</a>
           </p>
           <p style="color:#6b7280;font-size:13px">This link expires in ${expires}. If the button doesn't work, paste this into your browser:<br>${escHtml(url)}</p>
         </div>`;
@@ -700,8 +710,10 @@ async function sendInvite(o) {
         await sgMail.send({
             to,
             from: fromAddress,
-            subject: `Set up your ${o.context || 'CHC'} account`,
-            text: `Hi ${o.name || 'there'}, set your password to activate your account: ${url} (expires in ${expires}).`,
+            subject: isReset ? `Reset your ${o.context || 'CHC'} password` : `Set up your ${o.context || 'CHC'} account`,
+            text: isReset
+                ? `Hi ${o.name || 'there'}, choose a new password for your account: ${url} (expires in ${expires}). If you didn't expect this, ignore this email.`
+                : `Hi ${o.name || 'there'}, set your password to activate your account: ${url} (expires in ${expires}).`,
             html
         });
         return { sent: true, to };

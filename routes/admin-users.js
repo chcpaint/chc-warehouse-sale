@@ -391,7 +391,7 @@ router.post('/:id/resend-invite', async (req, res) => {
     try {
         const id = req.params.id;
         if (!isValidUUID(id)) return res.status(400).json({ error: 'Invalid user id.' });
-        const { data: user } = await supabaseAdmin.from('admin_users').select('id, email, name').eq('id', id).maybeSingle();
+        const { data: user } = await supabaseAdmin.from('admin_users').select('id, email, name, password_hash').eq('id', id).maybeSingle();
         if (!user) return res.status(404).json({ error: 'User not found.' });
 
         const { token, expires } = newInvite();
@@ -404,10 +404,11 @@ router.post('/:id/resend-invite', async (req, res) => {
             inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=admin`,
             context: 'CHC order desk',
             invitedBy: req.admin.name,
-            expiresText: `${INVITE_TTL_DAYS} days`
+            expiresText: `${INVITE_TTL_DAYS} days`,
+            reset: !!user.password_hash
         });
         await logAction(req.admin.id, 'admin_user_reinvited', id, { email: user.email }, req.ip);
-        res.json({ message: `Invite re-sent to ${user.email}.`, email_sent: invite.sent });
+        res.json({ message: `${user.password_hash ? 'Password-reset link' : 'Invite'} sent to ${user.email}.`, email_sent: invite.sent });
     } catch (err) {
         console.error('Resend invite error:', err);
         res.status(500).json({ error: 'Failed to resend the invite.' });
