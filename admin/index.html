@@ -100,6 +100,9 @@
                 <button onclick="adminNav('products')" data-nav="products" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-box w-5"></i> Products
                 </button>
+                <button onclick="adminNav('pricing')" data-nav="pricing" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <i class="fas fa-tags w-5"></i> Customer Pricing
+                </button>
                 <button onclick="adminNav('library')" data-nav="library" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-book w-5"></i> Item Library
                 </button>
@@ -746,6 +749,50 @@
                 </section>
 
                 <!-- Products Management -->
+                <section id="section-pricing" class="hidden fade-in">
+                    <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
+                        <div class="flex flex-wrap items-end gap-4">
+                            <div class="min-w-[220px] flex-1">
+                                <label for="pricing-company" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Customer</label>
+                                <select id="pricing-company" onchange="pricingLoad(1)" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="">Select a customer</option>
+                                </select>
+                            </div>
+                            <div class="min-w-[200px] flex-1">
+                                <label for="pricing-search" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search item or SKU</label>
+                                <input id="pricing-search" type="search" oninput="pricingDebounce()" placeholder="Name or SKU" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            </div>
+                            <div class="min-w-[160px]">
+                                <label for="pricing-brand" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Brand</label>
+                                <input id="pricing-brand" type="search" oninput="pricingDebounce()" placeholder="Exact brand" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-3">
+                            A price changed here applies to <strong id="pricing-company-name">the selected customer</strong> only &mdash; every other customer keeps their own price for the same item.
+                            Click a price to edit it; Enter saves, Esc cancels.
+                            <i class="fas fa-lock text-gray-400"></i> marks a PPG item held at the PPG list price.
+                        </p>
+                        <p id="pricing-msg" class="hidden text-sm mt-2" role="status"></p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+                                <tr>
+                                    <th class="px-4 py-3 text-left">Item</th>
+                                    <th class="px-4 py-3 text-left">Brand</th>
+                                    <th class="px-4 py-3 text-left">SKU</th>
+                                    <th class="px-4 py-3 text-right">List</th>
+                                    <th class="px-4 py-3 text-right">Price</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pricing-tbody">
+                                <tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">Select a customer to see and edit their pricing.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="pricing-pager" class="flex items-center justify-between mt-3 text-sm text-gray-500"></div>
+                </section>
+
                 <section id="section-products" class="hidden fade-in">
                     <!-- Top Bar: Company selector + actions -->
                     <div class="flex justify-between items-center mb-4">
@@ -2094,7 +2141,10 @@
         // same limit, so this is presentation only — not the security boundary.
         if (admin.user.role === 'order_desk' || admin.user.role === 'order_manager') {
             document.querySelectorAll('.sidebar-link').forEach(el => {
-                if (el.dataset.nav !== 'orders') el.classList.add('hidden');
+                // The operations manager (order_manager) also prices per customer.
+                const keep = el.dataset.nav === 'orders' ||
+                    (el.dataset.nav === 'pricing' && admin.user.role === 'order_manager');
+                if (!keep) el.classList.add('hidden');
             });
             document.body.classList.add('order-desk-only');
             adminNav('orders');
@@ -2156,7 +2206,7 @@
         document.querySelectorAll('.sidebar-link').forEach(el => el.classList.remove('active'));
         document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
 
-        const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products',
+        const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products', pricing: 'Customer Pricing',
             library: 'Item Library', master: 'Master Table', kits: 'Kits',
             promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
         document.getElementById('page-title').textContent = titles[section] || section;
@@ -2164,6 +2214,7 @@
         if (section === 'dashboard') dbLoad();
         if (section === 'reports') arInit();
         if (section === 'products') loadAdminProducts();
+        if (section === 'pricing') pricingInit();
         if (section === 'library') libInit();
         if (section === 'master') mtInit();
         if (section === 'kits') ktInit();
@@ -5135,6 +5186,208 @@
     // ============================================================
     let productState = { all: [], filtered: [], selected: new Set(), currentFilters: {} };
     let filterDebounce = null;
+
+    // ============================================================
+    // CUSTOMER PRICING -- per-customer, per-item inline price editor.
+    // A save changes ONE customer's catalogue row (the API is scoped to
+    // /pricing/companies/:companyId/products/:productId/price). The server
+    // owns the rules (PPG list-price lock, price sanity, audit); this only
+    // reacts to its answers.
+    // ============================================================
+    const pricingState = { companyId: '', page: 1, limit: 100, total: 0, products: [], canUnlock: false, editing: null, saving: false };
+    let pricingTimer = null;
+
+    function pricingMsg(text, kind) {
+        const el = document.getElementById('pricing-msg');
+        if (!el) return;
+        if (!text) { el.classList.add('hidden'); el.textContent = ''; return; }
+        el.className = 'text-sm mt-2 ' + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-green-700' : 'text-gray-600');
+        el.textContent = text;
+    }
+
+    function pricingDebounce() {
+        clearTimeout(pricingTimer);
+        pricingTimer = setTimeout(() => pricingLoad(1), 300);
+    }
+
+    async function pricingInit() {
+        const sel = document.getElementById('pricing-company');
+        if (sel.options.length > 1) return;
+        try {
+            const resp = await adminFetch('/pricing/companies');
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load customers.');
+            (data.companies || []).forEach(c => {
+                const o = document.createElement('option');
+                o.value = c.id;
+                o.textContent = c.name + (c.is_active === false ? ' (inactive)' : '');
+                sel.appendChild(o);
+            });
+            if ((data.companies || []).length === 1) { sel.value = data.companies[0].id; pricingLoad(1); }
+        } catch (err) { pricingMsg(err.message, 'error'); }
+    }
+
+    async function pricingLoad(page) {
+        const sel = document.getElementById('pricing-company');
+        pricingState.companyId = sel.value;
+        pricingState.page = page || 1;
+        pricingState.editing = null;
+        pricingMsg('');
+        const tbody = document.getElementById('pricing-tbody');
+        document.getElementById('pricing-company-name').textContent =
+            sel.value ? sel.options[sel.selectedIndex].textContent : 'the selected customer';
+        if (!sel.value) {
+            pricingState.products = [];
+            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">Select a customer to see and edit their pricing.</td></tr>';
+            document.getElementById('pricing-pager').innerHTML = '';
+            return;
+        }
+        const qs = new URLSearchParams({
+            page: pricingState.page, limit: pricingState.limit,
+            q: document.getElementById('pricing-search').value.trim(),
+            brand: document.getElementById('pricing-brand').value.trim()
+        });
+        try {
+            const resp = await adminFetch(`/pricing/companies/${sel.value}/products?${qs}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load products.');
+            pricingState.products = data.products || [];
+            pricingState.total = data.total || 0;
+            pricingState.canUnlock = !!data.can_unlock_ppg;
+            pricingRender();
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-red-500">${esc(err.message)}</td></tr>`;
+        }
+    }
+
+    function pricingMoney(n) { return '$' + Number(n).toFixed(2); }
+
+    function pricingPriceCell(p) {
+        if (pricingState.editing === p.id) {
+            return `<div class="flex items-center justify-end gap-1">
+                <span class="text-gray-400">$</span>
+                <input id="pricing-input" type="number" step="0.01" min="0.01" inputmode="decimal"
+                    value="${p.price_on_request ? '' : Number(p.price).toFixed(2)}"
+                    onkeydown="pricingKey(event, '${p.id}')"
+                    class="w-28 px-2 py-1 border rounded text-right font-semibold" aria-label="New price for ${esc(p.name)}">
+                <button onclick="pricingSave('${p.id}')" class="px-2 py-1 bg-blue-700 text-white rounded text-xs font-semibold" title="Save (Enter)">Save</button>
+                <button onclick="pricingCancel()" class="px-2 py-1 border rounded text-xs" title="Cancel (Esc)">Cancel</button>
+            </div>`;
+        }
+        const label = p.price_on_request
+            ? '<span class="text-amber-600">On request</span>'
+            : pricingMoney(p.price);
+        const lock = p.ppg_locked
+            ? `<i class="fas fa-lock text-gray-400 mr-1" title="PPG list price ${pricingMoney(p.master_price)} on every customer"></i>` : '';
+        return `${lock}<button onclick="pricingEdit('${p.id}')" class="font-semibold hover:text-blue-700 hover:underline" title="Click to edit this customer's price">${label}</button>`;
+    }
+
+    function pricingRender() {
+        const tbody = document.getElementById('pricing-tbody');
+        const rows = pricingState.products;
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No items match.</td></tr>';
+        } else {
+            tbody.innerHTML = rows.map(p => `
+                <tr class="border-b hover:bg-gray-50 ${p.is_active ? '' : 'opacity-60'}">
+                    <td class="px-4 py-3 font-medium text-gray-800">${esc(p.name)}${p.is_active ? '' : ' <span class="text-xs text-gray-400">(hidden)</span>'}</td>
+                    <td class="px-4 py-3 text-gray-500">${esc(p.brand)}</td>
+                    <td class="px-4 py-3 text-gray-400 font-mono">${esc(p.sku || '-')}</td>
+                    <td class="px-4 py-3 text-right text-gray-400">${p.list_price ? pricingMoney(p.list_price) : '&mdash;'}</td>
+                    <td class="px-4 py-3 text-right">${pricingPriceCell(p)}</td>
+                </tr>`).join('');
+        }
+        const pages = Math.max(1, Math.ceil(pricingState.total / pricingState.limit));
+        document.getElementById('pricing-pager').innerHTML = `
+            <span>${pricingState.total} item${pricingState.total === 1 ? '' : 's'}</span>
+            <span class="flex items-center gap-2">
+                <button onclick="pricingLoad(${pricingState.page - 1})" ${pricingState.page <= 1 ? 'disabled' : ''} class="px-3 py-1 border rounded disabled:opacity-40">Prev</button>
+                Page ${pricingState.page} of ${pages}
+                <button onclick="pricingLoad(${pricingState.page + 1})" ${pricingState.page >= pages ? 'disabled' : ''} class="px-3 py-1 border rounded disabled:opacity-40">Next</button>
+            </span>`;
+        if (pricingState.editing) {
+            const input = document.getElementById('pricing-input');
+            if (input) { input.focus(); input.select(); }
+        }
+    }
+
+    function pricingEdit(id) {
+        if (pricingState.saving) return;
+        pricingState.editing = id;
+        pricingMsg('');
+        pricingRender();
+    }
+
+    function pricingCancel() {
+        pricingState.editing = null;
+        pricingMsg('');
+        pricingRender();
+    }
+
+    function pricingKey(ev, id) {
+        if (ev.key === 'Enter') { ev.preventDefault(); pricingSave(id); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); pricingCancel(); }
+    }
+
+    async function pricingSave(id, extra) {
+        if (pricingState.saving) return;
+        const p = pricingState.products.find(x => x.id === id);
+        const input = document.getElementById('pricing-input');
+        if (!p || !input) return;
+        const price = input.value.trim();
+        if (price === '' || !(Number(price) > 0)) { pricingMsg('Enter a price above $0.00.', 'error'); return; }
+
+        pricingState.saving = true;
+        try {
+            const resp = await adminFetch(`/pricing/companies/${pricingState.companyId}/products/${id}/price`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    price: Number(price),
+                    expected_price: p.price_on_request ? null : Number(p.price),
+                    ...(extra || {})
+                })
+            });
+            const data = await resp.json().catch(() => ({}));
+            pricingState.saving = false;
+
+            if (resp.ok) {
+                p.price = data.product ? data.product.price : Number(price);
+                p.price_on_request = false;
+                pricingState.editing = null;
+                pricingRender();
+                pricingMsg(data.unchanged ? 'Price unchanged.' : `${p.name}: ${pricingMoney(data.old_price)} → ${pricingMoney(data.new_price)}` +
+                    (data.warning ? ` — ${data.warning}` : ''), 'ok');
+                return;
+            }
+            if (data.code === 'ppg_locked') {
+                if (pricingState.canUnlock) {
+                    if (confirm(`${p.name} is a PPG item held at the PPG list price of ${pricingMoney(data.master_price)} on every customer.\n\nOverride it for THIS customer only?`)) {
+                        return pricingSave(id, { unlock_ppg: true, ...(extra || {}) });
+                    }
+                } else {
+                    pricingMsg(data.error, 'error');
+                }
+                return;
+            }
+            if (data.code === 'needs_confirmation') {
+                if (confirm(`${data.error}\n\nSave it anyway? It will be recorded for review.`)) {
+                    return pricingSave(id, { ...(extra || {}), confirm_outlier: true });
+                }
+                return;
+            }
+            if (data.code === 'stale') {
+                p.price = data.current_price;
+                pricingState.editing = null;
+                pricingRender();
+                pricingMsg(data.error, 'error');
+                return;
+            }
+            pricingMsg(data.error || 'Could not save the price.', 'error');
+        } catch (err) {
+            pricingState.saving = false;
+            pricingMsg('Could not save the price: ' + err.message, 'error');
+        }
+    }
 
     async function loadAdminProducts() {
         const companyId = document.getElementById('admin-product-company').value;
