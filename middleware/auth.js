@@ -214,6 +214,8 @@ const ORDER_DESK_ALLOW = [
     ['GET', /^\/pricing\/companies$/],
     ['GET', /^\/pricing\/companies\/[^/]+\/products$/],
     ['PUT', /^\/pricing\/companies\/[^/]+\/products\/[^/]+\/price$/],
+    ['GET', /^\/pricing\/companies\/[^/]+\/filters$/],
+    ['POST', /^\/pricing\/companies\/[^/]+\/bulk$/],
     ['GET', /^\/whoami$/],
     ['PUT', /^\/me\/password$/]
 ];

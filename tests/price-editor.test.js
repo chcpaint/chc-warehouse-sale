@@ -486,3 +486,278 @@ test('the generic product update no longer accepts price fields', async () => {
     const ok = await request(app).put(`/api/admin/companies/${co}/products/${p}`).send({ is_active: false });
     assert.equal(ok.status, 200, 'non-price edits still work');
 });
+
+// ======================================================================
+// Sales-screen filters + bulk percent change
+// ======================================================================
+
+const bulk = (co, body) => request(app).post(`/api/admin/pricing/companies/${co}/bulk`).send(body);
+
+function seedCatalogue(label) {
+    const co = uid('co-' + label);
+    seedCompany(co, label);
+    const ids = {};
+    const add = (key, patch) => { ids[key] = uid(`${label}-${key}`); seedProduct(ids[key], co, patch); };
+    add('ppg1',  { brand: 'PPG',  category: 'Clear',  name: 'PPG Clear One', sku: `${label}-PPG1`, price: 100 });
+    add('ppg2',  { brand: 'PPG',  category: 'Primer', name: 'PPG Primer',    sku: `${label}-PPG2`, price: 50 });
+    add('ehp1',  { brand: 'EHP',  category: 'Toner',  name: 'EHP Toner Red', sku: `${label}-EHP1`, price: 40 });
+    add('ehp2',  { brand: 'EHP',  category: 'Toner',  name: 'EHP Toner Blue',sku: `${label}-EHP2`, price: 30 });
+    add('nrt',   { brand: 'Norton', category: 'Abrasives', name: 'Norton Disc', sku: `${label}-NRT`, price: 10 });
+    seedLibrary(`${label}-PPG1`, 100, 'PPG');
+    seedLibrary(`${label}-PPG2`, 50, 'PPG');
+    return { co, ids };
+}
+
+test('filters lists this customer\'s brands and categories (hidden items included)', async () => {
+    asRole('order_manager');
+    const { co } = seedCatalogue('filt');
+    seedProduct(uid('filt-hidden'), co, { brand: 'Zeta', category: 'Misc', sku: 'filt-Z', is_active: false });
+    const other = uid('co-filt-other'); seedCompany(other, 'Other');
+    seedProduct(uid('filt-other-p'), other, { brand: 'NotMine', category: 'NotMineCat', sku: 'filt-O' });
+
+    const resp = await request(app).get(`/api/admin/pricing/companies/${co}/filters`);
+    assert.equal(resp.status, 200);
+    assert.deepEqual(resp.body.brands, ['EHP', 'Norton', 'PPG', 'Zeta']);
+    assert.deepEqual(resp.body.categories, ['Abrasives', 'Clear', 'Misc', 'Primer', 'Toner']);
+});
+
+test('the list takes the sales screen\'s filters: search (incl. brand), brand, category', async () => {
+    asRole('order_manager');
+    const { co } = seedCatalogue('lst');
+    const get = qs => request(app).get(`/api/admin/pricing/companies/${co}/products?${qs}`);
+
+    assert.equal((await get('')).body.total, 5);
+    assert.equal((await get('brand=EHP')).body.total, 2);
+    assert.equal((await get('category=Toner')).body.total, 2);
+    assert.equal((await get('brand=PPG&category=Primer')).body.total, 1);
+    assert.equal((await get('search=ehp')).body.total, 2, 'search matches brand');
+    assert.equal((await get('search=lst-nrt')).body.total, 1, 'search matches sku');
+    assert.equal((await get('search=toner&brand=EHP')).body.total, 2);
+});
+
+test('bulk preview changes nothing and says what would happen', async () => {
+    asRole('super_admin');
+    const { co, ids } = seedCatalogue('prev');
+
+    const resp = await bulk(co, { percent: 10, scope: { brand: 'EHP' } });
+    assert.equal(resp.status, 200);
+    assert.equal(resp.body.preview, true);
+    assert.equal(resp.body.matched, 2);
+    assert.equal(resp.body.will_change, 2);
+    assert.equal(resp.body.total_before, 70);
+    assert.equal(resp.body.total_after, 77);
+    const red = resp.body.sample.find(s => s.id === ids.ehp1);
+    assert.equal(red.old_price, 40);
+    assert.equal(red.new_price, 44);
+    assert.equal(stored(ids.ehp1).price, 40, 'preview must not write');
+});
+
+test('bulk apply raises one brand for one customer only, audited, other customer untouched', async () => {
+    asRole('super_admin');
+    const { co, ids } = seedCatalogue('app');
+    const other = seedCatalogue('app-other');
+
+    const resp = await bulk(co, { percent: 3, scope: { category: 'Toner' }, apply: true, expected_count: 2, reason: 'Oct increase' });
+    assert.equal(resp.status, 200);
+    assert.equal(resp.body.changed, 2);
+    assert.equal(stored(ids.ehp1).price, 41.2);
+    assert.equal(stored(ids.ehp2).price, 30.9);
+    assert.equal(stored(ids.nrt).price, 10, 'outside the scope');
+    assert.equal(stored(other.ids.ehp1).price, 40, 'another customer must not move');
+
+    const log = lastAudit();
+    assert.equal(log.action, 'product_prices_bulk_changed');
+    assert.equal(log.entity_id, co);
+    assert.equal(log.details.changed, 2);
+    assert.equal(log.details.reason, 'Oct increase');
+    assert.deepEqual(log.details.items.map(i => [i.old, i.new]).sort(), [[30, 30.9], [40, 41.2]]);
+});
+
+test('bulk apply refuses when the count differs from what the manager was shown', async () => {
+    asRole('super_admin');
+    const { co, ids } = seedCatalogue('cnt');
+
+    const resp = await bulk(co, { percent: 5, scope: { brand: 'EHP' }, apply: true, expected_count: 7 });
+    assert.equal(resp.status, 409);
+    assert.equal(resp.body.code, 'scope_changed');
+    assert.equal(resp.body.will_change, 2);
+    assert.equal(stored(ids.ehp1).price, 40);
+
+    const missing = await bulk(co, { percent: 5, scope: { brand: 'EHP' }, apply: true });
+    assert.equal(missing.status, 409, 'no expected_count means not confirmed');
+});
+
+test('bulk skips PPG items by default and says how many', async () => {
+    asRole('super_admin');
+    const { co, ids } = seedCatalogue('ppgskip');
+
+    const prev = await bulk(co, { percent: 3, scope: { brand: 'PPG' } });
+    assert.equal(prev.body.will_change, 0);
+    assert.equal(prev.body.skipped.ppg_locked, 2);
+
+    const resp = await bulk(co, { percent: 3, scope: { brand: 'PPG' }, apply: true, expected_count: 0 });
+    assert.equal(resp.status, 200);
+    assert.equal(stored(ids.ppg1).price, 100);
+});
+
+test('an admin can include PPG for this customer; the override is recorded', async () => {
+    asRole('super_admin');
+    const { co, ids } = seedCatalogue('ppgin');
+    const other = seedCatalogue('ppgin-other');
+
+    const resp = await bulk(co, { percent: 3, scope: { brand: 'PPG' }, include_ppg: true, apply: true, expected_count: 2 });
+    assert.equal(resp.status, 200);
+    assert.equal(stored(ids.ppg1).price, 103);
+    assert.equal(stored(ids.ppg2).price, 51.5);
+    assert.equal(stored(other.ids.ppg1).price, 100, 'PPG at another customer stays on the list price');
+    assert.equal(lastAudit().details.ppg_override_items, 2);
+});
+
+test('an order manager cannot include PPG, however they ask', async () => {
+    asRole('order_manager');
+    const { co, ids } = seedCatalogue('ppgdeny');
+
+    const resp = await bulk(co, { percent: 3, scope: { brand: 'PPG' }, include_ppg: true, apply: true, expected_count: 2 });
+    assert.equal(resp.status, 403);
+    assert.equal(stored(ids.ppg1).price, 100);
+
+    // ...but can run the same bulk change on everything that is not PPG.
+    const ok = await bulk(co, { percent: 3, scope: { search: 'e' }, apply: false });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.can_unlock_ppg, false);
+});
+
+test('bulk can target ticked items only', async () => {
+    asRole('order_manager');
+    const { co, ids } = seedCatalogue('pick');
+
+    const resp = await bulk(co, { percent: -10, scope: { product_ids: [ids.ehp1, ids.nrt] }, apply: true, expected_count: 2 });
+    assert.equal(resp.status, 200);
+    assert.equal(stored(ids.ehp1).price, 36);
+    assert.equal(stored(ids.nrt).price, 9);
+    assert.equal(stored(ids.ehp2).price, 30);
+});
+
+test('a bulk change must name a scope, or explicitly mean everything', async () => {
+    asRole('super_admin');
+    const { co, ids } = seedCatalogue('every');
+
+    const none = await bulk(co, { percent: 3 });
+    assert.equal(none.status, 400);
+
+    const all = await bulk(co, { percent: 10, all_items: true, apply: true, expected_count: 3 });
+    assert.equal(all.status, 200, 'everything except the 2 PPG items');
+    assert.equal(all.body.changed, 3);
+    assert.equal(stored(ids.nrt).price, 11);
+    assert.equal(stored(ids.ppg1).price, 100);
+});
+
+test('bulk refuses bad percentages', async () => {
+    asRole('super_admin');
+    const { co } = seedCatalogue('pct');
+    for (const percent of [0, '', null, 'abc', -95, 500]) {
+        const resp = await bulk(co, { percent, scope: { brand: 'EHP' } });
+        assert.equal(resp.status, 400, `percent ${JSON.stringify(percent)}`);
+    }
+});
+
+test('bulk skips price-on-request lines and prices that would be a decimal error', async () => {
+    asRole('super_admin');
+    const co = uid('co-skip'); seedCompany(co, 'Skip');
+    const por = uid('skip-por'), cheap = uid('skip-cheap'), fine = uid('skip-fine');
+    seedProduct(por, co, { brand: 'S', sku: 'SK-1', price: 0, price_on_request: true });
+    seedProduct(cheap, co, { brand: 'S', sku: 'SK-2', price: 20 });
+    seedProduct(fine, co, { brand: 'S', sku: 'SK-3', price: 20 });
+    seedLibrary('SK-2', 400, 'Rupes'); // 20 -> 10 is 2.5% of list: refused
+    seedLibrary('SK-3', 20, 'Rupes');
+
+    const resp = await bulk(co, { percent: -50, scope: { brand: 'S' }, apply: true, expected_count: 1 });
+    assert.equal(resp.status, 200);
+    assert.equal(resp.body.skipped.price_on_request, 1);
+    assert.equal(resp.body.skipped.refused, 1);
+    assert.equal(stored(fine).price, 10);
+    assert.equal(stored(cheap).price, 20);
+    assert.equal(stored(por).price_on_request, true);
+});
+
+test('bulk outliers need include_outliers; otherwise they are skipped', async () => {
+    asRole('super_admin');
+    const co = uid('co-out'); seedCompany(co, 'Outliers');
+    const p = uid('out-p'); seedProduct(p, co, { brand: 'O', sku: 'OUT-1', price: 100 });
+    seedLibrary('OUT-1', 100, 'Rupes');
+
+    const skip = await bulk(co, { percent: -75, scope: { brand: 'O' } });
+    assert.equal(skip.body.will_change, 0);
+    assert.equal(skip.body.skipped.outlier, 1);
+
+    const take = await bulk(co, { percent: -75, scope: { brand: 'O' }, include_outliers: true, apply: true, expected_count: 1 });
+    assert.equal(take.status, 200);
+    assert.equal(stored(p).price, 25);
+    assert.equal(lastAudit().details.outlier_items, 1);
+});
+
+test('bulk applies from the live price, not a stale one', async () => {
+    asRole('super_admin');
+    const { co, ids } = seedCatalogue('live');
+    stored(ids.ehp1).price = 55; // changed since anyone last looked
+    const resp = await bulk(co, { percent: 10, scope: { product_ids: [ids.ehp1] }, apply: true, expected_count: 1 });
+    assert.equal(resp.status, 200);
+    assert.equal(stored(ids.ehp1).price, 60.5);
+});
+
+test('a row repriced by someone else between preview-compute and write is left alone', async () => {
+    asRole('super_admin');
+    const { co, ids } = seedCatalogue('race');
+
+    // Let the route read 40, then change the row just before its write lands.
+    const realFrom = fake.from;
+    let tripped = false;
+    fake.from = function (table) {
+        const q = realFrom.call(this, table);
+        if (table === 'products') {
+            const realUpdate = q.update;
+            q.update = function (payload) {
+                const uq = realUpdate.call(this, payload);
+                const realThen = uq.then;
+                uq.then = function (res, rej) {
+                    if (!tripped) { tripped = true; stored(ids.ehp1).price = 99; }
+                    return realThen.call(this, res, rej);
+                };
+                return uq;
+            };
+        }
+        return q;
+    };
+    try {
+        const resp = await bulk(co, { percent: 10, scope: { product_ids: [ids.ehp1] }, apply: true, expected_count: 1 });
+        assert.equal(resp.status, 200);
+        assert.equal(resp.body.changed, 0);
+        assert.equal(resp.body.changed_meanwhile, 1);
+        assert.equal(stored(ids.ehp1).price, 99, 'the other person\'s price survives');
+    } finally {
+        fake.from = realFrom;
+    }
+    assert.equal(tripped, true, 'the race was actually simulated');
+});
+
+test('planBulk and applyPercent round to the cent', () => {
+    const route = require('../routes/price-editor-admin');
+    assert.equal(route.applyPercent(19.99, 3), 20.59);
+    assert.equal(route.applyPercent(10, -33.33), 6.67);
+    assert.equal(route.applyPercent(0.99, 3), 1.02);
+});
+
+test('order_desk is refused on bulk and filters', async () => {
+    asRole('order_desk');
+    const { co } = seedCatalogue('desk');
+    assert.equal((await bulk(co, { percent: 3, scope: { brand: 'EHP' } })).status, 403);
+    assert.equal((await request(app).get(`/api/admin/pricing/companies/${co}/filters`)).status, 403);
+});
+
+test('a company admin cannot bulk-change another customer', async () => {
+    const mine = seedCatalogue('cadm-mine'), other = seedCatalogue('cadm-other');
+    asRole('admin', { company_id: mine.co });
+    assert.equal((await bulk(mine.co, { percent: 3, scope: { brand: 'EHP' }, apply: true, expected_count: 2 })).status, 200);
+    assert.equal((await bulk(other.co, { percent: 3, scope: { brand: 'EHP' }, apply: true, expected_count: 2 })).status, 403);
+    assert.equal(stored(other.ids.ehp1).price, 40);
+});

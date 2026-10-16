@@ -751,42 +751,75 @@
                 <!-- Products Management -->
                 <section id="section-pricing" class="hidden fade-in">
                     <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
-                        <div class="flex flex-wrap items-end gap-4">
+                        <div class="flex flex-wrap items-end gap-3">
                             <div class="min-w-[220px] flex-1">
                                 <label for="pricing-company" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Customer</label>
-                                <select id="pricing-company" onchange="pricingLoad(1)" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                <select id="pricing-company" onchange="pricingCompanyChanged()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                                     <option value="">Select a customer</option>
                                 </select>
                             </div>
-                            <div class="min-w-[200px] flex-1">
-                                <label for="pricing-search" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search item or SKU</label>
-                                <input id="pricing-search" type="search" oninput="pricingDebounce()" placeholder="Name or SKU" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            <div class="min-w-[220px] flex-[2]">
+                                <label for="pricing-search" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search</label>
+                                <div class="relative">
+                                    <i class="fas fa-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
+                                    <input id="pricing-search" type="search" oninput="pricingDebounce()" placeholder="Search products..." autocomplete="off" class="w-full pl-9 pr-3 py-2 border rounded-lg text-sm">
+                                </div>
                             </div>
-                            <div class="min-w-[160px]">
+                            <div class="min-w-[150px] flex-1">
                                 <label for="pricing-brand" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Brand</label>
-                                <input id="pricing-brand" type="search" oninput="pricingDebounce()" placeholder="Exact brand" class="w-full px-3 py-2 border rounded-lg text-sm">
+                                <select id="pricing-brand" onchange="pricingLoad(1)" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"><option value="">All Brands</option></select>
                             </div>
+                            <div class="min-w-[150px] flex-1">
+                                <label for="pricing-category" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Category</label>
+                                <select id="pricing-category" onchange="pricingLoad(1)" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"><option value="">All Categories</option></select>
+                            </div>
+                            <button onclick="pricingClearFilters()" class="px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Clear</button>
                         </div>
                         <p class="text-xs text-gray-500 mt-3">
-                            A price changed here applies to <strong id="pricing-company-name">the selected customer</strong> only &mdash; every other customer keeps their own price for the same item.
-                            Click a price to edit it; Enter saves, Esc cancels.
-                            <i class="fas fa-lock text-gray-400"></i> marks a PPG item held at the PPG list price.
+                            Prices here belong to <strong id="pricing-company-name">the selected customer</strong> only &mdash; every other customer keeps their own price for the same item.
+                            Click a price to change it. <i class="fas fa-lock text-gray-400"></i> marks a PPG item held at the PPG list price.
                         </p>
                         <p id="pricing-msg" class="hidden text-sm mt-2" role="status"></p>
                     </div>
+
+                    <!-- Bulk change: applies to everything the filters above match, or to the ticked rows. -->
+                    <div id="pricing-bulk-bar" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+                        <div class="flex flex-wrap items-end gap-3">
+                            <div class="flex-1 min-w-[220px]">
+                                <p class="text-sm font-semibold text-blue-900"><i class="fas fa-percent mr-1"></i> Change prices by a percentage</p>
+                                <p id="pricing-bulk-scope" class="text-xs text-blue-800 mt-1"></p>
+                            </div>
+                            <div>
+                                <label for="pricing-bulk-dir" class="block text-xs font-semibold text-blue-900 uppercase mb-1">Change</label>
+                                <select id="pricing-bulk-dir" class="px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="up">Increase</option>
+                                    <option value="down">Decrease</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="pricing-bulk-pct" class="block text-xs font-semibold text-blue-900 uppercase mb-1">By %</label>
+                                <input id="pricing-bulk-pct" type="number" min="0.01" max="200" step="0.01" placeholder="3" onkeydown="if(event.key==='Enter'){event.preventDefault();pricingBulkPreview();}" class="w-24 px-3 py-2 border rounded-lg text-sm text-right">
+                            </div>
+                            <button onclick="pricingBulkPreview()" class="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm font-semibold">Review change</button>
+                            <button id="pricing-clear-ticks" onclick="pricingClearTicks()" class="hidden px-3 py-2 border rounded-lg text-sm text-blue-800 bg-white">Clear ticks</button>
+                        </div>
+                    </div>
+
                     <div class="bg-white rounded-xl shadow-sm border overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead class="bg-gray-50 text-xs uppercase text-gray-500">
                                 <tr>
+                                    <th class="px-4 py-3 w-8"><input type="checkbox" id="pricing-select-all" onchange="pricingTickPage(this.checked)" class="w-4 h-4 rounded border-gray-300" aria-label="Tick all items on this page"></th>
                                     <th class="px-4 py-3 text-left">Item</th>
                                     <th class="px-4 py-3 text-left">Brand</th>
+                                    <th class="px-4 py-3 text-left">Category</th>
                                     <th class="px-4 py-3 text-left">SKU</th>
                                     <th class="px-4 py-3 text-right">List</th>
                                     <th class="px-4 py-3 text-right">Price</th>
                                 </tr>
                             </thead>
                             <tbody id="pricing-tbody">
-                                <tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">Select a customer to see and edit their pricing.</td></tr>
+                                <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Select a customer to see and edit their pricing.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1945,6 +1978,33 @@
     </div>
 
     <!-- Edit Staff Modal (name/email of an existing CHC staff account) -->
+    <!-- Customer Pricing: confirm one price change -->
+    <div id="pricing-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="pricing-confirm-title" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 id="pricing-confirm-title" class="text-lg font-bold mb-3">Confirm price change</h3>
+            <div id="pricing-confirm-body" class="text-sm text-gray-700 space-y-3"></div>
+            <div class="flex justify-end gap-2 mt-6">
+                <button id="pricing-confirm-cancel" class="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+                <button id="pricing-confirm-ok" class="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm font-semibold">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer Pricing: review and confirm a bulk percentage change -->
+    <div id="pricing-bulk-modal" role="dialog" aria-modal="true" aria-labelledby="pricing-bulk-title" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-start mb-3">
+                <h3 id="pricing-bulk-title" class="text-lg font-bold">Review price change</h3>
+                <button onclick="pricingBulkClose()" class="text-gray-400 hover:text-gray-600" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="pricing-bulk-body" class="text-sm text-gray-700"></div>
+            <div class="flex justify-end gap-2 mt-6">
+                <button onclick="pricingBulkClose()" class="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+                <button id="pricing-bulk-apply" onclick="pricingBulkApply()" class="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed" disabled>Apply</button>
+            </div>
+        </div>
+    </div>
+
     <div id="admin-edit-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <div class="flex justify-between items-center mb-4">
@@ -5188,13 +5248,19 @@
     let filterDebounce = null;
 
     // ============================================================
-    // CUSTOMER PRICING -- per-customer, per-item inline price editor.
-    // A save changes ONE customer's catalogue row (the API is scoped to
-    // /pricing/companies/:companyId/products/:productId/price). The server
-    // owns the rules (PPG list-price lock, price sanity, audit); this only
-    // reacts to its answers.
+    // CUSTOMER PRICING -- per-customer price editor.
+    //
+    // Everything here is scoped to ONE customer (/pricing/companies/:id/...).
+    // The server owns the rules (PPG list-price lock, price sanity, audit,
+    // recomputing a bulk change); this screen shows what will happen, asks a
+    // manager to confirm it, and reacts to the server's answer.
     // ============================================================
-    const pricingState = { companyId: '', page: 1, limit: 100, total: 0, products: [], canUnlock: false, editing: null, saving: false };
+    const pricingState = {
+        companyId: '', companyName: '', page: 1, limit: 100, total: 0, products: [],
+        canUnlock: false, editing: null, saving: false,
+        ticked: new Set(), loadSeq: 0,
+        bulk: { percent: 0, includePPG: false, includeOutliers: false, preview: null, busy: false }
+    };
     let pricingTimer = null;
 
     function pricingMsg(text, kind) {
@@ -5205,11 +5271,44 @@
         el.textContent = text;
     }
 
+    function pricingMoney(n) { return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function pricingPct(oldP, newP) {
+        const d = (newP - oldP) / oldP * 100;
+        return (d >= 0 ? '+' : '−') + Math.abs(d).toFixed(1) + '%';
+    }
+
     function pricingDebounce() {
         clearTimeout(pricingTimer);
         pricingTimer = setTimeout(() => pricingLoad(1), 300);
     }
 
+    // --- a promise-based confirmation pop-up ---------------------------------
+    function pricingConfirm({ title, html, confirmText, danger }) {
+        return new Promise(resolve => {
+            document.getElementById('pricing-confirm-title').textContent = title;
+            document.getElementById('pricing-confirm-body').innerHTML = html;
+            const ok = document.getElementById('pricing-confirm-ok');
+            const cancel = document.getElementById('pricing-confirm-cancel');
+            ok.textContent = confirmText || 'Confirm';
+            ok.className = 'px-4 py-2 text-white rounded-lg text-sm font-semibold ' +
+                (danger ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-700 hover:bg-blue-800');
+            const modal = document.getElementById('pricing-confirm-modal');
+            const finish = v => {
+                document.removeEventListener('keydown', onKey, true);
+                ok.onclick = cancel.onclick = null;
+                hideModal('pricing-confirm-modal');
+                resolve(v);
+            };
+            const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); } };
+            document.addEventListener('keydown', onKey, true);
+            ok.onclick = () => finish(true);
+            cancel.onclick = () => finish(false);
+            showModal('pricing-confirm-modal');
+            ok.focus();
+        });
+    }
+
+    // --- loading ----------------------------------------------------------------
     async function pricingInit() {
         const sel = document.getElementById('pricing-company');
         if (sel.options.length > 1) return;
@@ -5223,45 +5322,90 @@
                 o.textContent = c.name + (c.is_active === false ? ' (inactive)' : '');
                 sel.appendChild(o);
             });
-            if ((data.companies || []).length === 1) { sel.value = data.companies[0].id; pricingLoad(1); }
+            if ((data.companies || []).length === 1) { sel.value = data.companies[0].id; pricingCompanyChanged(); }
         } catch (err) { pricingMsg(err.message, 'error'); }
+    }
+
+    async function pricingCompanyChanged() {
+        const sel = document.getElementById('pricing-company');
+        pricingState.ticked = new Set();
+        document.getElementById('pricing-search').value = '';
+        fillPricingFilter('pricing-brand', [], 'All Brands');
+        fillPricingFilter('pricing-category', [], 'All Categories');
+        if (sel.value) {
+            try {
+                const resp = await adminFetch(`/pricing/companies/${sel.value}/filters`);
+                const data = await resp.json();
+                if (resp.ok) {
+                    fillPricingFilter('pricing-brand', data.brands || [], 'All Brands');
+                    fillPricingFilter('pricing-category', data.categories || [], 'All Categories');
+                }
+            } catch (err) { console.error('Pricing filters failed:', err); }
+        }
+        pricingLoad(1);
+    }
+
+    function fillPricingFilter(id, options, label) {
+        const el = document.getElementById(id);
+        el.innerHTML = '';
+        const first = document.createElement('option');
+        first.value = ''; first.textContent = label;
+        el.appendChild(first);
+        options.forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; el.appendChild(o); });
+    }
+
+    function pricingClearFilters() {
+        document.getElementById('pricing-search').value = '';
+        document.getElementById('pricing-brand').value = '';
+        document.getElementById('pricing-category').value = '';
+        pricingLoad(1);
+    }
+
+    function pricingFilters() {
+        return {
+            search: document.getElementById('pricing-search').value.trim(),
+            brand: document.getElementById('pricing-brand').value,
+            category: document.getElementById('pricing-category').value
+        };
     }
 
     async function pricingLoad(page) {
         const sel = document.getElementById('pricing-company');
         pricingState.companyId = sel.value;
+        pricingState.companyName = sel.value ? sel.options[sel.selectedIndex].textContent : '';
         pricingState.page = page || 1;
         pricingState.editing = null;
         pricingMsg('');
         const tbody = document.getElementById('pricing-tbody');
-        document.getElementById('pricing-company-name').textContent =
-            sel.value ? sel.options[sel.selectedIndex].textContent : 'the selected customer';
+        document.getElementById('pricing-company-name').textContent = pricingState.companyName || 'the selected customer';
+        document.getElementById('pricing-bulk-bar').classList.toggle('hidden', !sel.value);
         if (!sel.value) {
-            pricingState.products = [];
-            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">Select a customer to see and edit their pricing.</td></tr>';
+            pricingState.products = []; pricingState.total = 0;
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Select a customer to see and edit their pricing.</td></tr>';
             document.getElementById('pricing-pager').innerHTML = '';
             return;
         }
-        const qs = new URLSearchParams({
-            page: pricingState.page, limit: pricingState.limit,
-            q: document.getElementById('pricing-search').value.trim(),
-            brand: document.getElementById('pricing-brand').value.trim()
-        });
+        const f = pricingFilters();
+        const qs = new URLSearchParams({ page: pricingState.page, limit: pricingState.limit });
+        if (f.search) qs.set('search', f.search);
+        if (f.brand) qs.set('brand', f.brand);
+        if (f.category) qs.set('category', f.category);
+        const seq = ++pricingState.loadSeq;
         try {
             const resp = await adminFetch(`/pricing/companies/${sel.value}/products?${qs}`);
             const data = await resp.json();
+            if (seq !== pricingState.loadSeq) return; // a newer search answered first
             if (!resp.ok) throw new Error(data.error || 'Failed to load products.');
             pricingState.products = data.products || [];
             pricingState.total = data.total || 0;
             pricingState.canUnlock = !!data.can_unlock_ppg;
             pricingRender();
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-red-500">${esc(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-8 text-center text-red-500">${esc(err.message)}</td></tr>`;
         }
     }
 
-    function pricingMoney(n) { return '$' + Number(n).toFixed(2); }
-
+    // --- table ----------------------------------------------------------------
     function pricingPriceCell(p) {
         if (pricingState.editing === p.id) {
             return `<div class="flex items-center justify-end gap-1">
@@ -5270,28 +5414,29 @@
                     value="${p.price_on_request ? '' : Number(p.price).toFixed(2)}"
                     onkeydown="pricingKey(event, '${p.id}')"
                     class="w-28 px-2 py-1 border rounded text-right font-semibold" aria-label="New price for ${esc(p.name)}">
-                <button onclick="pricingSave('${p.id}')" class="px-2 py-1 bg-blue-700 text-white rounded text-xs font-semibold" title="Save (Enter)">Save</button>
+                <button onclick="pricingSave('${p.id}')" class="px-2 py-1 bg-blue-700 text-white rounded text-xs font-semibold" title="Review and save (Enter)">Save</button>
                 <button onclick="pricingCancel()" class="px-2 py-1 border rounded text-xs" title="Cancel (Esc)">Cancel</button>
             </div>`;
         }
         const label = p.price_on_request
-            ? '<span class="text-amber-600">On request</span>'
-            : pricingMoney(p.price);
+            ? '<span class="text-amber-600">On request</span>' : pricingMoney(p.price);
         const lock = p.ppg_locked
             ? `<i class="fas fa-lock text-gray-400 mr-1" title="PPG list price ${pricingMoney(p.master_price)} on every customer"></i>` : '';
-        return `${lock}<button onclick="pricingEdit('${p.id}')" class="font-semibold hover:text-blue-700 hover:underline" title="Click to edit this customer's price">${label}</button>`;
+        return `${lock}<button onclick="pricingEdit('${p.id}')" class="font-semibold hover:text-blue-700 hover:underline" title="Click to change this customer's price">${label}</button>`;
     }
 
     function pricingRender() {
         const tbody = document.getElementById('pricing-tbody');
         const rows = pricingState.products;
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No items match.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No products found.</td></tr>';
         } else {
             tbody.innerHTML = rows.map(p => `
-                <tr class="border-b hover:bg-gray-50 ${p.is_active ? '' : 'opacity-60'}">
+                <tr class="border-b hover:bg-gray-50 ${pricingState.ticked.has(p.id) ? 'bg-blue-50' : ''} ${p.is_active ? '' : 'opacity-60'}">
+                    <td class="px-4 py-3"><input type="checkbox" class="w-4 h-4 rounded border-gray-300" ${pricingState.ticked.has(p.id) ? 'checked' : ''} onchange="pricingTick('${p.id}', this.checked)" aria-label="Tick ${esc(p.name)}"></td>
                     <td class="px-4 py-3 font-medium text-gray-800">${esc(p.name)}${p.is_active ? '' : ' <span class="text-xs text-gray-400">(hidden)</span>'}</td>
                     <td class="px-4 py-3 text-gray-500">${esc(p.brand)}</td>
+                    <td class="px-4 py-3 text-gray-500">${esc(p.category || '')}</td>
                     <td class="px-4 py-3 text-gray-400 font-mono">${esc(p.sku || '-')}</td>
                     <td class="px-4 py-3 text-right text-gray-400">${p.list_price ? pricingMoney(p.list_price) : '&mdash;'}</td>
                     <td class="px-4 py-3 text-right">${pricingPriceCell(p)}</td>
@@ -5305,25 +5450,54 @@
                 Page ${pricingState.page} of ${pages}
                 <button onclick="pricingLoad(${pricingState.page + 1})" ${pricingState.page >= pages ? 'disabled' : ''} class="px-3 py-1 border rounded disabled:opacity-40">Next</button>
             </span>`;
+        const all = document.getElementById('pricing-select-all');
+        all.checked = rows.length > 0 && rows.every(p => pricingState.ticked.has(p.id));
+        pricingScopeText();
         if (pricingState.editing) {
             const input = document.getElementById('pricing-input');
             if (input) { input.focus(); input.select(); }
         }
     }
 
+    // --- ticking rows -----------------------------------------------------------
+    function pricingTick(id, on) {
+        if (on) pricingState.ticked.add(id); else pricingState.ticked.delete(id);
+        pricingRender();
+    }
+    function pricingTickPage(on) {
+        pricingState.products.forEach(p => { if (on) pricingState.ticked.add(p.id); else pricingState.ticked.delete(p.id); });
+        pricingRender();
+    }
+    function pricingClearTicks() { pricingState.ticked = new Set(); pricingRender(); }
+
+    function pricingFilterSummary() {
+        const f = pricingFilters();
+        const parts = [];
+        if (f.brand) parts.push(`brand ${f.brand}`);
+        if (f.category) parts.push(`category ${f.category}`);
+        if (f.search) parts.push(`matching “${f.search}”`);
+        return parts;
+    }
+
+    function pricingScopeText() {
+        const el = document.getElementById('pricing-bulk-scope');
+        const n = pricingState.ticked.size;
+        document.getElementById('pricing-clear-ticks').classList.toggle('hidden', !n);
+        if (n) { el.textContent = `Applies to the ${n} ticked item${n === 1 ? '' : 's'} for ${pricingState.companyName}.`; return; }
+        const parts = pricingFilterSummary();
+        el.textContent = parts.length
+            ? `Applies to all ${pricingState.total} item${pricingState.total === 1 ? '' : 's'} matching ${parts.join(', ')} for ${pricingState.companyName}.`
+            : `No filter set — this would apply to every item for ${pricingState.companyName}. Pick a brand, category or search to narrow it, or tick items.`;
+    }
+
+    // --- one price: click, type, confirm ------------------------------------------
     function pricingEdit(id) {
         if (pricingState.saving) return;
         pricingState.editing = id;
         pricingMsg('');
         pricingRender();
     }
-
-    function pricingCancel() {
-        pricingState.editing = null;
-        pricingMsg('');
-        pricingRender();
-    }
-
+    function pricingCancel() { pricingState.editing = null; pricingMsg(''); pricingRender(); }
     function pricingKey(ev, id) {
         if (ev.key === 'Enter') { ev.preventDefault(); pricingSave(id); }
         else if (ev.key === 'Escape') { ev.preventDefault(); pricingCancel(); }
@@ -5334,45 +5508,67 @@
         const p = pricingState.products.find(x => x.id === id);
         const input = document.getElementById('pricing-input');
         if (!p || !input) return;
-        const price = input.value.trim();
-        if (price === '' || !(Number(price) > 0)) { pricingMsg('Enter a price above $0.00.', 'error'); return; }
+        const raw = input.value.trim();
+        const newPrice = Math.round(Number(raw) * 100) / 100;
+        if (raw === '' || !(newPrice > 0)) { pricingMsg('Enter a price above $0.00.', 'error'); return; }
+        if (!p.price_on_request && Math.abs(newPrice - Number(p.price)) < 0.004) { pricingCancel(); return; }
 
+        // The manager's confirmation — always, before anything is written.
+        if (!extra || !extra.__confirmed) {
+            const change = p.price_on_request
+                ? `Set a price of <strong>${pricingMoney(newPrice)}</strong>`
+                : `<strong>${pricingMoney(p.price)}</strong> → <strong>${pricingMoney(newPrice)}</strong> <span class="text-gray-500">(${pricingPct(Number(p.price), newPrice)})</span>`;
+            const ok = await pricingConfirm({
+                title: 'Confirm price change',
+                confirmText: 'Confirm change',
+                html: `<p class="font-semibold text-gray-900">${esc(p.name)}</p>
+                       <p class="text-xs text-gray-500 font-mono">${esc(p.sku || '')}${p.brand ? ' · ' + esc(p.brand) : ''}</p>
+                       <p class="text-lg">${change}</p>
+                       <p>This changes the price for <strong>${esc(pricingState.companyName)}</strong> only. It takes effect on their store immediately and is recorded in the audit log.</p>`
+            });
+            if (!ok) return;
+        }
+
+        const { __confirmed, ...flags } = extra || {};
         pricingState.saving = true;
         try {
             const resp = await adminFetch(`/pricing/companies/${pricingState.companyId}/products/${id}/price`, {
                 method: 'PUT',
                 body: JSON.stringify({
-                    price: Number(price),
+                    price: newPrice,
                     expected_price: p.price_on_request ? null : Number(p.price),
-                    ...(extra || {})
+                    ...flags
                 })
             });
             const data = await resp.json().catch(() => ({}));
             pricingState.saving = false;
 
             if (resp.ok) {
-                p.price = data.product ? data.product.price : Number(price);
+                p.price = data.product ? data.product.price : newPrice;
                 p.price_on_request = false;
                 pricingState.editing = null;
                 pricingRender();
-                pricingMsg(data.unchanged ? 'Price unchanged.' : `${p.name}: ${pricingMoney(data.old_price)} → ${pricingMoney(data.new_price)}` +
-                    (data.warning ? ` — ${data.warning}` : ''), 'ok');
+                pricingMsg(data.unchanged ? 'Price unchanged.'
+                    : `${p.name}: ${pricingMoney(data.old_price)} → ${pricingMoney(data.new_price)} saved for ${pricingState.companyName}.` +
+                      (data.warning ? ` ${data.warning}` : ''), 'ok');
                 return;
             }
             if (data.code === 'ppg_locked') {
-                if (pricingState.canUnlock) {
-                    if (confirm(`${p.name} is a PPG item held at the PPG list price of ${pricingMoney(data.master_price)} on every customer.\n\nOverride it for THIS customer only?`)) {
-                        return pricingSave(id, { unlock_ppg: true, ...(extra || {}) });
-                    }
-                } else {
-                    pricingMsg(data.error, 'error');
-                }
+                if (!pricingState.canUnlock) { pricingMsg(data.error, 'error'); return; }
+                const ok = await pricingConfirm({
+                    title: 'PPG list price', confirmText: 'Override for this customer', danger: true,
+                    html: `<p><strong>${esc(p.name)}</strong> is a PPG item held at the PPG list price of <strong>${pricingMoney(data.master_price)}</strong> on every customer.</p>
+                           <p>Override it for <strong>${esc(pricingState.companyName)}</strong> only?</p>`
+                });
+                if (ok) return pricingSave(id, { ...flags, unlock_ppg: true, __confirmed: true });
                 return;
             }
             if (data.code === 'needs_confirmation') {
-                if (confirm(`${data.error}\n\nSave it anyway? It will be recorded for review.`)) {
-                    return pricingSave(id, { ...(extra || {}), confirm_outlier: true });
-                }
+                const ok = await pricingConfirm({
+                    title: 'Unusual price', confirmText: 'Save anyway', danger: true,
+                    html: `<p>${esc(data.error)}</p><p>If it is intended, it will be saved and recorded for review.</p>`
+                });
+                if (ok) return pricingSave(id, { ...flags, confirm_outlier: true, __confirmed: true });
                 return;
             }
             if (data.code === 'stale') {
@@ -5386,6 +5582,171 @@
         } catch (err) {
             pricingState.saving = false;
             pricingMsg('Could not save the price: ' + err.message, 'error');
+        }
+    }
+
+    // --- bulk percentage change -----------------------------------------------------
+    function pricingBulkBody(extra) {
+        const b = pricingState.bulk;
+        const f = pricingFilters();
+        const ids = [...pricingState.ticked];
+        return {
+            percent: b.percent,
+            scope: ids.length ? { product_ids: ids } : { search: f.search, brand: f.brand, category: f.category },
+            include_ppg: b.includePPG,
+            include_outliers: b.includeOutliers,
+            ...(extra || {})
+        };
+    }
+
+    function pricingBulkPreview() {
+        const pct = Number(document.getElementById('pricing-bulk-pct').value);
+        if (!(pct > 0)) { pricingMsg('Enter the percentage to change prices by, for example 3.', 'error'); return; }
+        const down = document.getElementById('pricing-bulk-dir').value === 'down';
+        pricingState.bulk = { percent: down ? -pct : pct, includePPG: false, includeOutliers: false, preview: null, busy: false, reason: '' };
+        pricingMsg('');
+        pricingBulkFetchPreview(true);
+    }
+
+    async function pricingBulkFetchPreview(open) {
+        const b = pricingState.bulk;
+        const body = document.getElementById('pricing-bulk-body');
+        const hasScope = pricingState.ticked.size || pricingFilterSummary().length;
+        if (open) {
+            body.innerHTML = '<p class="text-gray-500 py-6 text-center"><i class="fas fa-spinner fa-spin mr-2"></i>Working out the change…</p>';
+            document.getElementById('pricing-bulk-apply').disabled = true;
+            showModal('pricing-bulk-modal');
+        }
+        b.busy = true;
+        try {
+            const resp = await adminFetch(`/pricing/companies/${pricingState.companyId}/bulk`, {
+                method: 'POST',
+                body: JSON.stringify(pricingBulkBody(hasScope ? {} : { all_items: true }))
+            });
+            const data = await resp.json().catch(() => ({}));
+            b.busy = false;
+            if (!resp.ok && data.code !== 'scope_changed') throw new Error(data.error || 'Could not work out the change.');
+            b.preview = data;
+            b.allItems = !hasScope;
+            pricingBulkRender();
+        } catch (err) {
+            b.busy = false;
+            body.innerHTML = `<p class="text-red-600 py-4">${esc(err.message)}</p>`;
+            document.getElementById('pricing-bulk-apply').disabled = true;
+        }
+    }
+
+    function pricingBulkRender() {
+        const b = pricingState.bulk, d = b.preview;
+        if (!d) return;
+        const sk = d.skipped || {};
+        const dir = b.percent > 0 ? 'Increase' : 'Decrease';
+        const pctText = Math.abs(b.percent) + '%';
+        const ticked = pricingState.ticked.size;
+        const scopeText = ticked
+            ? `${ticked} ticked item${ticked === 1 ? '' : 's'}`
+            : (b.allItems ? 'every item' : pricingFilterSummary().join(', '));
+        document.getElementById('pricing-bulk-title').textContent =
+            `${dir} prices by ${pctText} — ${d.company ? d.company.name : pricingState.companyName}`;
+
+        const skipLines = [];
+        if (sk.ppg_locked) skipLines.push(`${sk.ppg_locked} PPG item${sk.ppg_locked === 1 ? '' : 's'} held at the PPG list price`);
+        if (sk.outlier) skipLines.push(`${sk.outlier} that would land far from list price`);
+        if (sk.refused) skipLines.push(`${sk.refused} that would fall below 15% of list price (refused)`);
+        if (sk.price_on_request) skipLines.push(`${sk.price_on_request} price-on-request`);
+        if (sk.unchanged) skipLines.push(`${sk.unchanged} unchanged after rounding`);
+        if (sk.invalid) skipLines.push(`${sk.invalid} without a usable price`);
+
+        const ppgOpt = sk.ppg_locked || b.includePPG
+            ? (d.can_unlock_ppg
+                ? `<label class="flex items-start gap-2"><input type="checkbox" id="pricing-opt-ppg" ${b.includePPG ? 'checked' : ''} onchange="pricingBulkOption('includePPG', this.checked)" class="mt-1">
+                     <span>Include PPG items &mdash; override the PPG list price for <strong>${esc(pricingState.companyName)}</strong> only</span></label>`
+                : `<p class="text-xs text-gray-500"><i class="fas fa-lock mr-1"></i>PPG items stay at the PPG list price. An admin can include them.</p>`)
+            : '';
+        const outOpt = sk.outlier || b.includeOutliers
+            ? `<label class="flex items-start gap-2"><input type="checkbox" id="pricing-opt-out" ${b.includeOutliers ? 'checked' : ''} onchange="pricingBulkOption('includeOutliers', this.checked)" class="mt-1">
+                 <span>Also change items that would land far from list price (recorded for review)</span></label>`
+            : '';
+
+        const rows = (d.sample || []).map(r => `
+            <tr class="border-b">
+                <td class="px-3 py-2">${esc(r.name)}${r.ppg_override ? ' <span class="text-xs text-amber-600">PPG override</span>' : ''}${r.outlier ? ' <span class="text-xs text-amber-600">unusual</span>' : ''}</td>
+                <td class="px-3 py-2 text-gray-400 font-mono text-xs">${esc(r.sku || '')}</td>
+                <td class="px-3 py-2 text-right text-gray-500">${pricingMoney(r.old_price)}</td>
+                <td class="px-3 py-2 text-right font-semibold">${pricingMoney(r.new_price)}</td>
+            </tr>`).join('');
+
+        document.getElementById('pricing-bulk-body').innerHTML = `
+            <p class="mb-3">${dir} by <strong>${pctText}</strong> on <strong>${esc(scopeText)}</strong> for <strong>${esc(pricingState.companyName)}</strong> only. Other customers are not affected.</p>
+            ${d.will_change ? `
+              <div class="grid grid-cols-3 gap-3 mb-3 text-center">
+                <div class="border rounded-lg p-3"><div class="text-2xl font-bold">${d.will_change}</div><div class="text-xs text-gray-500">item${d.will_change === 1 ? '' : 's'} will change</div></div>
+                <div class="border rounded-lg p-3"><div class="text-lg font-bold text-gray-500">${pricingMoney(d.total_before)}</div><div class="text-xs text-gray-500">their prices add up to</div></div>
+                <div class="border rounded-lg p-3"><div class="text-lg font-bold">${pricingMoney(d.total_after)}</div><div class="text-xs text-gray-500">after the change</div></div>
+              </div>` : `<p class="border rounded-lg p-4 text-center text-gray-500 mb-3">No items would change.</p>`}
+            ${skipLines.length ? `<div class="bg-gray-50 border rounded-lg p-3 mb-3 text-xs text-gray-600"><p class="font-semibold mb-1">Left alone:</p><ul class="list-disc ml-5 space-y-0.5">${skipLines.map(l => `<li>${l}</li>`).join('')}</ul></div>` : ''}
+            <div class="space-y-2 mb-3">${ppgOpt}${outOpt}</div>
+            ${rows ? `<div class="border rounded-lg overflow-x-auto max-h-64 overflow-y-auto">
+                <table class="w-full text-sm"><thead class="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0"><tr>
+                    <th class="px-3 py-2 text-left">Item</th><th class="px-3 py-2 text-left">SKU</th><th class="px-3 py-2 text-right">Now</th><th class="px-3 py-2 text-right">New</th>
+                </tr></thead><tbody>${rows}</tbody></table></div>
+                ${d.will_change > (d.sample || []).length ? `<p class="text-xs text-gray-500 mt-1">Showing the first ${d.sample.length} of ${d.will_change}.</p>` : ''}` : ''}
+            <div class="mt-3"><label for="pricing-bulk-reason" class="block text-xs font-semibold text-gray-500 uppercase mb-1">Reason (optional, kept in the audit log)</label>
+                <input id="pricing-bulk-reason" type="text" maxlength="200" value="${esc(b.reason || '')}" oninput="pricingState.bulk.reason = this.value" placeholder="e.g. October supplier increase" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+            <p class="mt-3 text-xs text-gray-500">Nothing has changed yet. Applying takes effect on ${esc(pricingState.companyName)}'s store immediately and is recorded in the audit log.</p>`;
+
+        const btn = document.getElementById('pricing-bulk-apply');
+        btn.textContent = d.will_change ? `Apply to ${d.will_change} item${d.will_change === 1 ? '' : 's'}` : 'Nothing to apply';
+        btn.disabled = !d.will_change || b.busy;
+    }
+
+    function pricingBulkOption(key, value) {
+        pricingState.bulk[key] = value;
+        pricingState.bulk.preview = null;
+        document.getElementById('pricing-bulk-apply').disabled = true;
+        pricingBulkFetchPreview(false);
+    }
+
+    function pricingBulkClose() { hideModal('pricing-bulk-modal'); }
+
+    async function pricingBulkApply() {
+        const b = pricingState.bulk, d = b.preview;
+        if (!d || !d.will_change || b.busy) return;
+        b.busy = true;
+        const btn = document.getElementById('pricing-bulk-apply');
+        btn.disabled = true; btn.textContent = 'Applying…';
+        try {
+            const resp = await adminFetch(`/pricing/companies/${pricingState.companyId}/bulk`, {
+                method: 'POST',
+                body: JSON.stringify(pricingBulkBody({
+                    apply: true, expected_count: d.will_change, reason: b.reason || '',
+                    ...(b.allItems ? { all_items: true } : {})
+                }))
+            });
+            const data = await resp.json().catch(() => ({}));
+            b.busy = false;
+            if (resp.status === 409 && data.code === 'scope_changed') {
+                b.preview = data; pricingBulkRender();
+                pricingMsg('', '');
+                document.getElementById('pricing-bulk-body').insertAdjacentHTML('afterbegin',
+                    `<p class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 mb-3 text-sm">${esc(data.error)}</p>`);
+                return;
+            }
+            if (!resp.ok) throw new Error(data.error || 'Could not apply the change.');
+            pricingBulkClose();
+            const extra = [];
+            if (data.changed_meanwhile) extra.push(`${data.changed_meanwhile} edited by someone else meanwhile and left alone`);
+            if (data.refused_by_database) extra.push(`${data.refused_by_database} refused by the price check`);
+            if (data.failed) extra.push(`${data.failed} failed`);
+            pricingState.ticked = new Set();
+            await pricingLoad(pricingState.page);
+            pricingMsg(`${data.changed} price${data.changed === 1 ? '' : 's'} changed for ${pricingState.companyName} (${b.percent > 0 ? '+' : '−'}${Math.abs(b.percent)}%).` +
+                (extra.length ? ' ' + extra.join('; ') + '.' : ''), extra.length ? 'error' : 'ok');
+        } catch (err) {
+            b.busy = false;
+            btn.disabled = false; pricingBulkRender();
+            document.getElementById('pricing-bulk-body').insertAdjacentHTML('afterbegin',
+                `<p class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 mb-3 text-sm">${esc(err.message)}</p>`);
         }
     }
 
