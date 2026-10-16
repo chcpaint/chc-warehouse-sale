@@ -207,6 +207,15 @@ const ORDER_DESK_ALLOW = [
     // to any order_desk account that isn't flagged is_branch_manager.
     ['GET', /^\/companies\/[^/]+\/delivery-fee$/],
     ['PUT', /^\/companies\/[^/]+\/delivery-fee$/],
+    // Customer Pricing: the per-item price editor. Reachability only -- the
+    // route itself refuses order_desk and decides who may unlock a PPG item
+    // (routes/price-editor-admin.js). Widening order_manager to this is a
+    // deliberate decision, made visible here.
+    ['GET', /^\/pricing\/companies$/],
+    ['GET', /^\/pricing\/companies\/[^/]+\/products$/],
+    ['PUT', /^\/pricing\/companies\/[^/]+\/products\/[^/]+\/price$/],
+    ['GET', /^\/pricing\/companies\/[^/]+\/filters$/],
+    ['POST', /^\/pricing\/companies\/[^/]+\/bulk$/],
     ['GET', /^\/whoami$/],
     ['PUT', /^\/me\/password$/]
 ];

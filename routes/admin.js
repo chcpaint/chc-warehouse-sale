@@ -121,6 +121,10 @@ router.use('/companies/:companyId/po', require('./po-admin'));
 router.use('/companies/:companyId/notes', require('./contact-notes-admin'));
 router.use('/companies/:companyId/tax', require('./tax-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));
+// Per-customer, per-item price editor. Its own role gate (super_admin, company
+// admin, order_manager) and the matching ORDER_DESK_ALLOW entries in
+// middleware/auth.js -- see the header of the route file.
+router.use('/pricing', require('./price-editor-admin'));
 router.use('/companies/:companyId/library', require('./item-library'));
 
 // ============================================================
@@ -949,6 +953,14 @@ router.put('/companies/:companyId/products/:productId', requireCompanyAccess, as
         const updates = sanitizeObject(req.body);
         delete updates.id;
         delete updates.company_id;
+
+        // Prices go through PUT /pricing/companies/:id/products/:id/price, which
+        // enforces the PPG list-price lock, the price-sanity rule and the audit
+        // trail. This generic update used to be a way round all three.
+        const PRICE_FIELDS = ['price', 'previous_price', 'price_on_request'];
+        if (PRICE_FIELDS.some(f => Object.prototype.hasOwnProperty.call(updates, f))) {
+            return res.status(400).json({ error: 'Prices are edited from Customer Pricing, not here.' });
+        }
 
         const { data, error } = await supabaseAdmin
             .from('products')
