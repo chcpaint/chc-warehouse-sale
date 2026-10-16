@@ -836,6 +836,9 @@
                             </select>
                         </div>
                         <div class="flex gap-2">
+                            <button onclick="openPricingFromProducts()" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-semibold" title="Change prices for this customer: one item, or a whole brand/category by percent">
+                                <i class="fas fa-tags mr-1"></i> Edit Prices / % Change
+                            </button>
                             <button onclick="openAddImport('file')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
                                 <i class="fas fa-upload mr-1"></i> Upload Catalog
                             </button>
@@ -5308,6 +5311,33 @@
         });
     }
 
+    // From the Products screen: jump to Customer Pricing for the same customer,
+    // carrying the brand / category / search already chosen there. Passing a
+    // search term (an item's SKU) lands on just that item.
+    function openPricingForProduct(id) {
+        const p = productState.all.find(x => x.id === id);
+        if (p) openPricingFromProducts(p.sku || p.name);
+    }
+
+    async function openPricingFromProducts(searchOverride) {
+        const companyId = document.getElementById('admin-product-company').value;
+        if (!companyId) { alert('Select a company first.'); return; }
+        const brand = document.getElementById('filter-brand').value;
+        const category = document.getElementById('filter-category').value;
+        const search = searchOverride !== undefined
+            ? searchOverride : document.getElementById('filter-search').value.trim();
+        adminNav('pricing');
+        await pricingInit();
+        const sel = document.getElementById('pricing-company');
+        sel.value = companyId;
+        if (sel.value !== companyId) { pricingMsg('That customer is not available to your account.', 'error'); return; }
+        await pricingCompanyChanged();
+        document.getElementById('pricing-brand').value = brand;
+        document.getElementById('pricing-category').value = category;
+        document.getElementById('pricing-search').value = search;
+        await pricingLoad(1);
+    }
+
     // --- loading ----------------------------------------------------------------
     async function pricingInit() {
         const sel = document.getElementById('pricing-company');
@@ -5853,6 +5883,9 @@
                 <td class="px-4 py-3 text-center text-sm">${p.case_qty || 1}</td>
                 <td class="px-4 py-3 text-center"><span class="px-2 py-1 rounded text-xs font-semibold ${p.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${p.is_active ? 'Active' : 'Hidden'}</span></td>
                 <td class="px-4 py-3 text-right">
+                    <button onclick="openPricingForProduct('${p.id}')" class="text-amber-600 hover:text-amber-700 text-sm mr-2" title="Edit this item's price">
+                        <i class="fas fa-dollar-sign"></i>
+                    </button>
                     <button onclick="toggleProductActive('${p.id}', ${!p.is_active})" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="${p.is_active ? 'Hide from catalog' : 'Show in catalog'}">
                         <i class="fas ${p.is_active ? 'fa-eye-slash' : 'fa-eye'}"></i>
                     </button>
