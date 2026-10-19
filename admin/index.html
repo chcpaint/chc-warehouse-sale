@@ -1855,9 +1855,10 @@
                     <p class="text-xs text-gray-400 mt-1">Columns: SKU, Item Name, Brand, Category, Price, Case Qty. Multi-tab XLSX supported (tab name becomes the brand). Rows priced $0 are skipped.</p>
                 </div>
                 <div id="upl-manual-section" class="hidden">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Enter items &mdash; one per line</label>
-                    <textarea id="upl-manual" rows="6" oninput="resetUploadState()" placeholder="SKU | Name | Brand | Category | Price | Case Qty&#10;MMM12345 | 3M Masking Tape 24mm | 3M | Abrasives/Masking | 8.50 | 1&#10;FIB135 | Evercoat Rage Optex Ga | Evercoat | Fillers/Putty | 10.74 | 1" class="w-full px-3 py-2 border rounded-lg text-sm font-mono"></textarea>
-                    <p class="text-xs text-gray-400 mt-1">Separate fields with <code>|</code> in this order: SKU, Name, Brand, Category, Price, Case Qty. <b>Name</b> and <b>Price</b> are required; the rest are optional.</p>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Enter your items</label>
+                    <p class="text-xs text-gray-500 mb-2">Fill in one card per product. Fields marked <span class="text-red-600 font-bold">*</span> are required; leave the others empty if you do not have them.</p>
+                    <div id="upl-manual-rows" class="space-y-3 max-h-72 overflow-y-auto pr-1"></div>
+                    <button type="button" onclick="addManualRow()" class="mt-2 text-sm font-semibold text-blue-700 hover:text-blue-900"><i class="fas fa-plus mr-1"></i>Add another item</button>
                 </div>
                 <div class="bg-gray-50 rounded-lg p-3">
                     <label class="block text-sm font-medium text-gray-700 mb-2">What should this do?</label>
@@ -6069,7 +6070,7 @@
         const up = document.getElementById('upload-company');
         if (sel && up && sel.value) up.value = sel.value;
         const f = document.getElementById('upload-file'); if (f) f.value = '';
-        const m = document.getElementById('upl-manual'); if (m) m.value = '';
+        resetManualRows();
         const mm = document.getElementById('upl-mode-merge'); if (mm) mm.checked = true;
         resetUploadState();
         showModal('upload-modal');
@@ -6096,18 +6097,89 @@
         const r = document.querySelector('input[name="upl-mode"]:checked');
         return r ? r.value : 'merge';
     }
+    // ---- Enter Manually: one card per product, labelled empty fields --------
+    const MANUAL_FIELDS = [
+        { key: 'sku',      label: 'SKU / Part #',  ph: 'e.g. 30669' },
+        { key: 'name',     label: 'Product name',  ph: 'e.g. 3MP1000', required: true },
+        { key: 'brand',    label: 'Brand',         ph: 'e.g. 3M' },
+        { key: 'category', label: 'Category',      ph: 'e.g. Abrasives' },
+        { key: 'price',    label: 'Price ($)',     ph: 'e.g. 93.99', required: true, inputmode: 'decimal' },
+        { key: 'case_qty', label: 'Case qty',      ph: 'e.g. 1', inputmode: 'numeric' }
+    ];
+    function manualRowHtml(n) {
+        const fields = MANUAL_FIELDS.map(f => (
+            '<label class="block"><span class="block text-xs font-medium text-gray-600 mb-0.5">' + f.label +
+            (f.required ? ' <span class="text-red-600 font-bold">*</span>' : '') + '</span>' +
+            '<input type="text" data-f="' + f.key + '" placeholder="' + f.ph + '"' +
+            (f.inputmode ? ' inputmode="' + f.inputmode + '"' : '') +
+            ' autocomplete="off" oninput="resetUploadState(); this.classList.remove(\'border-red-500\')"' +
+            ' class="w-full px-2 py-1.5 border rounded-md text-sm"></label>'
+        )).join('');
+        return '<div class="manual-row border rounded-lg p-3 bg-white">' +
+            '<div class="flex items-center justify-between mb-2"><span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Item <span class="manual-n">' + n + '</span></span>' +
+            '<button type="button" onclick="removeManualRow(this)" class="text-xs text-gray-400 hover:text-red-600" title="Remove this item"><i class="fas fa-trash mr-1"></i>Remove</button></div>' +
+            '<div class="grid grid-cols-2 gap-2">' + fields + '</div></div>';
+    }
+    function renumberManualRows() {
+        document.querySelectorAll('#upl-manual-rows .manual-n').forEach((el, i) => { el.textContent = i + 1; });
+    }
+    function addManualRow() {
+        const host = document.getElementById('upl-manual-rows');
+        if (!host) return;
+        host.insertAdjacentHTML('beforeend', manualRowHtml(host.children.length + 1));
+        resetUploadState();
+        const last = host.lastElementChild && host.lastElementChild.querySelector('input');
+        if (last) last.focus();
+    }
+    function removeManualRow(btn) {
+        const host = document.getElementById('upl-manual-rows');
+        const row = btn.closest('.manual-row');
+        if (row) row.remove();
+        if (host && !host.children.length) addManualRow();
+        renumberManualRows();
+        resetUploadState();
+    }
+    function resetManualRows() {
+        const host = document.getElementById('upl-manual-rows');
+        if (!host) return;
+        host.innerHTML = '';
+        addManualRow();
+    }
+    function readManualRows() {
+        return [...document.querySelectorAll('#upl-manual-rows .manual-row')].map(row => {
+            const o = { _row: row };
+            row.querySelectorAll('input[data-f]').forEach(i => { o[i.dataset.f] = i.value.trim(); });
+            return o;
+        });
+    }
     function buildManualCsv() {
-        const lines = (document.getElementById('upl-manual').value || '').split('\n').map(l => l.trim()).filter(Boolean);
         const esc = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
         const out = ['sku,name,brand,category,price,case_qty'];
-        let bad = 0;
-        for (const ln of lines) {
-            const p = ln.split('|').map(x => x.trim());
-            const sku = p[0]||'', name = p[1]||'', brand = p[2]||'', category = p[3]||'', price = p[4]||'', cq = p[5]||'';
-            if (!name || !price) { bad++; continue; }
-            out.push([sku,name,brand,category,price,cq].map(esc).join(','));
-        }
-        return { csv: out.length > 1 ? out.join('\n') : null, rows: out.length - 1, bad };
+        const problems = [];
+        let n = 0;
+        readManualRows().forEach((r, idx) => {
+            const filled = MANUAL_FIELDS.some(f => r[f.key]);
+            if (!filled) return;                       // untouched card: ignore
+            n++;
+            // Accept "$1,234.50" but nothing else non-numeric.
+            const price = (r.price || '').replace(/[$,\s]/g, '');
+            const bad = [];
+            if (!r.name) bad.push('name');
+            if (!price || !/^\d+(\.\d+)?$/.test(price) || Number(price) <= 0) bad.push('price');
+            if (r.case_qty && !/^\d+$/.test(r.case_qty)) bad.push('case_qty');
+            if (bad.length) { problems.push({ item: idx + 1, fields: bad, row: r._row }); return; }
+            out.push([r.sku, r.name, r.brand, r.category, price, r.case_qty].map(v => esc(v || '')).join(','));
+        });
+        return { csv: out.length > 1 ? out.join('\n') : null, rows: out.length - 1, entered: n, problems };
+    }
+    function flagManualProblems(problems) {
+        document.querySelectorAll('#upl-manual-rows .border-red-500').forEach(e => e.classList.remove('border-red-500'));
+        problems.forEach(pr => pr.fields.forEach(f => {
+            const el = pr.row.querySelector('input[data-f="' + f + '"]');
+            if (el) el.classList.add('border-red-500');
+        }));
+        const first = problems[0] && problems[0].row.querySelector('.border-red-500');
+        if (first) { first.scrollIntoView({ block: 'center' }); first.focus(); }
     }
 
     function resetUploadState() {
@@ -6129,8 +6201,13 @@
         let file;
         if (uploadSource === 'manual') {
             const m = buildManualCsv();
-            if (!m.csv) { alert('Enter at least one item (Name and Price are required).'); return null; }
-            if (m.bad && !confirm(m.bad + ' line(s) are missing a Name or Price and will be skipped. Continue?')) return null;
+            if (m.problems.length) {
+                flagManualProblems(m.problems);
+                const lbl = { name: 'product name', price: 'a valid price (numbers only)', case_qty: 'a whole-number case qty' };
+                alert('Please fix the highlighted fields:\n' + m.problems.map(pr => 'Item ' + pr.item + ': ' + pr.fields.map(f => lbl[f]).join(', ')).join('\n'));
+                return null;
+            }
+            if (!m.csv) { alert('Fill in at least one item (product name and price are required).'); return null; }
             file = new File([m.csv], 'manual-entry.csv', { type: 'text/csv' });
         } else {
             file = document.getElementById('upload-file').files[0];
