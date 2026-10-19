@@ -1877,8 +1877,9 @@
                 <div id="upload-result" class="hidden"></div>
                 <div class="flex gap-2">
                     <button type="button" id="upload-preview-btn" onclick="catalogPreview()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg">Preview Changes</button>
-                    <button type="button" id="upload-apply-btn" onclick="catalogApply()" disabled class="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg">Apply Import</button>
+                    <button type="button" id="upload-apply-btn" onclick="catalogApply()" disabled title="Press Preview Changes first" class="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg">Apply Import</button>
                 </div>
+                <p id="upload-step-hint" class="text-xs text-gray-500 -mt-1"><b>Step 1:</b> press <b>Preview Changes</b> to check your items (nothing is saved). <b>Step 2:</b> <b>Apply Import</b> then turns green &mdash; press it to save.</p>
             </form>
         </div>
     </div>
@@ -6271,6 +6272,8 @@
         if (!d) return;
         showUploadResult(uploadSummaryHtml(d, true));
         document.getElementById('upload-apply-btn').disabled = false;
+        const res = document.getElementById('upload-result');
+        if (res && res.scrollIntoView) res.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
     async function catalogApply() {
