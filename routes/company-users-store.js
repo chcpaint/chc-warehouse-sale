@@ -46,7 +46,7 @@ router.post('/', async (req, res) => {
         const result = await cu.createUser({
             company: req.ownerCompany,
             name: req.body.name, email: req.body.email,
-            locationId: req.body.location_id, role: 'member',
+            locationId: req.body.location_id, groupId: req.body.group_id, role: 'member',
             invitedBy: req.companyUser.id, invitedByType: 'owner'
         });
         res.status(result.status).json(result.body);
@@ -56,7 +56,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
     try {
         // Owners may rename, move location, and enable/disable — not promote to owner.
-        const patch = { name: req.body.name, location_id: req.body.location_id, is_active: req.body.is_active };
+        const patch = { name: req.body.name, location_id: req.body.location_id, group_id: req.body.group_id, is_active: req.body.is_active };
         const result = await cu.updateUser({ company: req.ownerCompany, userId: req.params.id, patch, actorUserId: req.companyUser.id });
         res.status(result.status).json(result.body);
     } catch (err) { console.error('Owner update user:', err); res.status(500).json({ error: 'Failed to update that user.' }); }

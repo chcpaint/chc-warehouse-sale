@@ -38,6 +38,27 @@ router.use('/', require('./admin-password'));
 router.use('/users', require('./admin-users'));
 router.use('/companies/:companyId/users', require('./company-users-admin'));
 
+// People & activity: named groups, who ordered / how much, who signed in
+// (the `activity` module). Reading is open to super_admin, the company's own
+// admin and order_manager; group changes are full-admin only.
+const { makePeopleRouter } = require('./people-activity');
+function requirePeopleRead(req, res, next) {
+    const role = req.admin && req.admin.role;
+    if (role === 'super_admin' || role === 'order_manager') return next();
+    if (role === 'admin' && req.admin.company_id === req.params.companyId) return next();
+    return res.status(403).json({ error: 'Your account cannot view this customer\'s people and activity.' });
+}
+router.use('/companies/:companyId/people', makePeopleRouter({
+    side: 'staff',
+    companyIdOf: req => req.params.companyId,
+    readGuards: [requirePeopleRead],
+    manageGuards: [requireFullAdmin, requireCompanyAccess],
+    onChange: (req, company, action, detail) => supabaseAdmin.from('audit_log').insert({
+        admin_id: req.admin.id, action, entity_type: 'company', entity_id: company.id,
+        details: detail, ip_address: req.ip
+    })
+}));
+
 // Platform-level distributor onboarding (platform_admin only -- see
 // routes/distributors-admin.js for why this is separate from super_admin).
 router.use('/platform/distributors', require('./distributors-admin'));

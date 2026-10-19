@@ -11,6 +11,8 @@ const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { hidePricingEnabled, stripOrderPricing } = require('../utils/pricing-visibility');
 const { labelFor } = require('../utils/order-status');
+const { resolveOrderingUser } = require('../utils/people-activity');
+const { moduleEnabled } = require('../utils/modules');
 
 const router = express.Router();
 
@@ -562,10 +564,24 @@ router.post('/:slug/track', async (req, res) => {
 router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const companyId = req.company.id;
-        const {
+        let {
             contact_name, contact_email, contact_phone,
             po_number, location, location_id, items, notes
         } = sanitizeObject(req.body);
+
+        // An individual login owns its order. Who placed it comes from the
+        // database, not the form: a person cannot order as someone else, a
+        // deactivated person is stopped immediately (their 24-hour token would
+        // otherwise keep working), and the order freezes the name, email and
+        // group they have right now so the history survives later changes.
+        let orderer = null;
+        if (req.companyUser) {
+            const who = await resolveOrderingUser(companyId, req.companyUser);
+            if (!who.ok) return res.status(who.status).json({ error: who.error });
+            orderer = who.user;
+            contact_name = orderer.name;
+            contact_email = orderer.email;
+        }
 
         // Validate required fields
         if (!contact_name || !contact_email || !items || !Array.isArray(items) || items.length === 0) {
@@ -577,6 +593,16 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         // purchase-order system ended up typing the same number every time.
         const { data: poCompany } = await supabaseAdmin
             .from('companies').select('settings').eq('id', companyId).maybeSingle();
+
+        // A company that tracks who orders (People & activity) orders as
+        // individuals only. A session opened with the shared access code before
+        // that was switched on must not keep placing unattributed orders.
+        if (!orderer && moduleEnabled(poCompany?.settings, 'activity')) {
+            return res.status(403).json({
+                error: 'Orders for this account are placed by signed-in people. Please sign out and sign in with your own email and password.',
+                individual_login_required: true
+            });
+        }
 
         const poDecision = resolveOrderPo(poCompany?.settings, po_number);
         if (!poDecision.ok) {
@@ -748,9 +774,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             poSource = 'generated';
         }
 
-        const { data: order, error } = await supabaseAdmin
-            .from('orders')
-            .insert({
+        const orderRow = {
                 company_id: companyId,
                 contact_name: stripHtml(contact_name),
                 contact_email: stripHtml(contact_email),
@@ -777,9 +801,26 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                         ? `Order placed — ${quotedItems.length} item(s) to be priced by the branch`
                         : 'Order placed'
                 }]
-            })
-            .select()
-            .single();
+        };
+
+        // Who placed it, frozen at this moment (see the comment where `orderer`
+        // is resolved). Added only for an individual login.
+        if (orderer) {
+            orderRow.placed_by_name = orderer.name;
+            orderRow.placed_by_email = orderer.email;
+            orderRow.placed_by_group = orderer.group_name;
+        }
+
+        let { data: order, error } = await supabaseAdmin.from('orders').insert(orderRow).select().single();
+
+        // Migration 045 adds those three columns. If it has not been applied to
+        // this database yet, place the order without them rather than refuse it
+        // -- the person is still recorded in placed_by_user_id.
+        if (error && orderer && /placed_by_(name|email|group)/i.test(error.message || '')) {
+            console.error('Order placed without the frozen orderer fields -- apply migration 045:', error.message);
+            delete orderRow.placed_by_name; delete orderRow.placed_by_email; delete orderRow.placed_by_group;
+            ({ data: order, error } = await supabaseAdmin.from('orders').insert(orderRow).select().single());
+        }
 
         if (error) {
             // 23505 on the PO index means this number has been used before by
@@ -1265,5 +1306,31 @@ router.use('/:slug/inventory', require('./inventory-store'));
 
 // Company-owner management of their own customer users (Customer-users module).
 router.use('/:slug/users', require('./company-users-store'));
+
+// People & activity for the company's own owner (the `activity` module): who
+// ordered, how much each person spends, who signed in, and named groups.
+// Owner only, re-checked against the database on every call so a person who
+// was deactivated or demoted loses it at once rather than when their 24-hour
+// token lapses. The one place that decides who an order belongs to is here and
+// in POST /orders (utils/people-activity.js resolveOrderingUser).
+const { requireCompanyOwner } = require('../middleware/auth');
+const { makePeopleRouter } = require('./people-activity');
+const peopleActivity = require('../utils/people-activity');
+async function requireCurrentOwner(req, res, next) {
+    try {
+        const r = await peopleActivity.resolveOrderingUser(req.company.id, req.companyUser);
+        if (!r.ok) return res.status(r.status).json({ error: r.error });
+        if (r.user.role !== 'owner') return res.status(403).json({ error: 'Owner access required.' });
+        next();
+    } catch (err) {
+        console.error('Owner check failed:', err);
+        res.status(500).json({ error: 'Could not verify your access.' });
+    }
+}
+router.use('/:slug/people', makePeopleRouter({
+    side: 'customer',
+    companyIdOf: req => req.company.id,
+    readGuards: [requireCompanyAuth, requireCompanyOwner, requireCurrentOwner]
+}));
 
 module.exports = router;

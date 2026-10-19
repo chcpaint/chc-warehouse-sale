@@ -76,6 +76,17 @@ const MODULES = {
         }
     },
 
+    activity: {
+        name: 'activity',
+        label: 'People & activity',
+        blurb: 'Named groups of people, plus who ordered, how much each person spends and who signed in. For the owner and for CHC.',
+        requires: ['users'],
+        released: true,
+        defaults: {
+            enabled: false
+        }
+    },
+
     kits: {
         name: 'kits',
         label: 'Repair kits',

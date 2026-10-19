@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { supabaseAdmin } = require('./supabase');
 const { sendInvite } = require('./email');
 const { stripHtml, validateEmail, isValidUUID } = require('./sanitize');
+const { resolveGroupId } = require('./people-activity');
 
 const ROLES = ['member', 'owner'];
 const INVITE_TTL_DAYS = 7;
@@ -27,16 +28,28 @@ function newInvite() {
 }
 
 async function listUsers(companyId) {
-    const { data } = await supabaseAdmin
+    // Groups arrived with migration 045. Until it is applied to a database the
+    // group columns do not exist, and this list must keep working without them
+    // -- an error here would otherwise show as "no users".
+    const base = 'id, email, name, role, location_id, is_active, last_login, password_hash, company_locations:location_id (id, name)';
+    let { data, error } = await supabaseAdmin
         .from('company_users')
-        .select('id, email, name, role, location_id, is_active, last_login, password_hash, company_locations:location_id (id, name)')
+        .select(`${base}, group_id, company_user_groups:group_id (id, name)`)
         .eq('company_id', companyId)
         .order('created_at', { ascending: true });
+    if (error) {
+        ({ data } = await supabaseAdmin
+            .from('company_users').select(base)
+            .eq('company_id', companyId)
+            .order('created_at', { ascending: true }));
+    }
 
     return (data || []).map(u => ({
         id: u.id, email: u.email, name: u.name, role: u.role,
         location_id: u.location_id,
         location_name: u.company_locations?.name || null,
+        group_id: u.group_id || null,
+        group_name: u.company_user_groups?.name || null,
         is_active: u.is_active, last_login: u.last_login,
         status: u.password_hash ? (u.is_active ? 'active' : 'disabled') : 'invited'
     }));
@@ -46,7 +59,7 @@ async function listUsers(companyId) {
  * Create a customer user and send them a set-password invite.
  * @returns {{status:number, body:object}}
  */
-async function createUser({ company, name, email, locationId, role, invitedBy, invitedByType }) {
+async function createUser({ company, name, email, locationId, groupId, role, invitedBy, invitedByType }) {
     name = stripHtml(name || '').trim();
     email = stripHtml(email || '').trim().toLowerCase();
     role = ROLES.includes(role) ? role : 'member';
@@ -61,6 +74,9 @@ async function createUser({ company, name, email, locationId, role, invitedBy, i
         if (!loc) return { status: 400, body: { error: 'That location is not part of this company.' } };
     }
 
+    const group = await resolveGroupId(company.id, groupId);
+    if (!group.ok) return { status: 400, body: { error: group.error } };
+
     const { data: existing } = await supabaseAdmin
         .from('company_users').select('id').eq('company_id', company.id).ilike('email', email).maybeSingle();
     if (existing) return { status: 409, body: { error: 'A user with that email already exists for this company.' } };
@@ -71,6 +87,7 @@ async function createUser({ company, name, email, locationId, role, invitedBy, i
         .insert({
             company_id: company.id, email, name, role,
             location_id: locationId || null,
+            ...(group.value ? { group_id: group.value } : {}),
             password_hash: null, is_active: true,
             invite_token: token, invite_expires_at: expires,
             invited_by: invitedBy, invited_by_type: invitedByType
@@ -87,6 +104,11 @@ async function createUser({ company, name, email, locationId, role, invitedBy, i
     });
 
     return { status: 201, body: { message: `Invite sent to ${email}.`, user: created, email_sent: invite.sent } };
+}
+
+/** The public shape of a user row -- never the hash or invite token. */
+function pickUser(u) {
+    return { id: u.id, email: u.email, name: u.name, role: u.role, location_id: u.location_id, group_id: u.group_id || null, is_active: u.is_active };
 }
 
 async function updateUser({ company, userId, patch, actorUserId }) {
@@ -126,12 +148,17 @@ async function updateUser({ company, userId, patch, actorUserId }) {
         }
         update.location_id = loc;
     }
+    if (patch.group_id !== undefined) {
+        const group = await resolveGroupId(company.id, patch.group_id);
+        if (!group.ok) return { status: 400, body: { error: group.error } };
+        update.group_id = group.value;
+    }
 
     const { data, error } = await supabaseAdmin
         .from('company_users').update(update).eq('id', userId).eq('company_id', company.id)
-        .select('id, email, name, role, location_id, is_active').single();
+        .select('*').single();
     if (error) throw error;
-    return { status: 200, body: { message: 'Saved.', user: data } };
+    return { status: 200, body: { message: 'Saved.', user: pickUser(data) } };
 }
 
 async function resendInvite({ company, userId }) {

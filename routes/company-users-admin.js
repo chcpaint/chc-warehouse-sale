@@ -37,7 +37,7 @@ router.post('/', async (req, res) => {
         const result = await cu.createUser({
             company: req.targetCompany,
             name: req.body.name, email: req.body.email,
-            locationId: req.body.location_id, role: req.body.role,
+            locationId: req.body.location_id, groupId: req.body.group_id, role: req.body.role,
             invitedBy: req.admin.id, invitedByType: 'admin'
         });
         res.status(result.status).json(result.body);
@@ -50,7 +50,7 @@ router.put('/:id', async (req, res) => {
             company: req.targetCompany, userId: req.params.id,
             patch: {
                 name: req.body.name, email: req.body.email, role: req.body.role,
-                location_id: req.body.location_id, is_active: req.body.is_active
+                location_id: req.body.location_id, group_id: req.body.group_id, is_active: req.body.is_active
             },
             actorUserId: null
         });

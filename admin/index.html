@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="/people-activity.js" defer></script>
     <style>
         .sidebar-link.active { background: rgba(59, 130, 246, 0.1); color: #2563eb; border-right: 3px solid #2563eb; }
         .fade-in { animation: fadeIn 0.3s ease; }
@@ -2031,7 +2032,8 @@
                 <h3 class="text-xl font-bold"><i class="fas fa-users text-amber-600 mr-2"></i>Customer users — <span id="cu-company-name"></span></h3>
                 <button onclick="hideModal('company-users-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
-            <p id="cu-module-note" class="text-sm text-gray-500 mb-4"></p>
+            <p id="cu-module-note" class="text-sm text-gray-500 mb-2"></p>
+            <div class="mb-4"><button type="button" onclick="openPeopleActivity()" class="text-sm font-semibold text-blue-700 hover:text-blue-900"><i class="fas fa-chart-column mr-1"></i>People &amp; activity &mdash; who orders, who signs in, groups</button></div>
 
             <form onsubmit="createCompanyUser(event)" class="grid grid-cols-1 md:grid-cols-5 gap-2 items-end bg-gray-50 border rounded-lg p-3 mb-4">
                 <div class="md:col-span-1"><label class="block text-xs font-medium text-gray-600 mb-1">Name *</label>
@@ -2058,6 +2060,17 @@
                     <tbody id="company-users-tbody"></tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <!-- People & activity (who ordered, who signed in, named groups) -->
+    <div id="people-activity-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xl font-bold"><i class="fas fa-chart-column text-blue-600 mr-2"></i>People &amp; activity &mdash; <span id="pa-company-name"></span></h3>
+                <button onclick="hideModal('people-activity-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="pa-host"></div>
         </div>
     </div>
 
@@ -7259,6 +7272,28 @@
         } catch (err) { /* non-fatal */ }
         showModal('company-users-modal');
         loadCompanyUsers();
+    }
+
+    // People & activity: the shared widget (public/people-activity.js), fresh
+    // each time it opens so listeners never pile up.
+    function openPeopleActivity() {
+        const companyId = cuCompanyId;
+        document.getElementById('pa-company-name').textContent = document.getElementById('cu-company-name').textContent;
+        const host = document.getElementById('pa-host');
+        const fresh = document.createElement('div');
+        host.replaceWith(fresh); fresh.id = 'pa-host';
+        showModal('people-activity-modal');
+        if (!window.PeopleActivity) { fresh.innerHTML = '<p class="text-red-600">The activity screen could not load. Refresh the page and try again.</p>'; return; }
+        window.PeopleActivity.mount(fresh, {
+            staff: true,
+            req: (p, o) => adminFetch(`/companies/${companyId}/people${p}`, o),
+            usersReq: (p, o) => adminFetch(`/companies/${companyId}/users${p}`, o),
+            loadLocations: async () => {
+                const r = await adminFetch(`/companies/${companyId}/locations`);
+                const d = await r.json();
+                return (d.locations || []).map(l => ({ id: l.id, name: l.name }));
+            }
+        });
     }
 
     async function loadCompanyUsers() {

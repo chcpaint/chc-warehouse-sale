@@ -262,6 +262,9 @@
                         <button id="team-btn" onclick="openTeam()" class="hidden text-gray-500 hover:text-blue-700 text-sm" title="Manage your team">
                             <i class="fas fa-user-group"></i> Team
                         </button>
+                        <button id="people-btn" onclick="openPeople()" class="hidden text-gray-500 hover:text-blue-700 text-sm" title="Who orders and who signs in">
+                            <i class="fas fa-chart-column"></i> Activity
+                        </button>
                         <button onclick="showTab('cart')" class="relative bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-2 rounded-lg transition-colors">
                             <i class="fas fa-shopping-cart"></i>
                             <span id="cart-badge" class="hidden absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center cart-count">0</span>
@@ -718,6 +721,17 @@
         </div>
     </div>
 
+    <!-- People & activity (company owner, when switched on for the account) -->
+    <div id="people-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xl font-bold"><i class="fas fa-chart-column text-blue-700 mr-2"></i>People &amp; activity</h3>
+                <button onclick="document.getElementById('people-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="people-host"></div>
+        </div>
+    </div>
+
     <!-- Team management (company owner) -->
     <div id="team-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
@@ -747,6 +761,7 @@
         </div>
     </div>
 
+    <script src="/people-activity.js"></script>
     <script>
     // ============================================================
     // STATE
@@ -867,7 +882,13 @@
                 logo.style.display = 'block';
                 document.getElementById('logo-divider').style.display = 'block';
             }
-            configureLoginMode((company.settings && company.settings.users) || {});
+            // A company that tracks who orders (People & activity) signs in as
+            // individuals only, whatever its users setting says.
+            const loginCfg = Object.assign({}, (company.settings && company.settings.users) || {});
+            if (company.settings && company.settings.activity && company.settings.activity.enabled === true) {
+                loginCfg.enabled = true; loginCfg.require_individual_login = true;
+            }
+            configureLoginMode(loginCfg);
         } catch (err) {
             console.error('Failed to load company info:', err);
         }
@@ -1003,6 +1024,25 @@
         } finally {
             link.disabled = false;
         }
+    }
+
+    // ---- Owner: who orders, who signs in, groups (public/people-activity.js) ----
+    function openPeople() {
+        document.getElementById('people-modal').classList.remove('hidden');
+        const host = document.getElementById('people-host');
+        const fresh = document.createElement('div');
+        host.replaceWith(fresh); fresh.id = 'people-host';
+        if (!window.PeopleActivity) { fresh.innerHTML = '<p class="text-red-600">The activity screen could not load. Refresh the page and try again.</p>'; return; }
+        window.PeopleActivity.mount(fresh, {
+            staff: false,
+            req: (p, o) => apiFetch(`/store/${state.slug}/people${p}`, o),
+            usersReq: (p, o) => apiFetch(`/store/${state.slug}/users${p}`, o),
+            loadLocations: async () => {
+                const r = await apiFetch(`/store/${state.slug}/locations`);
+                const d = await r.json();
+                return (d.locations || []).map(l => ({ id: l.id, name: l.name }));
+            }
+        });
     }
 
     // ---- Owner team management ----
@@ -1149,6 +1189,10 @@
             if (greet) greet.textContent = state.companyUser.name;
             const teamBtn = document.getElementById('team-btn');
             if (teamBtn) teamBtn.classList.toggle('hidden', state.companyUser.role !== 'owner');
+            // Activity is its own switch (People & activity module); owners only.
+            const peopleBtn = document.getElementById('people-btn');
+            const actOn = !!(state.company && state.company.settings && state.company.settings.activity && state.company.settings.activity.enabled === true);
+            if (peopleBtn) peopleBtn.classList.toggle('hidden', !(actOn && state.companyUser.role === 'owner'));
         }
 
         // Inventory is opt-in per company; initInventory() reveals the tab only

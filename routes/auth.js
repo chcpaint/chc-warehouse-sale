@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { supabaseAdmin } = require('../utils/supabase');
 const { stripHtml, validateEmail } = require('../utils/sanitize');
+const { recordLogin } = require('../utils/people-activity');
+const { moduleEnabled } = require('../utils/modules');
 
 const router = express.Router();
 
@@ -48,6 +50,18 @@ router.post('/company-login', async (req, res) => {
         const validCode = await bcrypt.compare(accessCode, company.access_code);
         if (!validCode) {
             return res.status(401).json({ error: 'Invalid company or access code.' });
+        }
+
+        // A company that tracks who orders (People & activity) signs in as
+        // individuals only. Checked after the code so the shared code is still
+        // what proves who is asking, and the answer tells a legitimate caller
+        // exactly what to do instead.
+        if (moduleEnabled(company.settings, 'activity')) {
+            await recordLogin({ companyId: company.id, email: null, event: 'shared_refused', req });
+            return res.status(403).json({
+                error: 'This account signs in with your own email and password. Use your personal login, or ask your account owner for an invite.',
+                individual_login_required: true
+            });
         }
 
         // Generate JWT
@@ -313,11 +327,21 @@ router.post('/company-user-login', async (req, res) => {
             .eq('email', email)
             .maybeSingle();
 
-        if (!user || !user.is_active || !user.password_hash) return res.status(401).json({ error: 'Invalid company or credentials.' });
+        // Every attempt that reaches a real company is logged (who, when, from
+        // where) for the customer's People & activity view. The caller is told
+        // nothing different for any of them.
+        if (!user || !user.is_active || !user.password_hash) {
+            await recordLogin({ companyId: company.id, user: user || null, email, event: user && !user.is_active ? 'disabled' : 'failed', req });
+            return res.status(401).json({ error: 'Invalid company or credentials.' });
+        }
         const ok = await bcrypt.compare(password, user.password_hash);
-        if (!ok) return res.status(401).json({ error: 'Invalid company or credentials.' });
+        if (!ok) {
+            await recordLogin({ companyId: company.id, user, event: 'failed', req });
+            return res.status(401).json({ error: 'Invalid company or credentials.' });
+        }
 
         await supabaseAdmin.from('company_users').update({ last_login: new Date().toISOString() }).eq('id', user.id);
+        await recordLogin({ companyId: company.id, user, event: 'login', req });
 
         const token = jwt.sign({
             type: 'company_user',
@@ -378,7 +402,7 @@ router.post('/company-accept-invite', async (req, res) => {
 
         const { data: user } = await supabaseAdmin
             .from('company_users')
-            .select('id, email, name, role, location_id, company_id, invite_expires_at, is_active')
+            .select('id, email, name, role, location_id, company_id, invite_expires_at, is_active, password_hash')
             .eq('invite_token', token)
             .maybeSingle();
         if (!user) return res.status(400).json({ error: 'This invite link is invalid or has already been used.' });
@@ -394,6 +418,7 @@ router.post('/company-accept-invite', async (req, res) => {
         await supabaseAdmin.from('company_users')
             .update({ password_hash: passwordHash, invite_token: null, invite_expires_at: null, last_login: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq('id', user.id);
+        await recordLogin({ companyId: company.id, user, event: user.password_hash ? 'password_reset' : 'password_set', req });
 
         const jwtToken = jwt.sign({
             type: 'company_user',
