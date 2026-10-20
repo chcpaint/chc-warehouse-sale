@@ -448,6 +448,101 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * GET /api/admin/dashboard/period-to-date?company_id=
+ *
+ * The two numbers the console opens on: month to date and year to date, side
+ * by side, for every company the viewer may see (or the one they narrowed to).
+ * It is deliberately independent of the period picker -- the picker steers the
+ * detail underneath; these two are the fixed reference points.
+ *
+ * Each carries the same stretch of last year (1 Jan or 1 of the month, up to
+ * today's date) so "is this good?" has an answer. Same rules as the main
+ * dashboard: cancelled orders are not sales, and a company admin only ever
+ * sees their own company.
+ */
+router.get('/period-to-date', async (req, res) => {
+    try {
+        const isSuper = req.admin.role === 'super_admin';
+        let scopeIds = null;
+        if (!isSuper) {
+            if (!req.admin.company_id) return res.status(403).json({ error: 'No company on this account.' });
+            scopeIds = [req.admin.company_id];
+        } else if (req.query.company_id && isValidUUID(req.query.company_id)) {
+            scopeIds = [req.query.company_id];
+        }
+
+        const now = new Date();
+        const y = now.getFullYear(), m = now.getMonth();
+        const start = (yy, mm) => new Date(yy, mm, 1, 0, 0, 0, 0);
+        const sameMomentLastYear = new Date(now);
+        sameMomentLastYear.setFullYear(y - 1);        // 29 Feb rolls to 1 Mar, which is fine
+        const win = {
+            mtd:       { from: start(y, m),     to: now },
+            ytd:       { from: start(y, 0),     to: now },
+            prior_mtd: { from: start(y - 1, m), to: sameMomentLastYear },
+            prior_ytd: { from: start(y - 1, 0), to: sameMomentLastYear }
+        };
+        const fresh = () => ({ sales: 0, orders: 0, companies: new Set() });
+        const acc = { mtd: fresh(), ytd: fresh(), prior_mtd: fresh(), prior_ytd: fresh() };
+
+        const { rows, truncated } = await readAll(() => {
+            let q = supabaseAdmin.from('orders')
+                .select('id, company_id, total, status, created_at')
+                .not('status', 'in', `(${NON_SALE_STATUSES.join(',')})`)
+                .gte('created_at', win.prior_ytd.from.toISOString())
+                .lte('created_at', now.toISOString());
+            if (scopeIds) q = q.in('company_id', scopeIds);
+            return q;
+        });
+
+        for (const o of rows) {
+            if (NON_SALE_STATUSES.includes(String(o.status))) continue;
+            const t = new Date(o.created_at).getTime();
+            if (!Number.isFinite(t)) continue;
+            const total = num(o.total);
+            for (const k of Object.keys(win)) {
+                if (t >= win[k].from.getTime() && t <= win[k].to.getTime()) {
+                    acc[k].sales += total; acc[k].orders += 1; acc[k].companies.add(o.company_id);
+                }
+            }
+        }
+
+        let companiesTotal = null;
+        {
+            const { rows: cs } = await readAll(() => {
+                let q = supabaseAdmin.from('companies').select('id');
+                if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
+                if (scopeIds) q = q.in('id', scopeIds);
+                return q;
+            });
+            companiesTotal = cs.length;
+        }
+
+        const shape = (a, label) => ({
+            label,
+            sales: round2(a.sales),
+            orders: a.orders,
+            average_order: a.orders ? round2(a.sales / a.orders) : 0,
+            customers_ordering: a.companies.size
+        });
+        const monthName = now.toLocaleString('en-CA', { month: 'long' });
+        res.json({
+            as_of: now.toISOString(),
+            companies_total: companiesTotal,
+            scope: { is_super: isSuper, company_id: scopeIds && scopeIds.length === 1 ? scopeIds[0] : null },
+            mtd: shape(acc.mtd, `${monthName} ${y}`),
+            ytd: shape(acc.ytd, `Year ${y}`),
+            prior_mtd: shape(acc.prior_mtd, `${monthName} ${y - 1}`),
+            prior_ytd: shape(acc.prior_ytd, `Year ${y - 1}`),
+            partial: truncated
+        });
+    } catch (err) {
+        console.error('Period-to-date error:', err);
+        res.status(500).json({ error: 'Could not load month-to-date and year-to-date.' });
+    }
+});
+
+/**
  * GET /api/admin/dashboard/jobs?period=&company_id=&format=csv
  *
  * Materials consumed per repair order, costed — the reconciliation view.

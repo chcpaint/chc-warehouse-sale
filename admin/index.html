@@ -189,55 +189,19 @@
 
                     <div id="db-warning" class="hidden mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"></div>
 
-                    <!-- Headline numbers -->
-                    <div id="db-headline" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                    <!-- Headline numbers: month to date and year to date, always both -->
+                    <div id="db-headline" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                         <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div class="min-w-0">
-                                    <p class="text-sm text-gray-500">Sales</p>
-                                    <p id="db-sales" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="db-sales-sub" class="text-sm text-gray-500 mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center shrink-0">
-                                    <i class="fas fa-dollar-sign text-green-600"></i>
-                                </div>
-                            </div>
+                            <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Month to date <span id="db-mtd-label" class="normal-case font-normal text-gray-400"></span></p>
+                            <p id="db-mtd-sales" class="text-4xl font-bold text-gray-800 mt-2">-</p>
+                            <p id="db-mtd-sub" class="text-sm text-gray-600 mt-1"></p>
+                            <p id="db-mtd-cmp" class="text-sm mt-2 text-gray-400"></p>
                         </div>
                         <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div class="min-w-0">
-                                    <p class="text-sm text-gray-500">Orders</p>
-                                    <p id="db-orders" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="db-orders-sub" class="text-sm text-gray-500 mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center shrink-0">
-                                    <i class="fas fa-receipt text-purple-600"></i>
-                                </div>
-                            </div>
-                        </div>
-                        <div id="db-stock-card" class="hidden bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div class="min-w-0">
-                                    <p id="db-stock-label" class="text-sm text-gray-500">Stock on hand</p>
-                                    <p id="db-stock" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="db-stock-sub" class="text-sm text-gray-500 mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
-                                    <i class="fas fa-warehouse text-blue-600"></i>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div class="min-w-0">
-                                    <p class="text-sm text-gray-500">Repairs billed</p>
-                                    <p id="db-repairs" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="db-repairs-sub" class="text-sm text-gray-500 mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center shrink-0">
-                                    <i class="fas fa-screwdriver-wrench text-orange-600"></i>
-                                </div>
-                            </div>
+                            <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Year to date <span id="db-ytd-label" class="normal-case font-normal text-gray-400"></span></p>
+                            <p id="db-ytd-sales" class="text-4xl font-bold text-gray-800 mt-2">-</p>
+                            <p id="db-ytd-sub" class="text-sm text-gray-600 mt-1"></p>
+                            <p id="db-ytd-cmp" class="text-sm mt-2 text-gray-400"></p>
                         </div>
                     </div>
 
@@ -2559,18 +2523,9 @@
     function dbApplyStockVisibility() {
         const c = dbStockScope();
         dbStockVisible = !!c;
-        const card = document.getElementById('db-stock-card');
-        if (card) card.classList.toggle('hidden', !c);
-        const head = document.getElementById('db-headline');
-        if (head) {
-            head.classList.toggle('lg:grid-cols-4', !!c);
-            head.classList.toggle('lg:grid-cols-3', !c);
-        }
         document.querySelectorAll('.db-stock-col').forEach(el => el.classList.toggle('hidden', !c));
         const note = document.getElementById('db-stock-note');
         if (note) note.classList.toggle('hidden', !c);
-        const lbl = document.getElementById('db-stock-label');
-        if (lbl && c) lbl.textContent = (/test/i.test(c.name) ? c.name + ' \u2014 ' : '') + 'Stock on hand' + (/test/i.test(c.name) ? '' : ' \u00b7 ' + c.name);
     }
 
     const dbMoney = n => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2598,18 +2553,22 @@
             const q = dbQuery();
             // Both reads together — the jobs panel is part of the same picture,
             // and serialising them just makes the screen appear in two stages.
-            const [resp, jobsResp] = await Promise.all([
+            const company = document.getElementById('db-company').value;
+            const ptdUrl = '/dashboard/period-to-date' + (company ? `?company_id=${encodeURIComponent(company)}` : '');
+            const [resp, jobsResp, ptdResp] = await Promise.all([
                 adminFetch(`/dashboard${q}`),
-                adminFetch(`/dashboard/jobs${q}`)
+                adminFetch(`/dashboard/jobs${q}`),
+                adminFetch(ptdUrl).catch(() => null)
             ]);
             if (!resp.ok) throw new Error('dashboard ' + resp.status);
             const data = await resp.json();
             dbState.data = data;
             dbState.jobs = jobsResp.ok ? await jobsResp.json() : null;
+            const ptd = ptdResp && ptdResp.ok ? await ptdResp.json() : null;
 
             document.getElementById('db-period-label').textContent = data.period.label;
             dbApplyStockVisibility();
-            dbRenderCards(data);
+            dbRenderPeriodToDate(ptd);
             dbRenderTrend(data);
             dbRenderCompanies(data);
             dbRenderKits(data);
@@ -2636,25 +2595,31 @@
         dbState.companiesFilled = true;
     }
 
-    function dbRenderCards(d) {
-        const t = d.totals;
-        document.getElementById('db-sales').textContent = dbMoney0(t.sales_total);
-        document.getElementById('db-sales-sub').textContent =
-            t.customers_ordering
-                ? `${t.customers_ordering} of ${t.companies_total} customers ordered`
-                : 'no orders in this period';
-
-        document.getElementById('db-orders').textContent = dbNum(t.order_count);
-        document.getElementById('db-orders-sub').textContent =
-            t.order_count ? `${dbMoney(t.average_order)} average · ${dbNum(t.units_ordered)} units` : '';
-
-        document.getElementById('db-stock').textContent = dbMoney0(t.inventory_value);
-        document.getElementById('db-stock-sub').textContent =
-            `${dbNum(t.inventory_units)} units on hand today \u00b7 this store only, not CHC's warehouse`;
-
-        document.getElementById('db-repairs').textContent = dbNum(t.kits_consumed);
-        document.getElementById('db-repairs-sub').textContent =
-            t.kits_consumed ? `${dbMoney(t.kits_value)} of materials` : 'no repairs billed yet';
+    // Month to date and year to date. Independent of the period picker, driven by
+    // the customer picker only. Last year's same stretch is the yardstick.
+    function dbRenderPeriodToDate(p) {
+        const one = (key, priorKey, noun) => {
+            const cur = p ? p[key] : null, prior = p ? p[priorKey] : null;
+            const set = (id, v) => { const el = document.getElementById(`db-${key}-${id}`); if (el) el.textContent = v; };
+            if (!cur) { set('sales', '\u2014'); set('sub', 'Could not load. Try Refresh.'); set('cmp', ''); set('label', ''); return; }
+            set('label', '\u00b7 ' + cur.label);
+            set('sales', dbMoney0(cur.sales));
+            set('sub', cur.orders
+                ? `${dbNum(cur.orders)} order${cur.orders === 1 ? '' : 's'} \u00b7 ${dbMoney(cur.average_order)} average \u00b7 ${dbNum(cur.customers_ordering)} of ${dbNum(p.companies_total)} customers ordered`
+                : 'no orders yet');
+            const cmp = document.getElementById(`db-${key}-cmp`);
+            if (prior && prior.sales > 0) {
+                const pct = (cur.sales - prior.sales) / prior.sales * 100;
+                const up = pct >= 0;
+                cmp.className = 'text-sm mt-2 ' + (up ? 'text-green-700' : 'text-red-700');
+                cmp.textContent = `${up ? '\u25B2' : '\u25BC'} ${Math.abs(pct).toFixed(1)}% vs ${noun} last year (${dbMoney0(prior.sales)})`;
+            } else {
+                cmp.className = 'text-sm mt-2 text-gray-400';
+                cmp.textContent = 'no sales in the same stretch last year to compare';
+            }
+        };
+        one('mtd', 'prior_mtd', 'the same days');
+        one('ytd', 'prior_ytd', 'the same days');
     }
 
     function dbRenderWarning(d, jobs) {
