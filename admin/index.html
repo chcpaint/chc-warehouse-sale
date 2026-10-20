@@ -905,11 +905,16 @@
                                 <option value="">Select Company</option>
                             </select>
                         </div>
-                        <button onclick="libOpenConflicts()" id="library-conflicts-btn"
-                                class="hidden bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-3 py-2 rounded-lg text-sm font-semibold">
-                            <i class="fas fa-triangle-exclamation mr-1"></i>
-                            <span id="library-conflicts-count">0</span> barcodes need a decision
-                        </button>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button onclick="libUploadSheet()" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-file-arrow-up mr-1"></i>Upload a price sheet
+                            </button>
+                            <button onclick="libOpenConflicts()" id="library-conflicts-btn"
+                                    class="hidden bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-3 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-triangle-exclamation mr-1"></i>
+                                <span id="library-conflicts-count">0</span> barcodes need a decision
+                            </button>
+                        </div>
                     </div>
 
                     <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
@@ -1816,7 +1821,10 @@
                 <div id="upl-file-section">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Catalog File (CSV or XLSX)</label>
                     <input type="file" id="upload-file" accept=".csv,.xlsx,.xls" class="w-full px-3 py-2 border rounded-lg" onchange="resetUploadState()">
-                    <p class="text-xs text-gray-400 mt-1">Columns: SKU, Item Name, Brand, Category, Price, Case Qty. Multi-tab XLSX supported (tab name becomes the brand). Rows priced $0 are skipped.</p>
+                    <p class="text-xs text-gray-400 mt-1">A vendor's price sheet works as it is: a company name or title above the column headings is fine, and prices like <b>$3.69</b> are fine. It needs a part number, a product name and a price column (Item #, Item Name, Current Price&hellip;). Optional: Brand, Category, Case Qty. Rows priced $0 are skipped.</p>
+                    <label for="upl-vendor" class="block text-sm font-medium text-gray-700 mt-3 mb-1">Vendor / brand for this sheet <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <input type="text" id="upl-vendor" maxlength="80" placeholder="e.g. 3M" oninput="resetUploadState()" class="w-full px-3 py-2 border rounded-lg text-sm">
+                    <p class="text-xs text-gray-400 mt-1">Filed against every item that has no Brand column of its own. New parts are added to this company's catalogue; parts it already has just get the new price.</p>
                 </div>
                 <div id="upl-manual-section" class="hidden">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Enter your items</label>
@@ -6070,6 +6078,7 @@
         if (sel && up && sel.value) up.value = sel.value;
         const f = document.getElementById('upload-file'); if (f) f.value = '';
         resetManualRows();
+        const vv = document.getElementById('upl-vendor'); if (vv) vv.value = '';
         const mm = document.getElementById('upl-mode-merge'); if (mm) mm.checked = true;
         resetUploadState();
         showModal('upload-modal');
@@ -6221,6 +6230,7 @@
         fd.append('catalog', file);
         fd.append('mode', getUploadMode());
         fd.append('unlock_ppg', (document.getElementById('upl-unlock-ppg') || {}).checked ? '1' : '0');
+        if (uploadSource === 'file') { const v = (document.getElementById('upl-vendor') || {}).value; if (v && v.trim()) fd.append('vendor', v.trim()); }
         if (dryRun) fd.append('dry_run', '1');
 
         try {
@@ -6256,11 +6266,14 @@
             : '';
         const ppgNote = (d.ppg_propagated)
             ? `<p class="text-sm text-blue-700 mt-1"><i class="fas fa-arrows-turn-to-dots mr-1"></i>PPG list-price change propagated to <b>${d.ppg_propagated}</b> item(s) on other companies.</p>` : '';
+        const errList = (d.error_details && d.error_details.length)
+            ? `<div class="mt-2 text-xs text-red-700 border-t pt-2 max-h-32 overflow-y-auto"><b>Not imported:</b>` + d.error_details.map(e => `<div>Row ${esc(String(e.row))}${e.sku ? ' (' + esc(e.sku) + ')' : ''}: ${esc(e.error)}</div>`).join('') + (d.errors > d.error_details.length ? `<div>&hellip;and ${d.errors - d.error_details.length} more</div>` : '') + '</div>' : '';
+        const readNote = d.rows_read ? `<p class="text-xs text-gray-500 mt-1">${d.rows_read} line(s) read from the file${d.vendor ? ' \u00b7 vendor: ' + esc(d.vendor) : ''}.</p>` : '';
         return `<div class="${bg} p-4 rounded-lg">
-            <p class="font-semibold text-gray-800">${title}</p>
+            <p class="font-semibold text-gray-800">${title}</p>${readNote}
             ${replaceNote}${ppgNote}
             <p class="text-sm text-gray-700 mt-1">New: <b>${d.inserted}</b> &middot; Updated: <b>${d.updated}</b> &middot; Price changes: <b>${d.price_changes}</b> &middot; Skipped ($0): <b>${d.skipped}</b> &middot; Errors: <b>${d.errors}</b></p>
-            ${sample}
+            ${sample}${errList}
         </div>`;
     }
 
@@ -7599,6 +7612,15 @@
             } catch (_) { /* the filter is a convenience; search still works without it */ }
         }
         libLoad(0);
+    }
+
+    // A vendor's whole price sheet for the shop chosen above: opens the same
+    // Add / Import window, already pointed at that company.
+    function libUploadSheet() {
+        const id = libCompany();
+        openAddImport('file');
+        const up = document.getElementById('upload-company');
+        if (up && id) up.value = id;
     }
 
     function libCompany() {
