@@ -190,7 +190,7 @@
                     <div id="db-warning" class="hidden mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"></div>
 
                     <!-- Headline numbers -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div id="db-headline" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                         <div class="bg-white rounded-xl shadow-sm border p-5">
                             <div class="flex justify-between items-start">
                                 <div class="min-w-0">
@@ -215,10 +215,10 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <div id="db-stock-card" class="hidden bg-white rounded-xl shadow-sm border p-5">
                             <div class="flex justify-between items-start">
                                 <div class="min-w-0">
-                                    <p class="text-sm text-gray-500">Stock on hand</p>
+                                    <p id="db-stock-label" class="text-sm text-gray-500">Stock on hand</p>
                                     <p id="db-stock" class="text-3xl font-bold text-gray-800 mt-1">-</p>
                                     <p id="db-stock-sub" class="text-sm text-gray-500 mt-1"></p>
                                 </div>
@@ -254,7 +254,7 @@
                     <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-6">
                         <div class="flex items-baseline justify-between px-5 py-4 border-b">
                             <h3 class="font-semibold text-gray-800">By customer</h3>
-                            <span class="text-xs text-gray-400">stock is valued at that customer's own price</span>
+                            <span id="db-stock-note" class="hidden text-xs text-gray-400">stock is valued at that customer's own price</span>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-sm">
@@ -264,8 +264,8 @@
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Sales</th>
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Orders</th>
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Avg order</th>
-                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock $</th>
-                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock units</th>
+                                        <th class="db-stock-col hidden text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock $</th>
+                                        <th class="db-stock-col hidden text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock units</th>
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Repairs</th>
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Repairs $</th>
                                     </tr>
@@ -2541,6 +2541,38 @@
     // ============================================================
     let dbState = { data: null, jobs: null, companiesFilled: false };
 
+    // Stock figures only make sense for ONE customer that has refinishAI Inventory
+    // switched on (today: the CHC Test store). Across "All customers" they add up a
+    // test store's handful of units and read as if they were CHC's own warehouse,
+    // which staff took as wrong. So: hidden unless a single such customer is chosen.
+    let dbStockVisible = false;
+    function dbStockScope() {
+        let id = (document.getElementById('db-company') || {}).value;
+        const all = admin.companies || [];
+        // A customer's own admin only ever sees their one company, so "All" is just theirs.
+        if (!id && all.length === 1) id = all[0].id;
+        if (!id) return null;
+        const c = all.find(x => x.id === id);
+        if (!c || !(c.settings && c.settings.inventory && c.settings.inventory.enabled)) return null;
+        return c;
+    }
+    function dbApplyStockVisibility() {
+        const c = dbStockScope();
+        dbStockVisible = !!c;
+        const card = document.getElementById('db-stock-card');
+        if (card) card.classList.toggle('hidden', !c);
+        const head = document.getElementById('db-headline');
+        if (head) {
+            head.classList.toggle('lg:grid-cols-4', !!c);
+            head.classList.toggle('lg:grid-cols-3', !c);
+        }
+        document.querySelectorAll('.db-stock-col').forEach(el => el.classList.toggle('hidden', !c));
+        const note = document.getElementById('db-stock-note');
+        if (note) note.classList.toggle('hidden', !c);
+        const lbl = document.getElementById('db-stock-label');
+        if (lbl && c) lbl.textContent = (/test/i.test(c.name) ? c.name + ' \u2014 ' : '') + 'Stock on hand' + (/test/i.test(c.name) ? '' : ' \u00b7 ' + c.name);
+    }
+
     const dbMoney = n => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const dbMoney0 = n => '$' + Math.round(Number(n || 0)).toLocaleString('en-CA');
     const dbNum = n => Number(n || 0).toLocaleString('en-CA', { maximumFractionDigits: 1 });
@@ -2576,6 +2608,7 @@
             dbState.jobs = jobsResp.ok ? await jobsResp.json() : null;
 
             document.getElementById('db-period-label').textContent = data.period.label;
+            dbApplyStockVisibility();
             dbRenderCards(data);
             dbRenderTrend(data);
             dbRenderCompanies(data);
@@ -2617,7 +2650,7 @@
 
         document.getElementById('db-stock').textContent = dbMoney0(t.inventory_value);
         document.getElementById('db-stock-sub').textContent =
-            `${dbNum(t.inventory_units)} units on hand today`;
+            `${dbNum(t.inventory_units)} units on hand today \u00b7 this store only, not CHC's warehouse`;
 
         document.getElementById('db-repairs').textContent = dbNum(t.kits_consumed);
         document.getElementById('db-repairs-sub').textContent =
@@ -2629,7 +2662,7 @@
         if (d.totals.unpriced_lines) {
             msgs.push(`${d.totals.unpriced_lines} order line(s) are priced on request, so the sales figure above does not include them.`);
         }
-        if (d.totals.inventory_unvalued_skus) {
+        if (dbStockVisible && d.totals.inventory_unvalued_skus) {
             msgs.push(`${d.totals.inventory_unvalued_skus} stocked item(s) have no price, so stock value is a floor, not a total.`);
         }
         if (jobs && jobs.totals.jobs_hand_scanned_only) {
@@ -2686,8 +2719,8 @@
             <td class="px-4 py-3 text-right font-semibold text-gray-800">${dbEsc(dbMoney(c.sales_total))}</td>
             <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.order_count)}</td>
             <td class="px-4 py-3 text-right text-gray-600">${c.order_count ? dbEsc(dbMoney(c.average_order)) : '—'}</td>
-            <td class="px-4 py-3 text-right text-gray-600">${dbEsc(dbMoney(c.inventory_value))}</td>
-            <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.inventory_units)}</td>
+            <td class="db-stock-col ${dbStockVisible ? '' : 'hidden'} px-4 py-3 text-right text-gray-600">${dbEsc(dbMoney(c.inventory_value))}</td>
+            <td class="db-stock-col ${dbStockVisible ? '' : 'hidden'} px-4 py-3 text-right text-gray-600">${dbNum(c.inventory_units)}</td>
             <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.kits_consumed)}</td>
             <td class="px-4 py-3 text-right text-gray-600">${dbEsc(dbMoney(c.kits_value))}</td>
           </tr>`).join('');
@@ -2699,8 +2732,8 @@
             <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('sales_total')))}</td>
             <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('order_count'))}</td>
             <td class="px-4 py-3 text-right text-gray-400">—</td>
-            <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('inventory_value')))}</td>
-            <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('inventory_units'))}</td>
+            <td class="db-stock-col ${dbStockVisible ? '' : 'hidden'} px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('inventory_value')))}</td>
+            <td class="db-stock-col ${dbStockVisible ? '' : 'hidden'} px-4 py-3 text-right text-gray-700">${dbNum(sum('inventory_units'))}</td>
             <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('kits_consumed'))}</td>
             <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('kits_value')))}</td>
           </tr>`;
