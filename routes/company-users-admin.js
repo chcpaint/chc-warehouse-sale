@@ -60,7 +60,7 @@ router.put('/:id', async (req, res) => {
 
 router.post('/:id/resend-invite', async (req, res) => {
     try {
-        const result = await cu.resendInvite({ company: req.targetCompany, userId: req.params.id });
+        const result = await cu.resendInvite({ company: req.targetCompany, userId: req.params.id, linkOnly: req.body && req.body.link_only === true });
         res.status(result.status).json(result.body);
     } catch (err) { console.error('CHC resend invite:', err); res.status(500).json({ error: 'Failed to resend the invite.' }); }
 });

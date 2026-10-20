@@ -161,7 +161,7 @@ async function updateUser({ company, userId, patch, actorUserId }) {
     return { status: 200, body: { message: 'Saved.', user: pickUser(data) } };
 }
 
-async function resendInvite({ company, userId }) {
+async function resendInvite({ company, userId, linkOnly = false }) {
     if (!isValidUUID(userId)) return { status: 400, body: { error: 'Invalid user id.' } };
     const { data: user } = await supabaseAdmin
         .from('company_users').select('id, email, name, password_hash').eq('id', userId).eq('company_id', company.id).maybeSingle();
@@ -172,14 +172,20 @@ async function resendInvite({ company, userId }) {
         .update({ invite_token: token, invite_expires_at: expires, updated_at: new Date().toISOString() })
         .eq('id', userId);
 
+    const link = `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`;
+    // linkOnly: nothing is emailed -- the admin hands the link over themselves
+    // (Teams, text, phone). For when the person's inbox is not receiving mail.
+    if (linkOnly) {
+        return { status: 200, body: { message: `Link created for ${user.email}. Send it to them yourself.`, email_sent: false, link } };
+    }
     const invite = await sendInvite({
         to: user.email, name: user.name,
-        inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`,
+        inviteUrl: link,
         context: company.name,
         expiresText: `${INVITE_TTL_DAYS} days`,
         reset: !!user.password_hash
     });
-    return { status: 200, body: { message: `${user.password_hash ? 'Password-reset link' : 'Invite'} sent to ${user.email}.`, email_sent: invite.sent } };
+    return { status: 200, body: { message: `${user.password_hash ? 'Password-reset link' : 'Invite'} sent to ${user.email}.`, email_sent: invite.sent, ...(invite.sent ? {} : { link, email_error: invite.error || invite.reason }) } };
 }
 
 /**

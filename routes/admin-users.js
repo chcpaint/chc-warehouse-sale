@@ -399,16 +399,23 @@ router.post('/:id/resend-invite', async (req, res) => {
             .update({ invite_token: token, invite_expires_at: expires, updated_at: new Date().toISOString() })
             .eq('id', id);
 
+        const link = `${baseUrl()}/set-password.html?token=${token}&kind=admin`;
+        // link_only: nothing is emailed; the admin hands the link over themselves
+        // (Teams, text, phone) -- for when the person's inbox is not receiving mail.
+        if (req.body && req.body.link_only === true) {
+            await logAction(req.admin.id, 'admin_user_reset_link_created', id, { email: user.email }, req.ip);
+            return res.json({ message: `Link created for ${user.email}. Send it to them yourself.`, email_sent: false, link });
+        }
         const invite = await sendInvite({
             to: user.email, name: user.name,
-            inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=admin`,
+            inviteUrl: link,
             context: 'CHC order desk',
             invitedBy: req.admin.name,
             expiresText: `${INVITE_TTL_DAYS} days`,
             reset: !!user.password_hash
         });
         await logAction(req.admin.id, 'admin_user_reinvited', id, { email: user.email }, req.ip);
-        res.json({ message: `${user.password_hash ? 'Password-reset link' : 'Invite'} sent to ${user.email}.`, email_sent: invite.sent });
+        res.json({ message: `${user.password_hash ? 'Password-reset link' : 'Invite'} sent to ${user.email}.`, email_sent: invite.sent, ...(invite.sent ? {} : { link, email_error: invite.error || invite.reason }) });
     } catch (err) {
         console.error('Resend invite error:', err);
         res.status(500).json({ error: 'Failed to resend the invite.' });

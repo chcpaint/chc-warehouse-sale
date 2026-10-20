@@ -256,6 +256,25 @@ function weakPassword(pw) {
 const PW_RULE = 'Password must be at least 8 characters with uppercase, lowercase, and a number.';
 
 /**
+ * POST /api/auth/admin-forgot   Body: { email }
+ * "Forgot password?" on the CHC console sign-in. Always answers the same way,
+ * so it cannot be used to discover which addresses have accounts.
+ */
+router.post('/admin-forgot', async (req, res) => {
+    const generic = { message: 'If that email belongs to a CHC console account, a password-reset link is on its way. It can take a few minutes to arrive -- check your junk folder too.' };
+    try {
+        const email = stripHtml(req.body.email || '').trim();
+        if (!email) return res.status(400).json({ error: 'Enter your email address.' });
+        const result = await require('../utils/admin-reset').requestAdminPasswordReset({ email, distributor: req.distributor });
+        if (result.reason === 'email_failed') console.error('Admin password reset email FAILED for', email, '-', result.error);
+        res.json(generic);
+    } catch (err) {
+        console.error('Admin forgot error:', err);
+        res.json(generic);   // an error must not reveal anything either
+    }
+});
+
+/**
  * POST /api/auth/admin-accept-invite   Body: { token, password }
  * A CHC staff member sets their password from an invite link and is logged in.
  */
@@ -280,7 +299,7 @@ router.post('/admin-accept-invite', async (req, res) => {
 
         const passwordHash = await bcrypt.hash(password, 12);
         await supabaseAdmin.from('admin_users')
-            .update({ password_hash: passwordHash, invite_token: null, invite_expires_at: null, last_login: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .update({ password_hash: passwordHash, must_change_password: false, invite_token: null, invite_expires_at: null, last_login: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq('id', admin.id);
 
         const jwtToken = jwt.sign({
