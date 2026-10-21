@@ -17,94 +17,27 @@
  */
 
 const express = require('express');
-const { supabaseAdmin } = require('../utils/supabase');
 const { isValidUUID } = require('../utils/sanitize');
-const { weekRanges, buildAdoption } = require('../utils/adoption');
+const { loadAdoptionReport } = require('../utils/adoption-data');
+const { digestInfo, sendDigestNow } = require('../utils/adoption-digest');
 
 const router = express.Router();
 
-const PAGE = 1000;
-const MAX_ROWS = 60000;
-
-async function readAll(build) {
-    const out = [];
-    for (let from = 0; from < MAX_ROWS; from += PAGE) {
-        const { data, error } = await build().range(from, from + PAGE - 1);
-        if (error) throw error;
-        const rows = data || [];
-        out.push(...rows);
-        if (rows.length < PAGE) return { rows: out, truncated: false };
-    }
-    return { rows: out, truncated: true };
-}
-
-/**
- * Like readAll, but a table that does not exist yet (a migration not applied)
- * yields no rows and a note rather than failing the whole report.
- */
-async function readOptional(build, note, notes) {
-    try {
-        return (await readAll(build)).rows;
-    } catch (err) {
-        console.error(`[adoption] ${note}:`, err.message || err.code);
-        notes.push(note);
-        return [];
-    }
-}
-
 async function load(req) {
     const isSuper = req.admin.role === 'super_admin';
-    let scopeIds = null;
+    let companyIds = null;
     if (!isSuper) {
         if (!req.admin.company_id) return { status: 403, body: { error: 'No company on this account.' } };
-        scopeIds = [req.admin.company_id];
+        companyIds = [req.admin.company_id];
     } else if (req.query.company_id && isValidUUID(req.query.company_id)) {
-        scopeIds = [req.query.company_id];
+        companyIds = [req.query.company_id];
     }
-
-    const ranges = weekRanges(req.query.weeks, new Date());
-    const from = ranges[0].start;
-    const to = new Date().toISOString();
-    const notes = [];
-
-    const { rows: companies } = await readAll(() => {
-        let q = supabaseAdmin.from('companies').select('id, name, is_active, settings');
-        if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
-        if (scopeIds) q = q.in('id', scopeIds);
-        return q;
+    const report = await loadAdoptionReport({
+        companyIds, distributorId: req.distributor ? req.distributor.id : null, weeks: req.query.weeks
     });
-    const live = companies.filter(c => c.is_active !== false);
-    const ids = live.map(c => c.id);
-    if (!ids.length) {
-        return { status: 200, body: { ...buildAdoption({ ranges }), notes, generated_at: to } };
-    }
-
-    const [{ rows: locations }, { rows: branches }] = await Promise.all([
-        readAll(() => supabaseAdmin.from('company_locations')
-            .select('id, company_id, name, city, is_active, supplier_branch_id').in('company_id', ids)),
-        readAll(() => supabaseAdmin.from('supplier_branches').select('id, name'))
-    ]);
-
-    const [orders, visits, userLogins] = await Promise.all([
-        readAll(() => supabaseAdmin.from('orders')
-            .select('id, company_id, location_id, total, status, created_at, contact_name, placed_by_name')
-            .in('company_id', ids)
-            .not('status', 'in', '(cancelled)')
-            .gte('created_at', from).lte('created_at', to)).then(r => r.rows),
-        readOptional(() => supabaseAdmin.from('console_visits')
-            .select('company_id, location_id, event, session_id, created_at')
-            .in('company_id', ids).in('event', ['enter', 'login'])
-            .gte('created_at', from).lte('created_at', to),
-            'Store visit tracking is not available yet, so shop sign-ins show as zero.', notes),
-        readOptional(() => supabaseAdmin.from('company_user_logins')
-            .select('company_id, user_id, email, name, event, created_at')
-            .in('company_id', ids).eq('event', 'login')
-            .gte('created_at', from).lte('created_at', to),
-            'Named sign-ins are not available yet.', notes)
-    ]);
-
-    const report = buildAdoption({ companies: live, locations, branches, visits, orders, userLogins, ranges });
-    return { status: 200, body: { ...report, notes, generated_at: to } };
+    // The email list is CHC's business, not a customer's.
+    const body = isSuper ? { ...report, digest: digestInfo() } : report;
+    return { status: 200, body };
 }
 
 router.get('/', async (req, res) => {
@@ -151,6 +84,34 @@ router.get('/csv', async (req, res) => {
     } catch (err) {
         console.error('Adoption CSV error:', err);
         res.status(500).json({ error: 'Could not build the adoption CSV.' });
+    }
+});
+
+/**
+ * POST /api/admin/adoption/email-now   {test: true}
+ * Super admin only. Sends last week's report right now: to the standing list,
+ * or, with {test: true}, only to the person asking.
+ */
+router.post('/email-now', async (req, res) => {
+    try {
+        if (req.admin.role !== 'super_admin') return res.status(403).json({ error: 'Only a super admin can send the report.' });
+        let to;
+        if (req.body && req.body.test === true) {
+            if (!req.admin.email) return res.status(400).json({ error: 'Your account has no email address to send a test to.' });
+            to = [req.admin.email];
+        }
+        const result = await sendDigestNow({ to });
+        if (!result.sent) {
+            return res.status(502).json({
+                error: result.reason === 'not_configured'
+                    ? 'Email is not set up on the server, so nothing was sent.'
+                    : `The email could not be sent${result.error ? ': ' + result.error : '.'}`
+            });
+        }
+        res.json({ message: `Sent the report for ${result.week} to ${result.to.join(', ')}.`, to: result.to });
+    } catch (err) {
+        console.error('Adoption email-now error:', err);
+        res.status(500).json({ error: 'Could not send the report.' });
     }
 });
 

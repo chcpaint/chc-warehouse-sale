@@ -724,4 +724,24 @@ async function sendInvite(o) {
     }
 }
 
-module.exports = { sendOrderNotification, sendOrderStatusUpdate, sendOrderNoteAdded, sendContactNote, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite };
+/**
+ * Send the weekly adoption report. One copy per recipient (isMultiple), so the
+ * people on the list do not see each other's addresses.
+ * @param {Object} o  {to: string[], subject, html, text}
+ */
+async function sendAdoptionReport(o) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+    const to = (Array.isArray(o.to) ? o.to : [o.to]).filter(Boolean);
+    if (!to.length) return { sent: false, reason: 'no_recipient' };
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    try {
+        await sgMail.send({ to, from: fromAddress, subject: o.subject, text: o.text, html: o.html }, true);
+        return { sent: true };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Adoption report email failed:', errMsg);
+        return { sent: false, error: errMsg };
+    }
+}
+
+module.exports = { sendOrderNotification, sendOrderStatusUpdate, sendOrderNoteAdded, sendContactNote, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite, sendAdoptionReport };

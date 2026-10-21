@@ -1273,6 +1273,14 @@
                             </div>
                         </div>
                         <p class="text-xs text-gray-400 mb-3">Weeks run Monday to Sunday (Toronto time). A shop counts as active in a week when someone signed in and entered its store, or it placed an order. The latest week is still in progress.</p>
+                        <div id="adopt-digest" class="hidden mb-3 text-sm bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-3 py-2">
+                            <div class="flex flex-wrap items-center gap-3">
+                                <div class="flex-1 min-w-[240px]"><i class="fas fa-envelope mr-1"></i><span id="adopt-digest-text"></span></div>
+                                <button id="adopt-test-btn" onclick="adoptEmail(true)" class="px-3 py-1.5 border border-blue-300 bg-white hover:bg-blue-100 rounded-lg text-xs font-semibold">Send me a test</button>
+                                <button id="adopt-send-btn" onclick="adoptEmail(false)" class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold">Send to the team now</button>
+                            </div>
+                            <div id="adopt-digest-msg" class="hidden mt-2 text-xs"></div>
+                        </div>
                         <div id="adopt-notes" class="hidden mb-3 text-sm bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg px-3 py-2"></div>
                         <div id="adopt-summary" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4"></div>
 
@@ -2484,6 +2492,10 @@
     }
     function adoptRender(d) {
         const t = d.totals, last = d.weeks.length - 1;
+        const dg = document.getElementById('adopt-digest');
+        dg.classList.toggle('hidden', !d.digest);
+        if (d.digest) document.getElementById('adopt-digest-text').textContent =
+            `Emailed automatically ${d.digest.when}, to: ${d.digest.recipients.join(', ')}.`;
         const notes = document.getElementById('adopt-notes');
         notes.classList.toggle('hidden', !(d.notes && d.notes.length));
         notes.textContent = (d.notes || []).join(' ');
@@ -2541,6 +2553,21 @@
                 <td class="px-4 py-2 text-right">${p.sign_ins}</td>
                 <td class="px-4 py-2 text-gray-600">${adoptDate(p.last_sign_in)}</td>
             </tr>`).join('') || '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No named sign-ins in these weeks.</td></tr>';
+    }
+    async function adoptEmail(test) {
+        const msg = document.getElementById('adopt-digest-msg');
+        const btns = [document.getElementById('adopt-test-btn'), document.getElementById('adopt-send-btn')];
+        if (!test && !confirm('Send last week\'s adoption report to the whole team now? They also get it automatically every Monday.')) return;
+        btns.forEach(b => b.disabled = true);
+        msg.className = 'mt-2 text-xs'; msg.textContent = 'Sending\u2026';
+        try {
+            const resp = await adminFetch('/adoption/email-now', { method: 'POST', body: JSON.stringify({ test }) });
+            const data = await resp.json();
+            msg.className = 'mt-2 text-xs ' + (resp.ok ? 'text-green-700' : 'text-red-700');
+            msg.textContent = resp.ok ? data.message : (data.error || 'Could not send.');
+        } catch (e) {
+            msg.className = 'mt-2 text-xs text-red-700'; msg.textContent = 'Could not send. Check your connection and try again.';
+        } finally { btns.forEach(b => b.disabled = false); }
     }
     async function adoptDownloadCSV() {
         try {
