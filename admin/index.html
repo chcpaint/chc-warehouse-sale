@@ -1676,6 +1676,11 @@
                     <label class="block text-xs font-medium text-gray-500 mb-1">Servicing CHC branch</label>
                     <select id="edit-loc-branch" class="w-full px-3 py-2 border rounded-lg bg-white"></select>
                 </div>
+                <div id="edit-loc-orderers-wrap">
+                    <label for="edit-loc-orderers" class="block text-xs font-medium text-gray-500 mb-1">People who can place orders (one name per line)</label>
+                    <textarea id="edit-loc-orderers" rows="4" placeholder="Leave empty to let people type their own name" class="w-full px-3 py-2 border rounded-lg text-sm"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">When filled in, checkout shows these names as a drop-down. They still type their own email.</p>
+                </div>
                 <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Save Changes</button>
             </form>
         </div>
@@ -5422,6 +5427,10 @@
         document.getElementById('edit-loc-province').value = l.province || '';
         document.getElementById('edit-loc-restrict').value = l.restrict_to_category || '';
         document.getElementById('edit-loc-branch').innerHTML = branchOptions(l.supplier_branch_id);
+        // Only offered once the database has the column (migration 046), so editing a shop never fails before then.
+        const ordSupported = Array.isArray(l.orderer_names);
+        document.getElementById('edit-loc-orderers-wrap').classList.toggle('hidden', !ordSupported);
+        document.getElementById('edit-loc-orderers').value = ordSupported ? l.orderer_names.join('\n') : '';
         showModal('edit-location-modal');
     }
 
@@ -5439,7 +5448,10 @@
                     contact_phone: document.getElementById('edit-loc-phone').value.trim(),
                     province: document.getElementById('edit-loc-province').value.trim() || null,
                     restrict_to_category: (() => { let r = document.getElementById('edit-loc-restrict').value || ''; const prov = document.getElementById('edit-loc-province').value.trim().toLowerCase(); if (!r && prov === 'nova scotia') r = 'Equip/Filter/Booth'; return r || null; })(),
-                    supplier_branch_id: document.getElementById('edit-loc-branch').value || null
+                    supplier_branch_id: document.getElementById('edit-loc-branch').value || null,
+                    ...(document.getElementById('edit-loc-orderers-wrap').classList.contains('hidden') ? {} : {
+                        orderer_names: document.getElementById('edit-loc-orderers').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)
+                    })
                 })
             });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }

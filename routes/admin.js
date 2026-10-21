@@ -606,6 +606,14 @@ router.put('/companies/:companyId/locations/:locationId', requireCompanyAccess, 
         delete updates.id;
         delete updates.company_id;
         if (updates.supplier_branch_id === '') updates.supplier_branch_id = null;
+        if (updates.orderer_names !== undefined) {
+            // One name per entry: trimmed, no blanks, no repeats (case-insensitive), sensible size.
+            const seen = new Set();
+            updates.orderer_names = (Array.isArray(updates.orderer_names) ? updates.orderer_names : [])
+                .map(n => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 80))
+                .filter(n => n && !seen.has(n.toLowerCase()) && seen.add(n.toLowerCase()))
+                .slice(0, 60);
+        }
 
         const { data, error } = await supabaseAdmin
             .from('company_locations')

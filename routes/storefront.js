@@ -16,6 +16,11 @@ const { moduleEnabled } = require('../utils/modules');
 
 const router = express.Router();
 
+/** Postgres "undefined_column" -- a column from a migration that has not been run yet. */
+function isMissingColumn(err) {
+    return Boolean(err) && (err.code === '42703' || /column .* does not exist|could not find the .* column/i.test(String(err.message || '')));
+}
+
 /**
  * Apply this company's pricing-visibility setting and the distributor's
  * status labels to a list of orders headed to the customer-facing storefront.
@@ -329,14 +334,21 @@ router.get('/:slug/promotions', requireCompanyAuth, async (req, res) => {
  */
 router.get('/:slug/locations', requireCompanyAuth, async (req, res) => {
     try {
-        const { data, error } = await supabaseAdmin
+        // orderer_names arrives with migration 046. Until that has been run, the
+        // column does not exist and asking for it would break sign-in for every
+        // shop, so fall back to the list without it.
+        const listLocations = (cols) => supabaseAdmin
             .from('company_locations')
-            .select('id, name, city, address, province, restrict_to_category')
+            .select(cols)
             .eq('company_id', req.company.id)
             .eq('is_active', true)
             .order('sort_order')
             .order('city')
             .order('name');
+        let { data, error } = await listLocations('id, name, city, address, province, restrict_to_category, orderer_names');
+        if (error && isMissingColumn(error)) {
+            ({ data, error } = await listLocations('id, name, city, address, province, restrict_to_category'));
+        }
 
         if (error) throw error;
         res.json({ locations: data || [] });
@@ -618,17 +630,41 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         if (!location_id || !isValidUUID(location_id)) {
             return res.status(400).json({ error: 'Please select your location before submitting your order.' });
         }
-        const { data: locationRow, error: locationLookupError } = await supabaseAdmin
+        const lookupLocation = (cols) => supabaseAdmin
             .from('company_locations')
-            .select('id, name, supplier_branch_id, restrict_to_category, notify_emails')
+            .select(cols)
             .eq('id', location_id)
             .eq('company_id', companyId)
             .eq('is_active', true)
             .single();
+        let { data: locationRow, error: locationLookupError } =
+            await lookupLocation('id, name, supplier_branch_id, restrict_to_category, notify_emails, orderer_names');
+        if (locationLookupError && isMissingColumn(locationLookupError)) {
+            // Migration 046 not applied yet: carry on without the orderer list.
+            ({ data: locationRow, error: locationLookupError } =
+                await lookupLocation('id, name, supplier_branch_id, restrict_to_category, notify_emails'));
+        }
         if (locationLookupError || !locationRow) {
             return res.status(400).json({ error: 'Selected location is not valid for this account.' });
         }
         const resolvedLocationName = locationRow.name;
+
+        // A shop with a fixed list of orderers (company_locations.orderer_names)
+        // must order as one of them. The drop-down is a convenience; THIS is the
+        // rule, so a hand-built request cannot put any other name on the order.
+        // Individual logins are exempt: their name comes from their account.
+        if (!orderer) {
+            const allowed = Array.isArray(locationRow.orderer_names)
+                ? locationRow.orderer_names.map(n => String(n || '').trim()).filter(Boolean) : [];
+            if (allowed.length) {
+                const wanted = String(contact_name || '').trim().toLowerCase();
+                const match = allowed.find(n => n.toLowerCase() === wanted);
+                if (!match) {
+                    return res.status(400).json({ error: 'Please choose who is ordering from the list.' });
+                }
+                contact_name = match;
+            }
+        }
 
         // Validate item quantities
         for (const item of items) {
