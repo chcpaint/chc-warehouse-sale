@@ -1161,6 +1161,11 @@
                 <!-- Admin Users -->
                 <!-- Reports (CHC head office: all companies) -->
                 <section id="section-reports" class="hidden fade-in">
+                    <div class="flex gap-1 mb-4 border-b" role="tablist">
+                        <button id="rep-tab-orders" role="tab" onclick="repShowTab('orders')" class="px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700">Orders &amp; dollars</button>
+                        <button id="rep-tab-adopt" role="tab" onclick="repShowTab('adopt')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Weekly adoption</button>
+                    </div>
+                    <div id="rep-orders-pane">
                     <div class="flex flex-wrap gap-3 items-end mb-4">
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1">Company</label>
@@ -1243,6 +1248,88 @@
                             </tr></thead>
                             <tbody id="rep-orders-body"></tbody>
                         </table></div>
+                    </div>
+                    </div><!-- /rep-orders-pane -->
+
+                    <div id="rep-adopt-pane" class="hidden">
+                        <div class="flex flex-wrap gap-3 items-end mb-3">
+                            <div>
+                                <label for="adopt-company" class="block text-xs font-semibold text-gray-500 mb-1">Company</label>
+                                <select id="adopt-company" onchange="adoptLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white min-w-[150px]">
+                                    <option value="">All Companies</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="adopt-weeks" class="block text-xs font-semibold text-gray-500 mb-1">Weeks shown</label>
+                                <select id="adopt-weeks" onchange="adoptLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="4">Last 4 weeks</option>
+                                    <option value="8" selected>Last 8 weeks</option>
+                                    <option value="12">Last 12 weeks</option>
+                                    <option value="26">Last 26 weeks</option>
+                                </select>
+                            </div>
+                            <div class="ml-auto">
+                                <button onclick="adoptDownloadCSV()" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Weekly CSV</button>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-400 mb-3">Weeks run Monday to Sunday (Toronto time). A shop counts as active in a week when someone signed in and entered its store, or it placed an order. The latest week is still in progress.</p>
+                        <div id="adopt-notes" class="hidden mb-3 text-sm bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg px-3 py-2"></div>
+                        <div id="adopt-summary" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4"></div>
+
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                            <div class="px-4 py-3 border-b bg-gray-50 font-semibold text-gray-700 text-sm">By company</div>
+                            <div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                    <th class="text-left px-4 py-2">Company</th>
+                                    <th class="text-right px-4 py-2">Shops</th>
+                                    <th class="text-right px-4 py-2">Active this week</th>
+                                    <th class="text-left px-4 py-2">Adoption</th>
+                                    <th class="text-right px-4 py-2">Sign-ins this week</th>
+                                    <th class="text-right px-4 py-2">Orders</th>
+                                    <th class="text-right px-4 py-2">Order dollars</th>
+                                </tr></thead>
+                                <tbody id="adopt-company-body"></tbody>
+                            </table></div>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                            <div class="px-4 py-3 border-b bg-gray-50 flex flex-wrap justify-between items-center gap-2">
+                                <span class="font-semibold text-gray-700 text-sm">By shop, week by week</span>
+                                <span class="text-xs text-gray-500">
+                                    <span class="inline-block w-3 h-3 rounded-sm align-middle mr-1" style="background:#16a34a"></span>signed in and ordered
+                                    <span class="inline-block w-3 h-3 rounded-sm align-middle ml-3 mr-1" style="background:#86efac"></span>signed in or ordered
+                                    <span class="inline-block w-3 h-3 rounded-sm align-middle ml-3 mr-1 border" style="background:#f3f4f6"></span>nothing
+                                </span>
+                            </div>
+                            <div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                    <th class="text-left px-4 py-2">Shop</th>
+                                    <th class="text-left px-4 py-2">CHC branch</th>
+                                    <th class="text-left px-4 py-2">Status</th>
+                                    <th class="text-left px-4 py-2" id="adopt-strip-head">Weeks</th>
+                                    <th class="text-left px-4 py-2">Last seen</th>
+                                    <th class="text-right px-4 py-2">Orders</th>
+                                    <th class="text-right px-4 py-2">Order dollars</th>
+                                    <th class="text-left px-4 py-2">Who ordered</th>
+                                </tr></thead>
+                                <tbody id="adopt-loc-body"></tbody>
+                            </table></div>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                            <div class="px-4 py-3 border-b bg-gray-50 font-semibold text-gray-700 text-sm">People who signed in <span class="font-normal text-gray-400">(customers that sign in with their own email)</span></div>
+                            <div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                    <th class="text-left px-4 py-2">Person</th>
+                                    <th class="text-left px-4 py-2">Company</th>
+                                    <th class="text-right px-4 py-2">Sign-ins this week</th>
+                                    <th class="text-right px-4 py-2">Sign-ins in period</th>
+                                    <th class="text-left px-4 py-2">Last sign-in</th>
+                                </tr></thead>
+                                <tbody id="adopt-people-body"></tbody>
+                            </table></div>
+                            <p class="px-4 py-3 text-xs text-gray-400 border-t">Customers that use a shared access code (for example Assured today) can be tracked by shop but not by person. For them, who ordered comes from the contact name on the order. To track individuals, turn on People &amp; activity for that customer.</p>
+                        </div>
                     </div>
                 </section>
 
@@ -2353,6 +2440,121 @@
                     sort: { orders: { key: 'date', dir: -1 }, items: { key: 'spend', dir: -1 } } };
     let arTimer, arInited = false;
     function arItemDebounce() { clearTimeout(arTimer); arTimer = setTimeout(arApplyFilters, 300); }
+    // ============================================================
+    // WEEKLY ADOPTION (Reports > Weekly adoption)
+    // ============================================================
+    function repShowTab(which) {
+        const adopt = which === 'adopt';
+        document.getElementById('rep-orders-pane').classList.toggle('hidden', adopt);
+        document.getElementById('rep-adopt-pane').classList.toggle('hidden', !adopt);
+        const on = 'px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700';
+        const off = 'px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700';
+        document.getElementById('rep-tab-orders').className = adopt ? off : on;
+        document.getElementById('rep-tab-adopt').className = adopt ? on : off;
+        if (adopt) adoptLoad();
+    }
+    function adoptParams() {
+        const p = new URLSearchParams();
+        const c = document.getElementById('adopt-company').value;
+        if (c) p.set('company_id', c);
+        p.set('weeks', document.getElementById('adopt-weeks').value || '8');
+        return p;
+    }
+    const ADOPT_STATUS = {
+        active_this_week: ['Active this week', 'bg-green-100 text-green-800'],
+        active_last_week: ['Active last week', 'bg-yellow-100 text-yellow-800'],
+        active_earlier: ['Not seen recently', 'bg-orange-100 text-orange-800'],
+        no_activity: ['No activity', 'bg-red-100 text-red-700']
+    };
+    const adoptMoney = n => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const adoptDate = iso => iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+    async function adoptLoad() {
+        const sum = document.getElementById('adopt-summary');
+        const locBody = document.getElementById('adopt-loc-body');
+        locBody.innerHTML = '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        try {
+            const resp = await adminFetch(`/adoption?${adoptParams()}`);
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || 'Failed');
+            adoptRender(d);
+        } catch (e) {
+            sum.innerHTML = '';
+            locBody.innerHTML = '<tr><td colspan="8" class="px-4 py-6 text-center text-red-500">Could not load the adoption report.</td></tr>';
+        }
+    }
+    function adoptRender(d) {
+        const t = d.totals, last = d.weeks.length - 1;
+        const notes = document.getElementById('adopt-notes');
+        notes.classList.toggle('hidden', !(d.notes && d.notes.length));
+        notes.textContent = (d.notes || []).join(' ');
+
+        const card = (label, value, sub) => `<div class="bg-white rounded-xl border shadow-sm px-4 py-3">
+            <div class="text-xs font-semibold text-gray-500 uppercase">${esc(label)}</div>
+            <div class="text-2xl font-bold text-gray-800">${value}</div>
+            <div class="text-xs text-gray-400">${sub || '&nbsp;'}</div></div>`;
+        const pct = t.locations ? Math.round(t.active_this_week / t.locations * 100) : 0;
+        document.getElementById('adopt-summary').innerHTML =
+            card('Shops', t.locations, 'active shops in scope') +
+            card('Active this week', t.active_this_week, pct + '% of shops') +
+            card('Active last week', t.active_last_week, 'for comparison') +
+            card('No activity', t.no_activity, 'in the weeks shown') +
+            card('Ordered this week', adoptMoney(t.dollars_this_week), t.orders_this_week + ' order(s)');
+
+        document.getElementById('adopt-company-body').innerHTML = d.companies.map(c => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2">${esc(c.company_name)}</td>
+                <td class="px-4 py-2 text-right">${c.locations_total}</td>
+                <td class="px-4 py-2 text-right">${c.active_this_week}</td>
+                <td class="px-4 py-2"><div class="flex items-center gap-2"><div class="w-24 h-2 rounded bg-gray-200"><div class="h-2 rounded bg-green-600" style="width:${c.adoption_pct}%"></div></div><span class="text-xs text-gray-600">${c.adoption_pct}%</span></div></td>
+                <td class="px-4 py-2 text-right">${c.sign_ins_this_week}</td>
+                <td class="px-4 py-2 text-right">${c.orders}</td>
+                <td class="px-4 py-2 text-right font-semibold">${adoptMoney(c.dollars)}</td>
+            </tr>`).join('') || '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400">No companies.</td></tr>';
+
+        document.getElementById('adopt-strip-head').textContent = `${d.weeks[0].label.split(' –')[0]} → this week`;
+        document.getElementById('adopt-loc-body').innerHTML = d.locations.map(l => {
+            const st = ADOPT_STATUS[l.status] || ADOPT_STATUS.no_activity;
+            const strip = d.weeks.map((w, k) => {
+                const entered = l.entries[k] > 0, ordered = l.orders[k] > 0;
+                const colour = entered && ordered ? '#16a34a' : (entered || ordered) ? '#86efac' : '#f3f4f6';
+                const tip = `${w.label}${w.current ? ' (so far)' : ''}: ${l.entries[k]} store entr${l.entries[k] === 1 ? 'y' : 'ies'}, ${l.orders[k]} order(s), ${adoptMoney(l.dollars[k])}`;
+                return `<span title="${esc(tip)}" class="inline-block w-4 h-4 rounded-sm mr-0.5 border border-white" style="background:${colour};${w.current ? 'outline:1px solid #9ca3af' : ''}"></span>`;
+            }).join('');
+            const who = l.people.slice(0, 3).map(p => `${esc(p.name)} (${p.orders})`).join(', ') + (l.people.length > 3 ? ` +${l.people.length - 3} more` : '');
+            return `<tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2"><div class="font-medium">${esc(l.location)}</div><div class="text-xs text-gray-400">${esc(l.company_name)}${l.city ? ' · ' + esc(l.city) : ''}</div></td>
+                <td class="px-4 py-2 text-gray-600">${esc(l.branch) || '<span class="text-gray-300">—</span>'}</td>
+                <td class="px-4 py-2"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${st[1]}">${st[0]}</span></td>
+                <td class="px-4 py-2 whitespace-nowrap">${strip}</td>
+                <td class="px-4 py-2 text-gray-600 whitespace-nowrap">${adoptDate(l.last_seen)}</td>
+                <td class="px-4 py-2 text-right">${l.totals.orders}</td>
+                <td class="px-4 py-2 text-right font-semibold">${adoptMoney(l.totals.dollars)}</td>
+                <td class="px-4 py-2 text-gray-600">${who || '<span class="text-gray-300">—</span>'}</td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-400">No shops found.</td></tr>';
+
+        document.getElementById('adopt-people-body').innerHTML = d.people.map(p => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2"><div class="font-medium">${esc(p.name)}</div><div class="text-xs text-gray-400">${esc(p.email)}</div></td>
+                <td class="px-4 py-2">${esc(p.company_name)}</td>
+                <td class="px-4 py-2 text-right">${p.this_week}</td>
+                <td class="px-4 py-2 text-right">${p.sign_ins}</td>
+                <td class="px-4 py-2 text-gray-600">${adoptDate(p.last_sign_in)}</td>
+            </tr>`).join('') || '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No named sign-ins in these weeks.</td></tr>';
+    }
+    async function adoptDownloadCSV() {
+        try {
+            const resp = await adminFetchRaw(`/adoption/csv?${adoptParams()}`);
+            if (!resp.ok) { alert('Download failed.'); return; }
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `weekly-adoption-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) { alert('Download failed.'); }
+    }
+
     async function arInit() { if (!arInited) { arInited = true; await populateRepShops(); } arLoad(); }
 
     function arPeriodRange(pd) {
@@ -3607,7 +3809,7 @@
     }
 
     function populateCompanyDropdowns() {
-        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'rep-company', 'library-company'];
+        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'rep-company', 'adopt-company', 'library-company'];
         selectors.forEach(id => {
             const el = document.getElementById(id);
             if (!el) return;

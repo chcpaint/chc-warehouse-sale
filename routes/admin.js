@@ -159,6 +159,10 @@ router.use('/companies/:companyId/library', require('./item-library'));
 // an allow-list and /dashboard is not on it.
 router.use('/dashboard', require('./admin-dashboard'));
 
+// Weekly adoption: which shops entered the console each week, what they ordered
+// and who ordered it. Read-only; not on the order-desk allow-list.
+router.use('/adoption', require('./admin-adoption'));
+
 // The master table — maintaining item_library rather than only reading it.
 // Super-admin only, enforced inside that router. Mounted before the
 // company-scoped routes so /master is never read as a company id.
