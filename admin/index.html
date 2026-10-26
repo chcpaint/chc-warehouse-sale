@@ -2432,9 +2432,21 @@
                     }
                 } catch (_) { /* not JSON -- not this case */ }
             }
+            // A 401 means the sign-in has expired (or the server was restarted
+            // with a new key). Without this the console stays on screen with
+            // every panel empty and a vague "could not be loaded". Send the
+            // person back to sign in, once, with a plain reason.
+            if (resp.status === 401 && admin.token && !adminSessionEnding) {
+                adminSessionEnding = true;
+                adminLogout();
+                const err = document.getElementById('admin-login-error');
+                if (err) { err.textContent = 'Your session has expired. Please sign in again.'; err.classList.remove('hidden'); }
+                setTimeout(() => { adminSessionEnding = false; }, 1500);
+            }
             return resp;
         });
     }
+    let adminSessionEnding = false;
 
     function adminFetchRaw(path, options = {}) {
         return fetch(`${API}${path}`, {
