@@ -543,3 +543,101 @@ test('the cancelled-order filter is a real filter, not a no-op', async () => {
     }).from('product_barcodes').select('id').not('barcode', 'is', null);
     assert.equal(withBarcode.length, 1, '.not(col, is, null) must exclude the null');
 });
+
+// ==================================================================
+// Month to date / year to date -- the two numbers the console opens on
+// ==================================================================
+
+// Dates that are always safely in the past relative to "now", unlike the
+// RECENT fixture above (which is noon on some day and may still be ahead).
+const MONTH_START = new Date(thisYear, NOW.getMonth(), 1, 0, 0, 1).toISOString();
+const YEAR_START  = new Date(thisYear, 0, 1, 0, 0, 1).toISOString();
+const PRIOR_MONTH_START = new Date(thisYear - 1, NOW.getMonth(), 1, 0, 0, 1).toISOString();
+const PRIOR_YEAR_START  = new Date(thisYear - 1, 0, 1, 0, 0, 1).toISOString();
+const IS_JAN = NOW.getMonth() === 0;
+
+function ptdSeed() {
+    reset({
+        orders: [
+            { id: 'p1', company_id: CO_A, status: 'closed',    total: 100,  created_at: MONTH_START, items: [] },
+            { id: 'p2', company_id: CO_B, status: 'pending',   total: 50,   created_at: MONTH_START, items: [] },
+            { id: 'p3', company_id: CO_B, status: 'cancelled', total: 9999, created_at: MONTH_START, items: [] },
+            { id: 'p4', company_id: CO_A, status: 'closed',    total: 1000, created_at: YEAR_START,  items: [] },
+            { id: 'p5', company_id: CO_A, status: 'closed',    total: 400,  created_at: PRIOR_MONTH_START, items: [] },
+            { id: 'p6', company_id: CO_B, status: 'closed',    total: 70,   created_at: PRIOR_YEAR_START,  items: [] },
+            { id: 'p7', company_id: CO_A, status: 'closed',    total: 5000, created_at: new Date(thisYear - 2, 5, 1).toISOString(), items: [] }
+        ]
+    });
+}
+
+test('month to date and year to date are both returned for every company, cancelled excluded', async () => {
+    ptdSeed();
+    const res = await get('/dashboard/period-to-date');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.mtd.sales, IS_JAN ? 1150 : 150, 'the cancelled $9,999 must not count');
+    assert.equal(res.body.mtd.orders, IS_JAN ? 3 : 2);
+    assert.equal(res.body.ytd.sales, 1150);
+    assert.equal(res.body.ytd.orders, 3);
+    assert.equal(res.body.ytd.average_order.toFixed(2), (1150 / 3).toFixed(2));
+    assert.equal(res.body.ytd.customers_ordering, 2);
+    assert.equal(res.body.companies_total, 3, 'a quiet customer still counts in the denominator');
+    assert.equal(res.body.mtd.label.includes(String(thisYear)), true);
+});
+
+test('year to date is never smaller than month to date', async () => {
+    ptdSeed();
+    const res = await get('/dashboard/period-to-date');
+    assert.ok(res.body.ytd.sales >= res.body.mtd.sales);
+    assert.ok(res.body.ytd.orders >= res.body.mtd.orders);
+});
+
+test('the same stretch of last year comes back for comparison and excludes older years', async () => {
+    ptdSeed();
+    const res = await get('/dashboard/period-to-date');
+    assert.equal(res.body.prior_ytd.sales, 470, 'last year: 400 + 70, and nothing from two years ago');
+    assert.equal(res.body.prior_mtd.sales, IS_JAN ? 470 : 400);
+    assert.equal(res.body.prior_ytd.label, `Year ${thisYear - 1}`);
+});
+
+test('period-to-date can be narrowed to one customer, and a junk id is ignored', async () => {
+    ptdSeed();
+    const one = await get(`/dashboard/period-to-date?company_id=${CO_B}`);
+    assert.equal(one.body.ytd.sales, 50);
+    assert.equal(one.body.ytd.customers_ordering, 1);
+    assert.equal(one.body.companies_total, 1);
+    const junk = await get('/dashboard/period-to-date?company_id=not-a-uuid');
+    assert.equal(junk.body.ytd.sales, 1150);
+});
+
+test('a company admin only ever sees their own period-to-date, whatever they ask for', async () => {
+    ptdSeed();
+    authAdmin = { id: 'admin-2', role: 'company_admin', company_id: CO_A };
+    const res = await get(`/dashboard/period-to-date?company_id=${CO_B}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ytd.sales, 1100, "Bayview's sales must not be in here");
+    assert.equal(res.body.scope.is_super, false);
+    authAdmin = { id: 'admin-3', role: 'company_admin', company_id: null };
+    const none = await get('/dashboard/period-to-date');
+    assert.equal(none.status, 403);
+});
+
+test('period-to-date is behind the order-desk fence too', () => {
+    for (const role of ['order_desk', 'order_manager']) {
+        let status = null;
+        const res = { status(c) { status = c; return this; }, json() { return this; } };
+        let passed = false;
+        restrictOrderDesk({ admin: { role }, method: 'GET', path: '/dashboard/period-to-date' }, res, () => { passed = true; });
+        assert.equal(passed, false, `${role} must not reach it`);
+        assert.equal(status, 403);
+    }
+});
+
+test('period-to-date on an empty system is zeroes, not an error', async () => {
+    reset({ orders: [], companies: [] });
+    const res = await get('/dashboard/period-to-date');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.mtd.sales, 0);
+    assert.equal(res.body.ytd.orders, 0);
+    assert.equal(res.body.ytd.average_order, 0);
+    assert.equal(res.body.companies_total, 0);
+});

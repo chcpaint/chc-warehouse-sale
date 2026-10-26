@@ -216,6 +216,11 @@ const ORDER_DESK_ALLOW = [
     ['PUT', /^\/pricing\/companies\/[^/]+\/products\/[^/]+\/price$/],
     ['GET', /^\/pricing\/companies\/[^/]+\/filters$/],
     ['POST', /^\/pricing\/companies\/[^/]+\/bulk$/],
+    // People & activity (who ordered, who signed in): READ only for an
+    // order_manager. Reachability only -- routes/people-activity.js's guard
+    // still refuses order_desk, and group changes need a full admin.
+    ['GET', /^\/companies\/[^/]+\/people\/(activity|groups|logins)$/],
+    ['GET', /^\/companies\/[^/]+\/people\/users\/[^/]+$/],
     ['GET', /^\/whoami$/],
     ['PUT', /^\/me\/password$/]
 ];

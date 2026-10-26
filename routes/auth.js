@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { supabaseAdmin } = require('../utils/supabase');
 const { stripHtml, validateEmail } = require('../utils/sanitize');
+const { recordLogin } = require('../utils/people-activity');
+const { moduleEnabled } = require('../utils/modules');
 
 const router = express.Router();
 
@@ -48,6 +50,18 @@ router.post('/company-login', async (req, res) => {
         const validCode = await bcrypt.compare(accessCode, company.access_code);
         if (!validCode) {
             return res.status(401).json({ error: 'Invalid company or access code.' });
+        }
+
+        // A company that tracks who orders (People & activity) signs in as
+        // individuals only. Checked after the code so the shared code is still
+        // what proves who is asking, and the answer tells a legitimate caller
+        // exactly what to do instead.
+        if (moduleEnabled(company.settings, 'activity')) {
+            await recordLogin({ companyId: company.id, email: null, event: 'shared_refused', req });
+            return res.status(403).json({
+                error: 'This account signs in with your own email and password. Use your personal login, or ask your account owner for an invite.',
+                individual_login_required: true
+            });
         }
 
         // Generate JWT
@@ -242,6 +256,25 @@ function weakPassword(pw) {
 const PW_RULE = 'Password must be at least 8 characters with uppercase, lowercase, and a number.';
 
 /**
+ * POST /api/auth/admin-forgot   Body: { email }
+ * "Forgot password?" on the CHC console sign-in. Always answers the same way,
+ * so it cannot be used to discover which addresses have accounts.
+ */
+router.post('/admin-forgot', async (req, res) => {
+    const generic = { message: 'If that email belongs to a CHC console account, a password-reset link is on its way. It can take a few minutes to arrive -- check your junk folder too.' };
+    try {
+        const email = stripHtml(req.body.email || '').trim();
+        if (!email) return res.status(400).json({ error: 'Enter your email address.' });
+        const result = await require('../utils/admin-reset').requestAdminPasswordReset({ email, distributor: req.distributor });
+        if (result.reason === 'email_failed') console.error('Admin password reset email FAILED for', email, '-', result.error);
+        res.json(generic);
+    } catch (err) {
+        console.error('Admin forgot error:', err);
+        res.json(generic);   // an error must not reveal anything either
+    }
+});
+
+/**
  * POST /api/auth/admin-accept-invite   Body: { token, password }
  * A CHC staff member sets their password from an invite link and is logged in.
  */
@@ -266,7 +299,7 @@ router.post('/admin-accept-invite', async (req, res) => {
 
         const passwordHash = await bcrypt.hash(password, 12);
         await supabaseAdmin.from('admin_users')
-            .update({ password_hash: passwordHash, invite_token: null, invite_expires_at: null, last_login: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .update({ password_hash: passwordHash, must_change_password: false, invite_token: null, invite_expires_at: null, last_login: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq('id', admin.id);
 
         const jwtToken = jwt.sign({
@@ -313,11 +346,21 @@ router.post('/company-user-login', async (req, res) => {
             .eq('email', email)
             .maybeSingle();
 
-        if (!user || !user.is_active || !user.password_hash) return res.status(401).json({ error: 'Invalid company or credentials.' });
+        // Every attempt that reaches a real company is logged (who, when, from
+        // where) for the customer's People & activity view. The caller is told
+        // nothing different for any of them.
+        if (!user || !user.is_active || !user.password_hash) {
+            await recordLogin({ companyId: company.id, user: user || null, email, event: user && !user.is_active ? 'disabled' : 'failed', req });
+            return res.status(401).json({ error: 'Invalid company or credentials.' });
+        }
         const ok = await bcrypt.compare(password, user.password_hash);
-        if (!ok) return res.status(401).json({ error: 'Invalid company or credentials.' });
+        if (!ok) {
+            await recordLogin({ companyId: company.id, user, event: 'failed', req });
+            return res.status(401).json({ error: 'Invalid company or credentials.' });
+        }
 
         await supabaseAdmin.from('company_users').update({ last_login: new Date().toISOString() }).eq('id', user.id);
+        await recordLogin({ companyId: company.id, user, event: 'login', req });
 
         const token = jwt.sign({
             type: 'company_user',
@@ -338,6 +381,34 @@ router.post('/company-user-login', async (req, res) => {
 });
 
 /**
+ * POST /api/auth/company-user-forgot   Body: { slug, email }
+ * "Forgot password?" on the customer sign-in. Always answers the same way, so
+ * it cannot be used to discover which emails have accounts; /api/auth/ is
+ * already rate-limited per IP in server.js.
+ */
+router.post('/company-user-forgot', async (req, res) => {
+    const generic = { message: 'If that email belongs to an account, a password-reset link is on its way. It can take a few minutes to arrive.' };
+    try {
+        const slug = stripHtml(req.body.slug || '');
+        const email = req.body.email;
+        if (!slug || !email) return res.status(400).json({ error: 'Enter your email address.' });
+
+        const { data: company } = await scopedBySlug(supabaseAdmin
+            .from('companies')
+            .select('id, name, slug, is_active, settings, distributor_id')
+            .eq('slug', slug), req)
+            .maybeSingle();
+
+        const result = await require('../utils/company-users').requestPasswordReset({ company, email });
+        if (result.reason === 'email_failed') console.error('Password reset email failed for', stripHtml(email));
+        res.json(generic);
+    } catch (err) {
+        console.error('Company user forgot error:', err);
+        res.json(generic);   // do not let an error reveal anything either
+    }
+});
+
+/**
  * POST /api/auth/company-accept-invite   Body: { token, password }
  * A customer user sets their password from an invite and is logged in.
  */
@@ -350,7 +421,7 @@ router.post('/company-accept-invite', async (req, res) => {
 
         const { data: user } = await supabaseAdmin
             .from('company_users')
-            .select('id, email, name, role, location_id, company_id, invite_expires_at, is_active')
+            .select('id, email, name, role, location_id, company_id, invite_expires_at, is_active, password_hash')
             .eq('invite_token', token)
             .maybeSingle();
         if (!user) return res.status(400).json({ error: 'This invite link is invalid or has already been used.' });
@@ -366,6 +437,7 @@ router.post('/company-accept-invite', async (req, res) => {
         await supabaseAdmin.from('company_users')
             .update({ password_hash: passwordHash, invite_token: null, invite_expires_at: null, last_login: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq('id', user.id);
+        await recordLogin({ companyId: company.id, user, event: user.password_hash ? 'password_reset' : 'password_set', req });
 
         const jwtToken = jwt.sign({
             type: 'company_user',

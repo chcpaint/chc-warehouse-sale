@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="/people-activity.js" defer></script>
     <style>
         .sidebar-link.active { background: rgba(59, 130, 246, 0.1); color: #2563eb; border-right: 3px solid #2563eb; }
         .fade-in { animation: fadeIn 0.3s ease; }
@@ -72,6 +73,8 @@
                     <span id="admin-login-text">Sign In</span>
                     <i id="admin-login-spinner" class="fas fa-spinner fa-spin ml-2 hidden"></i>
                 </button>
+                <p class="text-right -mt-1"><button type="button" id="admin-forgot-link" onclick="adminForgotPassword()" class="text-sm text-blue-700 hover:text-blue-900 hover:underline">Forgot password?</button></p>
+                <p id="admin-forgot-msg" class="hidden text-sm rounded-lg px-3 py-2" role="status"></p>
             </form>
         </div>
     </div>
@@ -188,55 +191,19 @@
 
                     <div id="db-warning" class="hidden mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"></div>
 
-                    <!-- Headline numbers -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <!-- Headline numbers: month to date and year to date, always both -->
+                    <div id="db-headline" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                         <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div class="min-w-0">
-                                    <p class="text-sm text-gray-500">Sales</p>
-                                    <p id="db-sales" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="db-sales-sub" class="text-sm text-gray-500 mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center shrink-0">
-                                    <i class="fas fa-dollar-sign text-green-600"></i>
-                                </div>
-                            </div>
+                            <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Month to date <span id="db-mtd-label" class="normal-case font-normal text-gray-400"></span></p>
+                            <p id="db-mtd-sales" class="text-4xl font-bold text-gray-800 mt-2">-</p>
+                            <p id="db-mtd-sub" class="text-sm text-gray-600 mt-1"></p>
+                            <p id="db-mtd-cmp" class="text-sm mt-2 text-gray-400"></p>
                         </div>
                         <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div class="min-w-0">
-                                    <p class="text-sm text-gray-500">Orders</p>
-                                    <p id="db-orders" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="db-orders-sub" class="text-sm text-gray-500 mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center shrink-0">
-                                    <i class="fas fa-receipt text-purple-600"></i>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div class="min-w-0">
-                                    <p class="text-sm text-gray-500">Stock on hand</p>
-                                    <p id="db-stock" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="db-stock-sub" class="text-sm text-gray-500 mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
-                                    <i class="fas fa-warehouse text-blue-600"></i>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="bg-white rounded-xl shadow-sm border p-5">
-                            <div class="flex justify-between items-start">
-                                <div class="min-w-0">
-                                    <p class="text-sm text-gray-500">Repairs billed</p>
-                                    <p id="db-repairs" class="text-3xl font-bold text-gray-800 mt-1">-</p>
-                                    <p id="db-repairs-sub" class="text-sm text-gray-500 mt-1"></p>
-                                </div>
-                                <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center shrink-0">
-                                    <i class="fas fa-screwdriver-wrench text-orange-600"></i>
-                                </div>
-                            </div>
+                            <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Year to date <span id="db-ytd-label" class="normal-case font-normal text-gray-400"></span></p>
+                            <p id="db-ytd-sales" class="text-4xl font-bold text-gray-800 mt-2">-</p>
+                            <p id="db-ytd-sub" class="text-sm text-gray-600 mt-1"></p>
+                            <p id="db-ytd-cmp" class="text-sm mt-2 text-gray-400"></p>
                         </div>
                     </div>
 
@@ -253,7 +220,7 @@
                     <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-6">
                         <div class="flex items-baseline justify-between px-5 py-4 border-b">
                             <h3 class="font-semibold text-gray-800">By customer</h3>
-                            <span class="text-xs text-gray-400">stock is valued at that customer's own price</span>
+                            <span id="db-stock-note" class="hidden text-xs text-gray-400">stock is valued at that customer's own price</span>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-sm">
@@ -263,8 +230,8 @@
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Sales</th>
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Orders</th>
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Avg order</th>
-                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock $</th>
-                                        <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock units</th>
+                                        <th class="db-stock-col hidden text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock $</th>
+                                        <th class="db-stock-col hidden text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Stock units</th>
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Repairs</th>
                                         <th class="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Repairs $</th>
                                     </tr>
@@ -940,11 +907,16 @@
                                 <option value="">Select Company</option>
                             </select>
                         </div>
-                        <button onclick="libOpenConflicts()" id="library-conflicts-btn"
-                                class="hidden bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-3 py-2 rounded-lg text-sm font-semibold">
-                            <i class="fas fa-triangle-exclamation mr-1"></i>
-                            <span id="library-conflicts-count">0</span> barcodes need a decision
-                        </button>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button onclick="libUploadSheet()" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-file-arrow-up mr-1"></i>Upload a price sheet
+                            </button>
+                            <button onclick="libOpenConflicts()" id="library-conflicts-btn"
+                                    class="hidden bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-3 py-2 rounded-lg text-sm font-semibold">
+                                <i class="fas fa-triangle-exclamation mr-1"></i>
+                                <span id="library-conflicts-count">0</span> barcodes need a decision
+                            </button>
+                        </div>
                     </div>
 
                     <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
@@ -1189,6 +1161,11 @@
                 <!-- Admin Users -->
                 <!-- Reports (CHC head office: all companies) -->
                 <section id="section-reports" class="hidden fade-in">
+                    <div class="flex gap-1 mb-4 border-b" role="tablist">
+                        <button id="rep-tab-orders" role="tab" onclick="repShowTab('orders')" class="px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700">Orders &amp; dollars</button>
+                        <button id="rep-tab-adopt" role="tab" onclick="repShowTab('adopt')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Weekly adoption</button>
+                    </div>
+                    <div id="rep-orders-pane">
                     <div class="flex flex-wrap gap-3 items-end mb-4">
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1">Company</label>
@@ -1271,6 +1248,96 @@
                             </tr></thead>
                             <tbody id="rep-orders-body"></tbody>
                         </table></div>
+                    </div>
+                    </div><!-- /rep-orders-pane -->
+
+                    <div id="rep-adopt-pane" class="hidden">
+                        <div class="flex flex-wrap gap-3 items-end mb-3">
+                            <div>
+                                <label for="adopt-company" class="block text-xs font-semibold text-gray-500 mb-1">Company</label>
+                                <select id="adopt-company" onchange="adoptLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white min-w-[150px]">
+                                    <option value="">All Companies</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="adopt-weeks" class="block text-xs font-semibold text-gray-500 mb-1">Weeks shown</label>
+                                <select id="adopt-weeks" onchange="adoptLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="4">Last 4 weeks</option>
+                                    <option value="8" selected>Last 8 weeks</option>
+                                    <option value="12">Last 12 weeks</option>
+                                    <option value="26">Last 26 weeks</option>
+                                </select>
+                            </div>
+                            <div class="ml-auto">
+                                <button onclick="adoptDownloadCSV()" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Weekly CSV</button>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-400 mb-3">Weeks run Monday to Sunday (Toronto time). A shop counts as active in a week when someone signed in and entered its store, or it placed an order. The latest week is still in progress.</p>
+                        <div id="adopt-digest" class="hidden mb-3 text-sm bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-3 py-2">
+                            <div class="flex flex-wrap items-center gap-3">
+                                <div class="flex-1 min-w-[240px]"><i class="fas fa-envelope mr-1"></i><span id="adopt-digest-text"></span></div>
+                                <button id="adopt-test-btn" onclick="adoptEmail(true)" class="px-3 py-1.5 border border-blue-300 bg-white hover:bg-blue-100 rounded-lg text-xs font-semibold">Send me a test</button>
+                                <button id="adopt-send-btn" onclick="adoptEmail(false)" class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold">Send to the team now</button>
+                            </div>
+                            <div id="adopt-digest-msg" class="hidden mt-2 text-xs"></div>
+                        </div>
+                        <div id="adopt-notes" class="hidden mb-3 text-sm bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg px-3 py-2"></div>
+                        <div id="adopt-summary" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4"></div>
+
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                            <div class="px-4 py-3 border-b bg-gray-50 font-semibold text-gray-700 text-sm">By company</div>
+                            <div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                    <th class="text-left px-4 py-2">Company</th>
+                                    <th class="text-right px-4 py-2">Shops</th>
+                                    <th class="text-right px-4 py-2">Active this week</th>
+                                    <th class="text-left px-4 py-2">Adoption</th>
+                                    <th class="text-right px-4 py-2">Sign-ins this week</th>
+                                    <th class="text-right px-4 py-2">Orders</th>
+                                    <th class="text-right px-4 py-2">Order dollars</th>
+                                </tr></thead>
+                                <tbody id="adopt-company-body"></tbody>
+                            </table></div>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                            <div class="px-4 py-3 border-b bg-gray-50 flex flex-wrap justify-between items-center gap-2">
+                                <span class="font-semibold text-gray-700 text-sm">By shop, week by week</span>
+                                <span class="text-xs text-gray-500">
+                                    <span class="inline-block w-3 h-3 rounded-sm align-middle mr-1" style="background:#16a34a"></span>signed in and ordered
+                                    <span class="inline-block w-3 h-3 rounded-sm align-middle ml-3 mr-1" style="background:#86efac"></span>signed in or ordered
+                                    <span class="inline-block w-3 h-3 rounded-sm align-middle ml-3 mr-1 border" style="background:#f3f4f6"></span>nothing
+                                </span>
+                            </div>
+                            <div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                    <th class="text-left px-4 py-2">Shop</th>
+                                    <th class="text-left px-4 py-2">CHC branch</th>
+                                    <th class="text-left px-4 py-2">Status</th>
+                                    <th class="text-left px-4 py-2" id="adopt-strip-head">Weeks</th>
+                                    <th class="text-left px-4 py-2">Last seen</th>
+                                    <th class="text-right px-4 py-2">Orders</th>
+                                    <th class="text-right px-4 py-2">Order dollars</th>
+                                    <th class="text-left px-4 py-2">Who ordered</th>
+                                </tr></thead>
+                                <tbody id="adopt-loc-body"></tbody>
+                            </table></div>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                            <div class="px-4 py-3 border-b bg-gray-50 font-semibold text-gray-700 text-sm">People who signed in <span class="font-normal text-gray-400">(customers that sign in with their own email)</span></div>
+                            <div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                    <th class="text-left px-4 py-2">Person</th>
+                                    <th class="text-left px-4 py-2">Company</th>
+                                    <th class="text-right px-4 py-2">Sign-ins this week</th>
+                                    <th class="text-right px-4 py-2">Sign-ins in period</th>
+                                    <th class="text-left px-4 py-2">Last sign-in</th>
+                                </tr></thead>
+                                <tbody id="adopt-people-body"></tbody>
+                            </table></div>
+                            <p class="px-4 py-3 text-xs text-gray-400 border-t">Customers that use a shared access code (for example Assured today) can be tracked by shop but not by person. For them, who ordered comes from the contact name on the order. To track individuals, turn on People &amp; activity for that customer.</p>
+                        </div>
                     </div>
                 </section>
 
@@ -1609,6 +1676,11 @@
                     <label class="block text-xs font-medium text-gray-500 mb-1">Servicing CHC branch</label>
                     <select id="edit-loc-branch" class="w-full px-3 py-2 border rounded-lg bg-white"></select>
                 </div>
+                <div id="edit-loc-orderers-wrap">
+                    <label for="edit-loc-orderers" class="block text-xs font-medium text-gray-500 mb-1">People who can place orders (one name per line)</label>
+                    <textarea id="edit-loc-orderers" rows="4" placeholder="Leave empty to let people type their own name" class="w-full px-3 py-2 border rounded-lg text-sm"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">When filled in, checkout shows these names as a drop-down. They still type their own email.</p>
+                </div>
                 <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg">Save Changes</button>
             </form>
         </div>
@@ -1846,17 +1918,32 @@
                     <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
                         <button type="button" id="src-file" onclick="setUploadSource('file')" class="px-4 py-1.5 bg-blue-700 text-white font-semibold"><i class="fas fa-upload mr-1"></i>Upload File</button>
                         <button type="button" id="src-manual" onclick="setUploadSource('manual')" class="px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50"><i class="fas fa-keyboard mr-1"></i>Enter Manually</button>
+                        <button type="button" id="src-image" onclick="setUploadSource('image')" class="px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50"><i class="fas fa-image mr-1"></i>From Screenshot</button>
                     </div>
                 </div>
                 <div id="upl-file-section">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Catalog File (CSV or XLSX)</label>
-                    <input type="file" id="upload-file" accept=".csv,.xlsx,.xls" class="w-full px-3 py-2 border rounded-lg" onchange="resetUploadState()">
-                    <p class="text-xs text-gray-400 mt-1">Columns: SKU, Item Name, Brand, Category, Price, Case Qty. Multi-tab XLSX supported (tab name becomes the brand). Rows priced $0 are skipped.</p>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Catalog File (CSV or XLSX) <span class="text-gray-400 font-normal">&mdash; or a screenshot (PNG / JPG)</span></label>
+                    <input type="file" id="upload-file" accept=".csv,.xlsx,.xls,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" class="w-full px-3 py-2 border rounded-lg" onchange="onCatalogFileChosen(this)">
+                    <p class="text-xs text-gray-400 mt-1">A vendor's price sheet works as it is: a company name or title above the column headings is fine, and prices like <b>$3.69</b> are fine. It needs a part number, a product name and a price column (Item #, Item Name, Current Price&hellip;). Optional: Brand, Category, Case Qty. Rows priced $0 are skipped.</p>
+                    <label for="upl-vendor" class="block text-sm font-medium text-gray-700 mt-3 mb-1">Vendor / brand for this sheet <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <input type="text" id="upl-vendor" maxlength="80" placeholder="e.g. 3M" oninput="resetUploadState()" class="w-full px-3 py-2 border rounded-lg text-sm">
+                    <p class="text-xs text-gray-400 mt-1">Filed against every item that has no Brand column of its own. New parts are added to this company's catalogue; parts it already has just get the new price.</p>
+                </div>
+                <div id="upl-image-section" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Screenshot of the item or price update</label>
+                    <input type="file" id="upl-image-file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" class="w-full px-3 py-2 border rounded-lg" onchange="resetUploadState(); imageStatus('')">
+                    <p class="text-xs text-gray-400 mt-1">Choose a PNG, JPG or WEBP &mdash; or just <b>paste</b> a screenshot here (Cmd+V). The console reads the part numbers, names and prices and fills in the item cards for you to check. <b>Nothing is saved until you press Preview Changes and then Apply Import.</b></p>
+                    <label for="upl-image-brand" class="block text-sm font-medium text-gray-700 mt-3 mb-1">Brand for items that show none <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <input type="text" id="upl-image-brand" maxlength="80" placeholder="e.g. 3M" class="w-full px-3 py-2 border rounded-lg text-sm">
+                    <button type="button" id="upl-image-read-btn" onclick="readScreenshot()" class="mt-3 w-full bg-gray-800 hover:bg-gray-900 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg"><i class="fas fa-wand-magic-sparkles mr-1"></i>Read screenshot</button>
+                    <p id="upl-image-status" class="text-sm mt-2" role="status" aria-live="polite"></p>
                 </div>
                 <div id="upl-manual-section" class="hidden">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Enter items &mdash; one per line</label>
-                    <textarea id="upl-manual" rows="6" oninput="resetUploadState()" placeholder="SKU | Name | Brand | Category | Price | Case Qty&#10;MMM12345 | 3M Masking Tape 24mm | 3M | Abrasives/Masking | 8.50 | 1&#10;FIB135 | Evercoat Rage Optex Ga | Evercoat | Fillers/Putty | 10.74 | 1" class="w-full px-3 py-2 border rounded-lg text-sm font-mono"></textarea>
-                    <p class="text-xs text-gray-400 mt-1">Separate fields with <code>|</code> in this order: SKU, Name, Brand, Category, Price, Case Qty. <b>Name</b> and <b>Price</b> are required; the rest are optional.</p>
+                    <div id="upl-image-banner" class="hidden bg-yellow-50 border border-yellow-300 text-yellow-900 text-xs rounded-lg px-3 py-2 mb-2"></div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Enter your items</label>
+                    <p class="text-xs text-gray-500 mb-2">Fill in one card per product. Fields marked <span class="text-red-600 font-bold">*</span> are required; leave the others empty if you do not have them.</p>
+                    <div id="upl-manual-rows" class="space-y-3 max-h-72 overflow-y-auto pr-1"></div>
+                    <button type="button" onclick="addManualRow()" class="mt-2 text-sm font-semibold text-blue-700 hover:text-blue-900"><i class="fas fa-plus mr-1"></i>Add another item</button>
                 </div>
                 <div class="bg-gray-50 rounded-lg p-3">
                     <label class="block text-sm font-medium text-gray-700 mb-2">What should this do?</label>
@@ -1875,8 +1962,9 @@
                 <div id="upload-result" class="hidden"></div>
                 <div class="flex gap-2">
                     <button type="button" id="upload-preview-btn" onclick="catalogPreview()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg">Preview Changes</button>
-                    <button type="button" id="upload-apply-btn" onclick="catalogApply()" disabled class="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg">Apply Import</button>
+                    <button type="button" id="upload-apply-btn" onclick="catalogApply()" disabled title="Press Preview Changes first" class="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg">Apply Import</button>
                 </div>
+                <p id="upload-step-hint" class="text-xs text-gray-500 -mt-1"><b>Step 1:</b> press <b>Preview Changes</b> to check your items (nothing is saved). <b>Step 2:</b> <b>Apply Import</b> then turns green &mdash; press it to save.</p>
             </form>
         </div>
     </div>
@@ -2031,7 +2119,8 @@
                 <h3 class="text-xl font-bold"><i class="fas fa-users text-amber-600 mr-2"></i>Customer users — <span id="cu-company-name"></span></h3>
                 <button onclick="hideModal('company-users-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
-            <p id="cu-module-note" class="text-sm text-gray-500 mb-4"></p>
+            <p id="cu-module-note" class="text-sm text-gray-500 mb-2"></p>
+            <div class="mb-4"><button type="button" onclick="openPeopleActivity()" class="text-sm font-semibold text-blue-700 hover:text-blue-900"><i class="fas fa-chart-column mr-1"></i>People &amp; activity &mdash; who orders, who signs in, groups</button></div>
 
             <form onsubmit="createCompanyUser(event)" class="grid grid-cols-1 md:grid-cols-5 gap-2 items-end bg-gray-50 border rounded-lg p-3 mb-4">
                 <div class="md:col-span-1"><label class="block text-xs font-medium text-gray-600 mb-1">Name *</label>
@@ -2058,6 +2147,17 @@
                     <tbody id="company-users-tbody"></tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <!-- People & activity (who ordered, who signed in, named groups) -->
+    <div id="people-activity-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xl font-bold"><i class="fas fa-chart-column text-blue-600 mr-2"></i>People &amp; activity &mdash; <span id="pa-company-name"></span></h3>
+                <button onclick="hideModal('people-activity-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="pa-host"></div>
         </div>
     </div>
 
@@ -2106,6 +2206,31 @@
             showAdminApp();
         }
     });
+
+    // "Forgot password?" on the sign-in: emails the person a link to choose a new one.
+    async function adminForgotPassword() {
+        const msg = document.getElementById('admin-forgot-msg');
+        const show = (text, ok) => {
+            msg.textContent = text;
+            msg.className = 'text-sm rounded-lg px-3 py-2 ' + (ok ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200');
+        };
+        document.getElementById('admin-login-error').classList.add('hidden');
+        const email = (document.getElementById('admin-email').value || '').trim();
+        if (!email) { show('Type your email address above first, then click Forgot password.', false); document.getElementById('admin-email').focus(); return; }
+        const link = document.getElementById('admin-forgot-link');
+        link.disabled = true;
+        try {
+            const resp = await fetch('/api/auth/admin-forgot', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email })
+            });
+            const data = await resp.json().catch(() => ({}));
+            show(data.message || data.error || 'Could not send the link. Try again.', resp.ok);
+        } catch (_) {
+            show('Connection error. Check your internet and try again.', false);
+        } finally {
+            link.disabled = false;
+        }
+    }
 
     document.getElementById('admin-login-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -2318,9 +2443,21 @@
                     }
                 } catch (_) { /* not JSON -- not this case */ }
             }
+            // A 401 means the sign-in has expired (or the server was restarted
+            // with a new key). Without this the console stays on screen with
+            // every panel empty and a vague "could not be loaded". Send the
+            // person back to sign in, once, with a plain reason.
+            if (resp.status === 401 && admin.token && !adminSessionEnding) {
+                adminSessionEnding = true;
+                adminLogout();
+                const err = document.getElementById('admin-login-error');
+                if (err) { err.textContent = 'Your session has expired. Please sign in again.'; err.classList.remove('hidden'); }
+                setTimeout(() => { adminSessionEnding = false; }, 1500);
+            }
             return resp;
         });
     }
+    let adminSessionEnding = false;
 
     function adminFetchRaw(path, options = {}) {
         return fetch(`${API}${path}`, {
@@ -2339,6 +2476,140 @@
                     sort: { orders: { key: 'date', dir: -1 }, items: { key: 'spend', dir: -1 } } };
     let arTimer, arInited = false;
     function arItemDebounce() { clearTimeout(arTimer); arTimer = setTimeout(arApplyFilters, 300); }
+    // ============================================================
+    // WEEKLY ADOPTION (Reports > Weekly adoption)
+    // ============================================================
+    function repShowTab(which) {
+        const adopt = which === 'adopt';
+        document.getElementById('rep-orders-pane').classList.toggle('hidden', adopt);
+        document.getElementById('rep-adopt-pane').classList.toggle('hidden', !adopt);
+        const on = 'px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700';
+        const off = 'px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700';
+        document.getElementById('rep-tab-orders').className = adopt ? off : on;
+        document.getElementById('rep-tab-adopt').className = adopt ? on : off;
+        if (adopt) adoptLoad();
+    }
+    function adoptParams() {
+        const p = new URLSearchParams();
+        const c = document.getElementById('adopt-company').value;
+        if (c) p.set('company_id', c);
+        p.set('weeks', document.getElementById('adopt-weeks').value || '8');
+        return p;
+    }
+    const ADOPT_STATUS = {
+        active_this_week: ['Active this week', 'bg-green-100 text-green-800'],
+        active_last_week: ['Active last week', 'bg-yellow-100 text-yellow-800'],
+        active_earlier: ['Not seen recently', 'bg-orange-100 text-orange-800'],
+        no_activity: ['No activity', 'bg-red-100 text-red-700']
+    };
+    const adoptMoney = n => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const adoptDate = iso => iso ? new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+    async function adoptLoad() {
+        const sum = document.getElementById('adopt-summary');
+        const locBody = document.getElementById('adopt-loc-body');
+        locBody.innerHTML = '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        try {
+            const resp = await adminFetch(`/adoption?${adoptParams()}`);
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || 'Failed');
+            adoptRender(d);
+        } catch (e) {
+            sum.innerHTML = '';
+            locBody.innerHTML = '<tr><td colspan="8" class="px-4 py-6 text-center text-red-500">Could not load the adoption report.</td></tr>';
+        }
+    }
+    function adoptRender(d) {
+        const t = d.totals, last = d.weeks.length - 1;
+        const dg = document.getElementById('adopt-digest');
+        dg.classList.toggle('hidden', !d.digest);
+        if (d.digest) document.getElementById('adopt-digest-text').textContent =
+            `Emailed automatically ${d.digest.when}, to: ${d.digest.recipients.join(', ')}.`;
+        const notes = document.getElementById('adopt-notes');
+        notes.classList.toggle('hidden', !(d.notes && d.notes.length));
+        notes.textContent = (d.notes || []).join(' ');
+
+        const card = (label, value, sub) => `<div class="bg-white rounded-xl border shadow-sm px-4 py-3">
+            <div class="text-xs font-semibold text-gray-500 uppercase">${esc(label)}</div>
+            <div class="text-2xl font-bold text-gray-800">${value}</div>
+            <div class="text-xs text-gray-400">${sub || '&nbsp;'}</div></div>`;
+        const pct = t.locations ? Math.round(t.active_this_week / t.locations * 100) : 0;
+        document.getElementById('adopt-summary').innerHTML =
+            card('Shops', t.locations, 'active shops in scope') +
+            card('Active this week', t.active_this_week, pct + '% of shops') +
+            card('Active last week', t.active_last_week, 'for comparison') +
+            card('No activity', t.no_activity, 'in the weeks shown') +
+            card('Ordered this week', adoptMoney(t.dollars_this_week), t.orders_this_week + ' order(s)');
+
+        document.getElementById('adopt-company-body').innerHTML = d.companies.map(c => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2">${esc(c.company_name)}</td>
+                <td class="px-4 py-2 text-right">${c.locations_total}</td>
+                <td class="px-4 py-2 text-right">${c.active_this_week}</td>
+                <td class="px-4 py-2"><div class="flex items-center gap-2"><div class="w-24 h-2 rounded bg-gray-200"><div class="h-2 rounded bg-green-600" style="width:${c.adoption_pct}%"></div></div><span class="text-xs text-gray-600">${c.adoption_pct}%</span></div></td>
+                <td class="px-4 py-2 text-right">${c.sign_ins_this_week}</td>
+                <td class="px-4 py-2 text-right">${c.orders}</td>
+                <td class="px-4 py-2 text-right font-semibold">${adoptMoney(c.dollars)}</td>
+            </tr>`).join('') || '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400">No companies.</td></tr>';
+
+        document.getElementById('adopt-strip-head').textContent = `${d.weeks[0].label.split(' –')[0]} → this week`;
+        document.getElementById('adopt-loc-body').innerHTML = d.locations.map(l => {
+            const st = ADOPT_STATUS[l.status] || ADOPT_STATUS.no_activity;
+            const strip = d.weeks.map((w, k) => {
+                const entered = l.entries[k] > 0, ordered = l.orders[k] > 0;
+                const colour = entered && ordered ? '#16a34a' : (entered || ordered) ? '#86efac' : '#f3f4f6';
+                const tip = `${w.label}${w.current ? ' (so far)' : ''}: ${l.entries[k]} store entr${l.entries[k] === 1 ? 'y' : 'ies'}, ${l.orders[k]} order(s), ${adoptMoney(l.dollars[k])}`;
+                return `<span title="${esc(tip)}" class="inline-block w-4 h-4 rounded-sm mr-0.5 border border-white" style="background:${colour};${w.current ? 'outline:1px solid #9ca3af' : ''}"></span>`;
+            }).join('');
+            const who = l.people.slice(0, 3).map(p => `${esc(p.name)} (${p.orders})`).join(', ') + (l.people.length > 3 ? ` +${l.people.length - 3} more` : '');
+            return `<tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2"><div class="font-medium">${esc(l.location)}</div><div class="text-xs text-gray-400">${esc(l.company_name)}${l.city ? ' · ' + esc(l.city) : ''}</div></td>
+                <td class="px-4 py-2 text-gray-600">${esc(l.branch) || '<span class="text-gray-300">—</span>'}</td>
+                <td class="px-4 py-2"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${st[1]}">${st[0]}</span></td>
+                <td class="px-4 py-2 whitespace-nowrap">${strip}</td>
+                <td class="px-4 py-2 text-gray-600 whitespace-nowrap">${adoptDate(l.last_seen)}</td>
+                <td class="px-4 py-2 text-right">${l.totals.orders}</td>
+                <td class="px-4 py-2 text-right font-semibold">${adoptMoney(l.totals.dollars)}</td>
+                <td class="px-4 py-2 text-gray-600">${who || '<span class="text-gray-300">—</span>'}</td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-400">No shops found.</td></tr>';
+
+        document.getElementById('adopt-people-body').innerHTML = d.people.map(p => `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2"><div class="font-medium">${esc(p.name)}</div><div class="text-xs text-gray-400">${esc(p.email)}</div></td>
+                <td class="px-4 py-2">${esc(p.company_name)}</td>
+                <td class="px-4 py-2 text-right">${p.this_week}</td>
+                <td class="px-4 py-2 text-right">${p.sign_ins}</td>
+                <td class="px-4 py-2 text-gray-600">${adoptDate(p.last_sign_in)}</td>
+            </tr>`).join('') || '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No named sign-ins in these weeks.</td></tr>';
+    }
+    async function adoptEmail(test) {
+        const msg = document.getElementById('adopt-digest-msg');
+        const btns = [document.getElementById('adopt-test-btn'), document.getElementById('adopt-send-btn')];
+        if (!test && !confirm('Send last week\'s adoption report to the whole team now? They also get it automatically every Monday.')) return;
+        btns.forEach(b => b.disabled = true);
+        msg.className = 'mt-2 text-xs'; msg.textContent = 'Sending\u2026';
+        try {
+            const resp = await adminFetch('/adoption/email-now', { method: 'POST', body: JSON.stringify({ test }) });
+            const data = await resp.json();
+            msg.className = 'mt-2 text-xs ' + (resp.ok ? 'text-green-700' : 'text-red-700');
+            msg.textContent = resp.ok ? data.message : (data.error || 'Could not send.');
+        } catch (e) {
+            msg.className = 'mt-2 text-xs text-red-700'; msg.textContent = 'Could not send. Check your connection and try again.';
+        } finally { btns.forEach(b => b.disabled = false); }
+    }
+    async function adoptDownloadCSV() {
+        try {
+            const resp = await adminFetchRaw(`/adoption/csv?${adoptParams()}`);
+            if (!resp.ok) { alert('Download failed.'); return; }
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `weekly-adoption-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) { alert('Download failed.'); }
+    }
+
     async function arInit() { if (!arInited) { arInited = true; await populateRepShops(); } arLoad(); }
 
     function arPeriodRange(pd) {
@@ -2526,6 +2797,29 @@
     // ============================================================
     let dbState = { data: null, jobs: null, companiesFilled: false };
 
+    // Stock figures only make sense for ONE customer that has refinishAI Inventory
+    // switched on (today: the CHC Test store). Across "All customers" they add up a
+    // test store's handful of units and read as if they were CHC's own warehouse,
+    // which staff took as wrong. So: hidden unless a single such customer is chosen.
+    let dbStockVisible = false;
+    function dbStockScope() {
+        let id = (document.getElementById('db-company') || {}).value;
+        const all = admin.companies || [];
+        // A customer's own admin only ever sees their one company, so "All" is just theirs.
+        if (!id && all.length === 1) id = all[0].id;
+        if (!id) return null;
+        const c = all.find(x => x.id === id);
+        if (!c || !(c.settings && c.settings.inventory && c.settings.inventory.enabled)) return null;
+        return c;
+    }
+    function dbApplyStockVisibility() {
+        const c = dbStockScope();
+        dbStockVisible = !!c;
+        document.querySelectorAll('.db-stock-col').forEach(el => el.classList.toggle('hidden', !c));
+        const note = document.getElementById('db-stock-note');
+        if (note) note.classList.toggle('hidden', !c);
+    }
+
     const dbMoney = n => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const dbMoney0 = n => '$' + Math.round(Number(n || 0)).toLocaleString('en-CA');
     const dbNum = n => Number(n || 0).toLocaleString('en-CA', { maximumFractionDigits: 1 });
@@ -2551,17 +2845,22 @@
             const q = dbQuery();
             // Both reads together — the jobs panel is part of the same picture,
             // and serialising them just makes the screen appear in two stages.
-            const [resp, jobsResp] = await Promise.all([
+            const company = document.getElementById('db-company').value;
+            const ptdUrl = '/dashboard/period-to-date' + (company ? `?company_id=${encodeURIComponent(company)}` : '');
+            const [resp, jobsResp, ptdResp] = await Promise.all([
                 adminFetch(`/dashboard${q}`),
-                adminFetch(`/dashboard/jobs${q}`)
+                adminFetch(`/dashboard/jobs${q}`),
+                adminFetch(ptdUrl).catch(() => null)
             ]);
             if (!resp.ok) throw new Error('dashboard ' + resp.status);
             const data = await resp.json();
             dbState.data = data;
             dbState.jobs = jobsResp.ok ? await jobsResp.json() : null;
+            const ptd = ptdResp && ptdResp.ok ? await ptdResp.json() : null;
 
             document.getElementById('db-period-label').textContent = data.period.label;
-            dbRenderCards(data);
+            dbApplyStockVisibility();
+            dbRenderPeriodToDate(ptd);
             dbRenderTrend(data);
             dbRenderCompanies(data);
             dbRenderKits(data);
@@ -2588,25 +2887,31 @@
         dbState.companiesFilled = true;
     }
 
-    function dbRenderCards(d) {
-        const t = d.totals;
-        document.getElementById('db-sales').textContent = dbMoney0(t.sales_total);
-        document.getElementById('db-sales-sub').textContent =
-            t.customers_ordering
-                ? `${t.customers_ordering} of ${t.companies_total} customers ordered`
-                : 'no orders in this period';
-
-        document.getElementById('db-orders').textContent = dbNum(t.order_count);
-        document.getElementById('db-orders-sub').textContent =
-            t.order_count ? `${dbMoney(t.average_order)} average · ${dbNum(t.units_ordered)} units` : '';
-
-        document.getElementById('db-stock').textContent = dbMoney0(t.inventory_value);
-        document.getElementById('db-stock-sub').textContent =
-            `${dbNum(t.inventory_units)} units on hand today`;
-
-        document.getElementById('db-repairs').textContent = dbNum(t.kits_consumed);
-        document.getElementById('db-repairs-sub').textContent =
-            t.kits_consumed ? `${dbMoney(t.kits_value)} of materials` : 'no repairs billed yet';
+    // Month to date and year to date. Independent of the period picker, driven by
+    // the customer picker only. Last year's same stretch is the yardstick.
+    function dbRenderPeriodToDate(p) {
+        const one = (key, priorKey, noun) => {
+            const cur = p ? p[key] : null, prior = p ? p[priorKey] : null;
+            const set = (id, v) => { const el = document.getElementById(`db-${key}-${id}`); if (el) el.textContent = v; };
+            if (!cur) { set('sales', '\u2014'); set('sub', 'Could not load. Try Refresh.'); set('cmp', ''); set('label', ''); return; }
+            set('label', '\u00b7 ' + cur.label);
+            set('sales', dbMoney0(cur.sales));
+            set('sub', cur.orders
+                ? `${dbNum(cur.orders)} order${cur.orders === 1 ? '' : 's'} \u00b7 ${dbMoney(cur.average_order)} average \u00b7 ${dbNum(cur.customers_ordering)} of ${dbNum(p.companies_total)} customers ordered`
+                : 'no orders yet');
+            const cmp = document.getElementById(`db-${key}-cmp`);
+            if (prior && prior.sales > 0) {
+                const pct = (cur.sales - prior.sales) / prior.sales * 100;
+                const up = pct >= 0;
+                cmp.className = 'text-sm mt-2 ' + (up ? 'text-green-700' : 'text-red-700');
+                cmp.textContent = `${up ? '\u25B2' : '\u25BC'} ${Math.abs(pct).toFixed(1)}% vs ${noun} last year (${dbMoney0(prior.sales)})`;
+            } else {
+                cmp.className = 'text-sm mt-2 text-gray-400';
+                cmp.textContent = 'no sales in the same stretch last year to compare';
+            }
+        };
+        one('mtd', 'prior_mtd', 'the same days');
+        one('ytd', 'prior_ytd', 'the same days');
     }
 
     function dbRenderWarning(d, jobs) {
@@ -2614,7 +2919,7 @@
         if (d.totals.unpriced_lines) {
             msgs.push(`${d.totals.unpriced_lines} order line(s) are priced on request, so the sales figure above does not include them.`);
         }
-        if (d.totals.inventory_unvalued_skus) {
+        if (dbStockVisible && d.totals.inventory_unvalued_skus) {
             msgs.push(`${d.totals.inventory_unvalued_skus} stocked item(s) have no price, so stock value is a floor, not a total.`);
         }
         if (jobs && jobs.totals.jobs_hand_scanned_only) {
@@ -2671,8 +2976,8 @@
             <td class="px-4 py-3 text-right font-semibold text-gray-800">${dbEsc(dbMoney(c.sales_total))}</td>
             <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.order_count)}</td>
             <td class="px-4 py-3 text-right text-gray-600">${c.order_count ? dbEsc(dbMoney(c.average_order)) : '—'}</td>
-            <td class="px-4 py-3 text-right text-gray-600">${dbEsc(dbMoney(c.inventory_value))}</td>
-            <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.inventory_units)}</td>
+            <td class="db-stock-col ${dbStockVisible ? '' : 'hidden'} px-4 py-3 text-right text-gray-600">${dbEsc(dbMoney(c.inventory_value))}</td>
+            <td class="db-stock-col ${dbStockVisible ? '' : 'hidden'} px-4 py-3 text-right text-gray-600">${dbNum(c.inventory_units)}</td>
             <td class="px-4 py-3 text-right text-gray-600">${dbNum(c.kits_consumed)}</td>
             <td class="px-4 py-3 text-right text-gray-600">${dbEsc(dbMoney(c.kits_value))}</td>
           </tr>`).join('');
@@ -2684,8 +2989,8 @@
             <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('sales_total')))}</td>
             <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('order_count'))}</td>
             <td class="px-4 py-3 text-right text-gray-400">—</td>
-            <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('inventory_value')))}</td>
-            <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('inventory_units'))}</td>
+            <td class="db-stock-col ${dbStockVisible ? '' : 'hidden'} px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('inventory_value')))}</td>
+            <td class="db-stock-col ${dbStockVisible ? '' : 'hidden'} px-4 py-3 text-right text-gray-700">${dbNum(sum('inventory_units'))}</td>
             <td class="px-4 py-3 text-right text-gray-700">${dbNum(sum('kits_consumed'))}</td>
             <td class="px-4 py-3 text-right text-gray-900">${dbEsc(dbMoney(sum('kits_value')))}</td>
           </tr>`;
@@ -3559,7 +3864,7 @@
     }
 
     function populateCompanyDropdowns() {
-        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'rep-company', 'library-company'];
+        const selectors = ['admin-product-company', 'upload-company', 'promo-company', 'admin-order-company', 'rep-company', 'adopt-company', 'library-company'];
         selectors.forEach(id => {
             const el = document.getElementById(id);
             if (!el) return;
@@ -5145,6 +5450,10 @@
         document.getElementById('edit-loc-province').value = l.province || '';
         document.getElementById('edit-loc-restrict').value = l.restrict_to_category || '';
         document.getElementById('edit-loc-branch').innerHTML = branchOptions(l.supplier_branch_id);
+        // Only offered once the database has the column (migration 046), so editing a shop never fails before then.
+        const ordSupported = Array.isArray(l.orderer_names);
+        document.getElementById('edit-loc-orderers-wrap').classList.toggle('hidden', !ordSupported);
+        document.getElementById('edit-loc-orderers').value = ordSupported ? l.orderer_names.join('\n') : '';
         showModal('edit-location-modal');
     }
 
@@ -5162,7 +5471,10 @@
                     contact_phone: document.getElementById('edit-loc-phone').value.trim(),
                     province: document.getElementById('edit-loc-province').value.trim() || null,
                     restrict_to_category: (() => { let r = document.getElementById('edit-loc-restrict').value || ''; const prov = document.getElementById('edit-loc-province').value.trim().toLowerCase(); if (!r && prov === 'nova scotia') r = 'Equip/Filter/Booth'; return r || null; })(),
-                    supplier_branch_id: document.getElementById('edit-loc-branch').value || null
+                    supplier_branch_id: document.getElementById('edit-loc-branch').value || null,
+                    ...(document.getElementById('edit-loc-orderers-wrap').classList.contains('hidden') ? {} : {
+                        orderer_names: document.getElementById('edit-loc-orderers').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)
+                    })
                 })
             });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
@@ -6056,7 +6368,11 @@
         const up = document.getElementById('upload-company');
         if (sel && up && sel.value) up.value = sel.value;
         const f = document.getElementById('upload-file'); if (f) f.value = '';
-        const m = document.getElementById('upl-manual'); if (m) m.value = '';
+        resetManualRows();
+        const ib = document.getElementById('upl-image-banner'); if (ib) ib.classList.add('hidden');
+        const iff = document.getElementById('upl-image-file'); if (iff) iff.value = '';
+        imageStatus('');
+        const vv = document.getElementById('upl-vendor'); if (vv) vv.value = '';
         const mm = document.getElementById('upl-mode-merge'); if (mm) mm.checked = true;
         resetUploadState();
         showModal('upload-modal');
@@ -6071,30 +6387,103 @@
         uploadSource = src;
         const active = 'px-4 py-1.5 bg-blue-700 text-white font-semibold';
         const idle = 'px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50';
-        const bf = document.getElementById('src-file'), bm = document.getElementById('src-manual');
+        const bf = document.getElementById('src-file'), bm = document.getElementById('src-manual'), bi = document.getElementById('src-image');
         if (bf) bf.className = src === 'file' ? active : idle;
         if (bm) bm.className = src === 'manual' ? active : idle;
-        const fs = document.getElementById('upl-file-section'), ms = document.getElementById('upl-manual-section');
+        if (bi) bi.className = src === 'image' ? active : idle;
+        const fs = document.getElementById('upl-file-section'), ms = document.getElementById('upl-manual-section'), is = document.getElementById('upl-image-section');
         if (fs) fs.classList.toggle('hidden', src !== 'file');
         if (ms) ms.classList.toggle('hidden', src !== 'manual');
+        if (is) is.classList.toggle('hidden', src !== 'image');
         resetUploadState();
     }
     function getUploadMode() {
         const r = document.querySelector('input[name="upl-mode"]:checked');
         return r ? r.value : 'merge';
     }
+    // ---- Enter Manually: one card per product, labelled empty fields --------
+    const MANUAL_FIELDS = [
+        { key: 'sku',      label: 'SKU / Part #',  ph: 'e.g. 30669' },
+        { key: 'name',     label: 'Product name',  ph: 'e.g. 3MP1000', required: true },
+        { key: 'brand',    label: 'Brand',         ph: 'e.g. 3M' },
+        { key: 'category', label: 'Category',      ph: 'e.g. Abrasives' },
+        { key: 'price',    label: 'Price ($)',     ph: 'e.g. 93.99', required: true, inputmode: 'decimal' },
+        { key: 'case_qty', label: 'Case qty',      ph: 'e.g. 1', inputmode: 'numeric' }
+    ];
+    function manualRowHtml(n) {
+        const fields = MANUAL_FIELDS.map(f => (
+            '<label class="block"><span class="block text-xs font-medium text-gray-600 mb-0.5">' + f.label +
+            (f.required ? ' <span class="text-red-600 font-bold">*</span>' : '') + '</span>' +
+            '<input type="text" data-f="' + f.key + '" placeholder="' + f.ph + '"' +
+            (f.inputmode ? ' inputmode="' + f.inputmode + '"' : '') +
+            ' autocomplete="off" oninput="resetUploadState(); this.classList.remove(\'border-red-500\')"' +
+            ' class="w-full px-2 py-1.5 border rounded-md text-sm"></label>'
+        )).join('');
+        return '<div class="manual-row border rounded-lg p-3 bg-white">' +
+            '<div class="flex items-center justify-between mb-2"><span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Item <span class="manual-n">' + n + '</span></span>' +
+            '<button type="button" onclick="removeManualRow(this)" class="text-xs text-gray-400 hover:text-red-600" title="Remove this item"><i class="fas fa-trash mr-1"></i>Remove</button></div>' +
+            '<div class="grid grid-cols-2 gap-2">' + fields + '</div></div>';
+    }
+    function renumberManualRows() {
+        document.querySelectorAll('#upl-manual-rows .manual-n').forEach((el, i) => { el.textContent = i + 1; });
+    }
+    function addManualRow() {
+        const host = document.getElementById('upl-manual-rows');
+        if (!host) return;
+        host.insertAdjacentHTML('beforeend', manualRowHtml(host.children.length + 1));
+        resetUploadState();
+        const last = host.lastElementChild && host.lastElementChild.querySelector('input');
+        if (last) last.focus();
+    }
+    function removeManualRow(btn) {
+        const host = document.getElementById('upl-manual-rows');
+        const row = btn.closest('.manual-row');
+        if (row) row.remove();
+        if (host && !host.children.length) addManualRow();
+        renumberManualRows();
+        resetUploadState();
+    }
+    function resetManualRows() {
+        const host = document.getElementById('upl-manual-rows');
+        if (!host) return;
+        host.innerHTML = '';
+        addManualRow();
+    }
+    function readManualRows() {
+        return [...document.querySelectorAll('#upl-manual-rows .manual-row')].map(row => {
+            const o = { _row: row };
+            row.querySelectorAll('input[data-f]').forEach(i => { o[i.dataset.f] = i.value.trim(); });
+            return o;
+        });
+    }
     function buildManualCsv() {
-        const lines = (document.getElementById('upl-manual').value || '').split('\n').map(l => l.trim()).filter(Boolean);
         const esc = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
         const out = ['sku,name,brand,category,price,case_qty'];
-        let bad = 0;
-        for (const ln of lines) {
-            const p = ln.split('|').map(x => x.trim());
-            const sku = p[0]||'', name = p[1]||'', brand = p[2]||'', category = p[3]||'', price = p[4]||'', cq = p[5]||'';
-            if (!name || !price) { bad++; continue; }
-            out.push([sku,name,brand,category,price,cq].map(esc).join(','));
-        }
-        return { csv: out.length > 1 ? out.join('\n') : null, rows: out.length - 1, bad };
+        const problems = [];
+        let n = 0;
+        readManualRows().forEach((r, idx) => {
+            const filled = MANUAL_FIELDS.some(f => r[f.key]);
+            if (!filled) return;                       // untouched card: ignore
+            n++;
+            // Accept "$1,234.50" but nothing else non-numeric.
+            const price = (r.price || '').replace(/[$,\s]/g, '');
+            const bad = [];
+            if (!r.name) bad.push('name');
+            if (!price || !/^\d+(\.\d+)?$/.test(price) || Number(price) <= 0) bad.push('price');
+            if (r.case_qty && !/^\d+$/.test(r.case_qty)) bad.push('case_qty');
+            if (bad.length) { problems.push({ item: idx + 1, fields: bad, row: r._row }); return; }
+            out.push([r.sku, r.name, r.brand, r.category, price, r.case_qty].map(v => esc(v || '')).join(','));
+        });
+        return { csv: out.length > 1 ? out.join('\n') : null, rows: out.length - 1, entered: n, problems };
+    }
+    function flagManualProblems(problems) {
+        document.querySelectorAll('#upl-manual-rows .border-red-500').forEach(e => e.classList.remove('border-red-500'));
+        problems.forEach(pr => pr.fields.forEach(f => {
+            const el = pr.row.querySelector('input[data-f="' + f + '"]');
+            if (el) el.classList.add('border-red-500');
+        }));
+        const first = problems[0] && problems[0].row.querySelector('.border-red-500');
+        if (first) { first.scrollIntoView({ block: 'center' }); first.focus(); }
     }
 
     function resetUploadState() {
@@ -6110,14 +6499,106 @@
         r.innerHTML = html;
     }
 
+    // ---- From Screenshot: read a picture of an item / price update ----------
+    // A picture chosen in the plain file box is a screenshot: hand it to the
+    // screenshot reader instead of refusing it, so nobody has to know which box is which.
+    function onCatalogFileChosen(input) {
+        resetUploadState();
+        const f = (input.files || [])[0];
+        if (!f || !/^image\//.test(f.type || '') && !/\.(png|jpe?g|webp)$/i.test(f.name || '')) return;
+        const target = document.getElementById('upl-image-file');
+        const dt = new DataTransfer(); dt.items.add(f); target.files = dt.files;
+        input.value = '';
+        setUploadSource('image');
+        imageStatus('Screenshot chosen: ' + (f.name || 'picture') + '.');
+        if (document.getElementById('upload-company').value) readScreenshot();
+        else imageStatus('Pick the company above, then press Read screenshot.', true);
+    }
+    function imageStatus(text, bad) {
+        const el = document.getElementById('upl-image-status');
+        if (!el) return;
+        el.textContent = text || '';
+        el.className = 'text-sm mt-2 ' + (bad ? 'text-red-700' : 'text-gray-600');
+    }
+    async function readScreenshot() {
+        const companyId = document.getElementById('upload-company').value;
+        if (!companyId) { alert('Select a company first.'); return; }
+        const file = (document.getElementById('upl-image-file').files || [])[0];
+        if (!file) { imageStatus('Choose a screenshot, or paste one with Cmd+V.', true); return; }
+        const btn = document.getElementById('upl-image-read-btn');
+        btn.disabled = true;
+        imageStatus('Reading the screenshot… this takes a few seconds.');
+        try {
+            const fd = new FormData();
+            fd.append('image', file);
+            const resp = await adminFetchRaw(`/companies/${companyId}/catalog-image`, { method: 'POST', body: fd });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) { imageStatus(data.error || 'Could not read that screenshot.', true); return; }
+            fillCardsFromImage(data);
+        } catch (err) {
+            imageStatus('Connection error. Please try again.', true);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+    function fillCardsFromImage(data) {
+        const items = data.items || [];
+        const brand = ((document.getElementById('upl-image-brand') || {}).value || '').trim();
+        const host = document.getElementById('upl-manual-rows');
+        host.innerHTML = '';
+        items.forEach((it, i) => {
+            host.insertAdjacentHTML('beforeend', manualRowHtml(i + 1));
+            const card = host.lastElementChild;
+            const set = (k, v) => { const el = card.querySelector('input[data-f="' + k + '"]'); if (el) el.value = v == null ? '' : String(v); };
+            set('sku', it.sku); set('name', it.name); set('brand', it.brand || brand); set('category', it.category);
+            set('price', it.price == null ? '' : Number(it.price).toFixed(2)); set('case_qty', it.case_qty);
+            if (it.uncertain) {
+                // Yellow = look at this one twice (hard to read, or no price found).
+                card.querySelectorAll('input').forEach(el => {
+                    el.classList.add('bg-yellow-50', 'border-yellow-400');
+                    el.addEventListener('input', () => el.classList.remove('bg-yellow-50', 'border-yellow-400'), { once: true });
+                });
+            }
+        });
+        if (!items.length) addManualRow();
+        setUploadSource('manual');
+        const banner = document.getElementById('upl-image-banner');
+        if (banner) {
+            const flagged = items.filter(i => i.uncertain).length;
+            banner.textContent = 'Read ' + items.length + ' item' + (items.length === 1 ? '' : 's') + ' from your screenshot. Check every part number and price against the picture' +
+                (flagged ? ' — ' + flagged + ' highlighted in yellow ' + (flagged === 1 ? 'was' : 'were') + ' hard to read' : '') + '.' +
+                (data.notes ? ' Note: ' + data.notes : '') + ' Nothing is saved yet: press Preview Changes, then Apply Import.';
+            banner.classList.remove('hidden');
+        }
+        resetUploadState();
+        const first = host.querySelector('input'); if (first && first.scrollIntoView) first.scrollIntoView({ block: 'nearest' });
+    }
+    // A screenshot pasted (Cmd+V) while the Add / Import window is on From Screenshot.
+    document.addEventListener('paste', ev => {
+        const modal = document.getElementById('upload-modal');
+        if (!modal || modal.classList.contains('hidden') || uploadSource !== 'image') return;
+        const files = [...((ev.clipboardData && ev.clipboardData.files) || [])].filter(f => /^image\//.test(f.type));
+        if (!files.length) return;
+        ev.preventDefault();
+        const input = document.getElementById('upl-image-file');
+        const dt = new DataTransfer(); dt.items.add(files[0]); input.files = dt.files;
+        imageStatus('Pasted ' + (files[0].name || 'screenshot') + '. Press Read screenshot.');
+    });
+
     async function catalogSend(dryRun) {
         const companyId = document.getElementById('upload-company').value;
         if (!companyId) { alert('Select a company.'); return null; }
         let file;
+        if (uploadSource === 'image') { alert('Press "Read screenshot" first. The items it finds appear as cards you can check and correct, then Preview Changes works.'); return null; }
         if (uploadSource === 'manual') {
             const m = buildManualCsv();
-            if (!m.csv) { alert('Enter at least one item (Name and Price are required).'); return null; }
-            if (m.bad && !confirm(m.bad + ' line(s) are missing a Name or Price and will be skipped. Continue?')) return null;
+            if (m.problems.length) {
+                flagManualProblems(m.problems);
+                const lbl = { name: 'product name', price: 'a valid price (numbers only)', case_qty: 'a whole-number case qty' };
+                alert('Please fix the highlighted fields:\n' + m.problems.map(pr => 'Item ' + pr.item + ': ' + pr.fields.map(f => lbl[f]).join(', ')).join('\n'));
+                return null;
+            }
+            if (!m.csv) { alert('Fill in at least one item (product name and price are required).'); return null; }
             file = new File([m.csv], 'manual-entry.csv', { type: 'text/csv' });
         } else {
             file = document.getElementById('upload-file').files[0];
@@ -6132,6 +6613,7 @@
         fd.append('catalog', file);
         fd.append('mode', getUploadMode());
         fd.append('unlock_ppg', (document.getElementById('upl-unlock-ppg') || {}).checked ? '1' : '0');
+        if (uploadSource === 'file') { const v = (document.getElementById('upl-vendor') || {}).value; if (v && v.trim()) fd.append('vendor', v.trim()); }
         if (dryRun) fd.append('dry_run', '1');
 
         try {
@@ -6167,11 +6649,14 @@
             : '';
         const ppgNote = (d.ppg_propagated)
             ? `<p class="text-sm text-blue-700 mt-1"><i class="fas fa-arrows-turn-to-dots mr-1"></i>PPG list-price change propagated to <b>${d.ppg_propagated}</b> item(s) on other companies.</p>` : '';
+        const errList = (d.error_details && d.error_details.length)
+            ? `<div class="mt-2 text-xs text-red-700 border-t pt-2 max-h-32 overflow-y-auto"><b>Not imported:</b>` + d.error_details.map(e => `<div>Row ${esc(String(e.row))}${e.sku ? ' (' + esc(e.sku) + ')' : ''}: ${esc(e.error)}</div>`).join('') + (d.errors > d.error_details.length ? `<div>&hellip;and ${d.errors - d.error_details.length} more</div>` : '') + '</div>' : '';
+        const readNote = d.rows_read ? `<p class="text-xs text-gray-500 mt-1">${d.rows_read} line(s) read from the file${d.vendor ? ' \u00b7 vendor: ' + esc(d.vendor) : ''}.</p>` : '';
         return `<div class="${bg} p-4 rounded-lg">
-            <p class="font-semibold text-gray-800">${title}</p>
+            <p class="font-semibold text-gray-800">${title}</p>${readNote}
             ${replaceNote}${ppgNote}
             <p class="text-sm text-gray-700 mt-1">New: <b>${d.inserted}</b> &middot; Updated: <b>${d.updated}</b> &middot; Price changes: <b>${d.price_changes}</b> &middot; Skipped ($0): <b>${d.skipped}</b> &middot; Errors: <b>${d.errors}</b></p>
-            ${sample}
+            ${sample}${errList}
         </div>`;
     }
 
@@ -6181,6 +6666,8 @@
         if (!d) return;
         showUploadResult(uploadSummaryHtml(d, true));
         document.getElementById('upload-apply-btn').disabled = false;
+        const res = document.getElementById('upload-result');
+        if (res && res.scrollIntoView) res.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
     async function catalogApply() {
@@ -7085,7 +7572,8 @@
                 actions.push(`<button onclick="openEditAdminModal('${a.id}', '${esc(a.name).replace(/'/g, "\\'")}', '${esc(a.email)}')" class="text-gray-500 hover:text-gray-800" title="Edit name/email"><i class="fas fa-pen"></i></button>`);
                 if (a.role === 'order_desk') actions.push(`<button onclick="openAdminAccessModal('${a.id}', '${esc(a.name).replace(/'/g, "\\'")}')" class="text-blue-600 hover:text-blue-800" title="Edit which branches/customers they can work from"><i class="fas fa-map-marker-alt"></i></button>`);
                 if (a.status === 'invited' || a.status === 'invite_expired') actions.push(`<button onclick="resendAdminInvite('${a.id}')" class="text-blue-600 hover:text-blue-800" title="Resend invite"><i class="fas fa-paper-plane"></i></button>`);
-                if (a.status === 'active' || a.status === 'password_reset_pending') actions.push(`<button onclick="resendAdminInvite('${a.id}', true)" class="text-orange-500 hover:text-orange-700" title="Send password-reset link"><i class="fas fa-key"></i></button>`);
+                if (a.status === 'active' || a.status === 'password_reset_pending') actions.push(`<button onclick="resendAdminInvite('${a.id}', true)" class="text-orange-500 hover:text-orange-700" title="Email a password-reset link"><i class="fas fa-key"></i></button>`);
+                if (a.status === 'active' || a.status === 'password_reset_pending' || a.status === 'invited' || a.status === 'invite_expired') actions.push(`<button onclick="adminResetLink('${a.id}')" class="text-purple-600 hover:text-purple-800" title="Get a reset link to send yourself (no email)"><i class="fas fa-link"></i></button>`);
                 if (a.status !== 'invited') actions.push(`<button onclick="resetAdminPassword('${a.id}', '${esc(a.email)}')" class="text-purple-600 hover:text-purple-800" title="Set a password for them right now — for when they're on the phone and can't wait on an email"><i class="fas fa-unlock-keyhole"></i></button>`);
                 if (!isSelf) actions.push(a.is_active
                     ? `<button onclick="setAdminActive('${a.id}', false)" class="text-red-500 hover:text-red-700" title="Deactivate"><i class="fas fa-user-slash"></i></button>`
@@ -7187,11 +7675,31 @@
 
     async function resendAdminInvite(id) {
         try {
-            const resp = await adminFetch(`/users/${id}/resend-invite`, { method: 'POST' });
+            const resp = await adminFetch(`/users/${id}/resend-invite`, { method: 'POST', body: JSON.stringify({}) });
             const d = await resp.json();
-            alert(resp.ok ? (d.message || 'Invite sent.') : (d.error || 'Failed.'));
-            if (resp.ok) loadAdminUsers();
+            if (!resp.ok) { alert(d.error || 'Failed.'); return; }
+            if (d.link) showResetLink(d.link, 'The email could not be sent' + (d.email_error ? ' (' + d.email_error + ')' : '') + '.');
+            else alert(d.message || 'Invite sent.');
+            loadAdminUsers();
         } catch (err) { alert('Failed to send invite.'); }
+    }
+
+    // No email needed: make the link and hand it over yourself (Teams, text, phone).
+    async function adminResetLink(id) {
+        try {
+            const resp = await adminFetch(`/users/${id}/resend-invite`, { method: 'POST', body: JSON.stringify({ link_only: true }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed.'); return; }
+            showResetLink(d.link, d.message);
+            loadAdminUsers();
+        } catch (err) { alert('Failed to create the link.'); }
+    }
+
+    // Copies the link and shows it, so it can be pasted into a message.
+    function showResetLink(link, note) {
+        let copied = false;
+        try { if (navigator.clipboard) { navigator.clipboard.writeText(link); copied = true; } } catch (_) { /* fall through to the prompt */ }
+        window.prompt((note ? note + '\n\n' : '') + (copied ? 'The link is copied. ' : '') + 'Send it to the person -- it works once and expires in 7 days. Copy it from here:', link);
     }
 
     async function setAdminActive(id, active) {
@@ -7261,6 +7769,28 @@
         loadCompanyUsers();
     }
 
+    // People & activity: the shared widget (public/people-activity.js), fresh
+    // each time it opens so listeners never pile up.
+    function openPeopleActivity() {
+        const companyId = cuCompanyId;
+        document.getElementById('pa-company-name').textContent = document.getElementById('cu-company-name').textContent;
+        const host = document.getElementById('pa-host');
+        const fresh = document.createElement('div');
+        host.replaceWith(fresh); fresh.id = 'pa-host';
+        showModal('people-activity-modal');
+        if (!window.PeopleActivity) { fresh.innerHTML = '<p class="text-red-600">The activity screen could not load. Refresh the page and try again.</p>'; return; }
+        window.PeopleActivity.mount(fresh, {
+            staff: true,
+            req: (p, o) => adminFetch(`/companies/${companyId}/people${p}`, o),
+            usersReq: (p, o) => adminFetch(`/companies/${companyId}/users${p}`, o),
+            loadLocations: async () => {
+                const r = await adminFetch(`/companies/${companyId}/locations`);
+                const d = await r.json();
+                return (d.locations || []).map(l => ({ id: l.id, name: l.name }));
+            }
+        });
+    }
+
     async function loadCompanyUsers() {
         try {
             const resp = await adminFetch(`/companies/${cuCompanyId}/users`);
@@ -7273,7 +7803,8 @@
                 const actions = [];
                 actions.push(`<button onclick="openEditCompanyUserModal('${u.id}', '${esc(u.name).replace(/'/g, "\\'")}', '${esc(u.email)}')" class="text-gray-500 hover:text-gray-800" title="Edit name/email"><i class="fas fa-pen"></i></button>`);
                 if (u.status === 'invited') actions.push(`<button onclick="resendCompanyInvite('${u.id}')" class="text-blue-600 hover:text-blue-800" title="Resend invite"><i class="fas fa-paper-plane"></i></button>`);
-                if (u.status === 'active') actions.push(`<button onclick="resendCompanyInvite('${u.id}')" class="text-orange-500 hover:text-orange-700" title="Send password-reset link"><i class="fas fa-key"></i></button>`);
+                if (u.status === 'active') actions.push(`<button onclick="resendCompanyInvite('${u.id}')" class="text-orange-500 hover:text-orange-700" title="Email a password-reset link"><i class="fas fa-key"></i></button>`);
+                if (u.status === 'active' || u.status === 'invited') actions.push(`<button onclick="companyUserResetLink('${u.id}')" class="text-purple-600 hover:text-purple-800" title="Get a link to send yourself (no email)"><i class="fas fa-link"></i></button>`);
                 actions.push(u.is_active
                     ? `<button onclick="setCompanyUserActive('${u.id}', false)" class="text-red-500 hover:text-red-700" title="Deactivate"><i class="fas fa-user-slash"></i></button>`
                     : `<button onclick="setCompanyUserActive('${u.id}', true)" class="text-green-600 hover:text-green-800" title="Reactivate"><i class="fas fa-user-check"></i></button>`);
@@ -7310,10 +7841,21 @@
 
     async function resendCompanyInvite(id) {
         try {
-            const resp = await adminFetch(`/companies/${cuCompanyId}/users/${id}/resend-invite`, { method: 'POST' });
+            const resp = await adminFetch(`/companies/${cuCompanyId}/users/${id}/resend-invite`, { method: 'POST', body: JSON.stringify({}) });
             const d = await resp.json();
-            alert(resp.ok ? (d.message || 'Invite sent.') : (d.error || 'Failed.'));
+            if (!resp.ok) { alert(d.error || 'Failed.'); return; }
+            if (d.link) showResetLink(d.link, 'The email could not be sent' + (d.email_error ? ' (' + d.email_error + ')' : '') + '.');
+            else alert(d.message || 'Invite sent.');
         } catch (err) { alert('Failed to send invite.'); }
+    }
+
+    async function companyUserResetLink(id) {
+        try {
+            const resp = await adminFetch(`/companies/${cuCompanyId}/users/${id}/resend-invite`, { method: 'POST', body: JSON.stringify({ link_only: true }) });
+            const d = await resp.json();
+            if (!resp.ok) { alert(d.error || 'Failed.'); return; }
+            showResetLink(d.link, d.message);
+        } catch (err) { alert('Failed to create the link.'); }
     }
 
     async function setCompanyUserActive(id, active) {
@@ -7486,6 +8028,15 @@
             } catch (_) { /* the filter is a convenience; search still works without it */ }
         }
         libLoad(0);
+    }
+
+    // A vendor's whole price sheet for the shop chosen above: opens the same
+    // Add / Import window, already pointed at that company.
+    function libUploadSheet() {
+        const id = libCompany();
+        openAddImport('file');
+        const up = document.getElementById('upload-company');
+        if (up && id) up.value = id;
     }
 
     function libCompany() {

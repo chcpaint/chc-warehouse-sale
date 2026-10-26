@@ -56,7 +56,10 @@ const KNOWN_COLUMNS = {
         'is_partial_shipment', 'notes_log', 'price_edited_at', 'price_edited_by', 'price_edit_reason',
         // Added by migration 040: which line(s) are short on a partial
         // shipment, and by how much, so it can match AccountEdge.
-        'backorder_items'
+        'backorder_items',
+        // Added by migration 045: who placed the order, frozen at the time, so
+        // the history survives the person's account being deleted.
+        'placed_by_name', 'placed_by_email', 'placed_by_group'
     ]),
     company_po_sequences: new Set([
         'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',
@@ -190,6 +193,16 @@ const KNOWN_COLUMNS = {
     admin_user_branches: new Set(['admin_user_id', 'branch_id', 'created_at']),
     admin_user_companies: new Set(['admin_user_id', 'company_id', 'created_at']),
     supplier_branches: new Set(['id', 'name', 'emails', 'city', 'is_active', 'created_at', 'updated_at']),
+    // Added by migration 020 (customer users) and 045 (groups).
+    company_users: new Set([
+        'id', 'company_id', 'location_id', 'email', 'name', 'password_hash', 'role', 'is_active',
+        'invite_token', 'invite_expires_at', 'invited_by', 'invited_by_type', 'last_login',
+        'created_at', 'updated_at', 'group_id'
+    ]),
+    company_user_groups: new Set(['id', 'company_id', 'name', 'created_at', 'updated_at']),
+    company_user_logins: new Set([
+        'id', 'company_id', 'user_id', 'email', 'name', 'event', 'ip', 'user_agent', 'created_at'
+    ]),
     audit_log: new Set(['id', 'admin_id', 'action', 'entity_type', 'entity_id', 'details', 'ip_address', 'created_at']),
     // Added by migration 043: the shared storefront cart, one row per
     // (company_id, product_id) -- see that migration for why price is
@@ -277,6 +290,8 @@ class Query {
         this._head = !!options.head;
         // Record any embedded relation names so the result can carry them.
         for (const m of String(cols).matchAll(/([a-z_]+)!?(?:inner)?\s*\(/g)) this._embeds.push(m[1]);
+        // Aliased embeds, `alias:fk_column (cols)`: the alias is the relation's name.
+        for (const m of String(cols).matchAll(/([a-z_]+)\s*:\s*[a-z_]+\s*\(/g)) this._embeds.push(m[1]);
         return this;
     }
     eq(col, val)   { this.filters.push({ col, op: 'eq', val }); return this; }
@@ -343,6 +358,8 @@ class Query {
                     out.repair_kits = clone((this.db.repair_kits || []).find(k => k.id === (r.kit_id || r.id))) || null;
                 } else if (rel === 'companies' && r.company_id) {
                     out.companies = clone((this.db.companies || []).find(c => c.id === r.company_id)) || null;
+                } else if (rel === 'company_user_groups' && r.group_id) {
+                    out.company_user_groups = clone((this.db.company_user_groups || []).find(g => g.id === r.group_id)) || null;
                 } else if (rel === 'supplier_branches' && r.branch_id) {
                     out.supplier_branches = clone((this.db.supplier_branches || []).find(b => b.id === r.branch_id)) || null;
                 }

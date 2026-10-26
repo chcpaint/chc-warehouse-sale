@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { supabaseAdmin } = require('./supabase');
 const { sendInvite } = require('./email');
 const { stripHtml, validateEmail, isValidUUID } = require('./sanitize');
+const { resolveGroupId } = require('./people-activity');
 
 const ROLES = ['member', 'owner'];
 const INVITE_TTL_DAYS = 7;
@@ -27,16 +28,28 @@ function newInvite() {
 }
 
 async function listUsers(companyId) {
-    const { data } = await supabaseAdmin
+    // Groups arrived with migration 045. Until it is applied to a database the
+    // group columns do not exist, and this list must keep working without them
+    // -- an error here would otherwise show as "no users".
+    const base = 'id, email, name, role, location_id, is_active, last_login, password_hash, company_locations:location_id (id, name)';
+    let { data, error } = await supabaseAdmin
         .from('company_users')
-        .select('id, email, name, role, location_id, is_active, last_login, password_hash, company_locations:location_id (id, name)')
+        .select(`${base}, group_id, company_user_groups:group_id (id, name)`)
         .eq('company_id', companyId)
         .order('created_at', { ascending: true });
+    if (error) {
+        ({ data } = await supabaseAdmin
+            .from('company_users').select(base)
+            .eq('company_id', companyId)
+            .order('created_at', { ascending: true }));
+    }
 
     return (data || []).map(u => ({
         id: u.id, email: u.email, name: u.name, role: u.role,
         location_id: u.location_id,
         location_name: u.company_locations?.name || null,
+        group_id: u.group_id || null,
+        group_name: u.company_user_groups?.name || null,
         is_active: u.is_active, last_login: u.last_login,
         status: u.password_hash ? (u.is_active ? 'active' : 'disabled') : 'invited'
     }));
@@ -46,7 +59,7 @@ async function listUsers(companyId) {
  * Create a customer user and send them a set-password invite.
  * @returns {{status:number, body:object}}
  */
-async function createUser({ company, name, email, locationId, role, invitedBy, invitedByType }) {
+async function createUser({ company, name, email, locationId, groupId, role, invitedBy, invitedByType }) {
     name = stripHtml(name || '').trim();
     email = stripHtml(email || '').trim().toLowerCase();
     role = ROLES.includes(role) ? role : 'member';
@@ -61,6 +74,9 @@ async function createUser({ company, name, email, locationId, role, invitedBy, i
         if (!loc) return { status: 400, body: { error: 'That location is not part of this company.' } };
     }
 
+    const group = await resolveGroupId(company.id, groupId);
+    if (!group.ok) return { status: 400, body: { error: group.error } };
+
     const { data: existing } = await supabaseAdmin
         .from('company_users').select('id').eq('company_id', company.id).ilike('email', email).maybeSingle();
     if (existing) return { status: 409, body: { error: 'A user with that email already exists for this company.' } };
@@ -71,6 +87,7 @@ async function createUser({ company, name, email, locationId, role, invitedBy, i
         .insert({
             company_id: company.id, email, name, role,
             location_id: locationId || null,
+            ...(group.value ? { group_id: group.value } : {}),
             password_hash: null, is_active: true,
             invite_token: token, invite_expires_at: expires,
             invited_by: invitedBy, invited_by_type: invitedByType
@@ -87,6 +104,11 @@ async function createUser({ company, name, email, locationId, role, invitedBy, i
     });
 
     return { status: 201, body: { message: `Invite sent to ${email}.`, user: created, email_sent: invite.sent } };
+}
+
+/** The public shape of a user row -- never the hash or invite token. */
+function pickUser(u) {
+    return { id: u.id, email: u.email, name: u.name, role: u.role, location_id: u.location_id, group_id: u.group_id || null, is_active: u.is_active };
 }
 
 async function updateUser({ company, userId, patch, actorUserId }) {
@@ -126,18 +148,23 @@ async function updateUser({ company, userId, patch, actorUserId }) {
         }
         update.location_id = loc;
     }
+    if (patch.group_id !== undefined) {
+        const group = await resolveGroupId(company.id, patch.group_id);
+        if (!group.ok) return { status: 400, body: { error: group.error } };
+        update.group_id = group.value;
+    }
 
     const { data, error } = await supabaseAdmin
         .from('company_users').update(update).eq('id', userId).eq('company_id', company.id)
-        .select('id, email, name, role, location_id, is_active').single();
+        .select('*').single();
     if (error) throw error;
-    return { status: 200, body: { message: 'Saved.', user: data } };
+    return { status: 200, body: { message: 'Saved.', user: pickUser(data) } };
 }
 
-async function resendInvite({ company, userId }) {
+async function resendInvite({ company, userId, linkOnly = false }) {
     if (!isValidUUID(userId)) return { status: 400, body: { error: 'Invalid user id.' } };
     const { data: user } = await supabaseAdmin
-        .from('company_users').select('id, email, name').eq('id', userId).eq('company_id', company.id).maybeSingle();
+        .from('company_users').select('id, email, name, password_hash').eq('id', userId).eq('company_id', company.id).maybeSingle();
     if (!user) return { status: 404, body: { error: 'User not found.' } };
 
     const { token, expires } = newInvite();
@@ -145,13 +172,64 @@ async function resendInvite({ company, userId }) {
         .update({ invite_token: token, invite_expires_at: expires, updated_at: new Date().toISOString() })
         .eq('id', userId);
 
+    const link = `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`;
+    // linkOnly: nothing is emailed -- the admin hands the link over themselves
+    // (Teams, text, phone). For when the person's inbox is not receiving mail.
+    if (linkOnly) {
+        return { status: 200, body: { message: `Link created for ${user.email}. Send it to them yourself.`, email_sent: false, link } };
+    }
     const invite = await sendInvite({
+        to: user.email, name: user.name,
+        inviteUrl: link,
+        context: company.name,
+        expiresText: `${INVITE_TTL_DAYS} days`,
+        reset: !!user.password_hash
+    });
+    return { status: 200, body: { message: `${user.password_hash ? 'Password-reset link' : 'Invite'} sent to ${user.email}.`, email_sent: invite.sent, ...(invite.sent ? {} : { link, email_error: invite.error || invite.reason }) } };
+}
+
+/**
+ * Self-service "forgot password" for a customer user.
+ *
+ * Says nothing about whether the address exists: the caller always gives the
+ * same answer, so this cannot be used to find out who has an account. Sends a
+ * reset link only to an active user of an active company that has individual
+ * logins on, and at most once every RESET_COOLDOWN_MINUTES per user — the age
+ * of the last link is read from its expiry, so no extra column is needed.
+ *
+ * @returns {{sent:boolean, reason?:string}}  (for tests and logs; never shown to the requester)
+ */
+const RESET_COOLDOWN_MINUTES = 10;
+async function requestPasswordReset({ company, email }) {
+    email = stripHtml(email || '').trim().toLowerCase();
+    if (!company || !company.is_active) return { sent: false, reason: 'company_inactive' };
+    if (company.settings?.users?.enabled !== true) return { sent: false, reason: 'users_off' };
+    if (!validateEmail(email)) return { sent: false, reason: 'bad_email' };
+
+    const { data: user } = await supabaseAdmin
+        .from('company_users')
+        .select('id, email, name, is_active, password_hash, invite_expires_at')
+        .eq('company_id', company.id).ilike('email', email).maybeSingle();
+    if (!user || !user.is_active) return { sent: false, reason: 'no_user' };
+
+    if (user.invite_expires_at) {
+        const issuedAt = new Date(user.invite_expires_at).getTime() - INVITE_TTL_DAYS * 24 * 60 * 60 * 1000;
+        if (Date.now() - issuedAt < RESET_COOLDOWN_MINUTES * 60 * 1000) return { sent: false, reason: 'cooldown' };
+    }
+
+    const { token, expires } = newInvite();
+    await supabaseAdmin.from('company_users')
+        .update({ invite_token: token, invite_expires_at: expires, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+
+    const mail = await sendInvite({
         to: user.email, name: user.name,
         inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`,
         context: company.name,
-        expiresText: `${INVITE_TTL_DAYS} days`
+        expiresText: `${INVITE_TTL_DAYS} days`,
+        reset: !!user.password_hash
     });
-    return { status: 200, body: { message: `Invite re-sent to ${user.email}.`, email_sent: invite.sent } };
+    return { sent: !!mail.sent, reason: mail.sent ? undefined : 'email_failed' };
 }
 
 async function deactivateUser({ company, userId, actorUserId }) {
@@ -187,4 +265,4 @@ async function purgeUser({ company, userId, actorUserId }) {
     return { status: 200, body: { message: 'User permanently deleted.' } };
 }
 
-module.exports = { ROLES, listUsers, createUser, updateUser, resendInvite, deactivateUser, purgeUser };
+module.exports = { ROLES, listUsers, createUser, updateUser, resendInvite, requestPasswordReset, deactivateUser, purgeUser };

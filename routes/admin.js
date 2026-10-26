@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const csv = require('csv-parser');
 const XLSX = require('xlsx');
+const { parseCSV, parseExcel, normalizeProductRow } = require('../utils/price-sheet');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requirePasswordCurrent, requireOrderAccess } = require('../middleware/auth');
@@ -37,6 +38,29 @@ router.use('/', require('./admin-password'));
 // CHC staff accounts (super-admin only) and per-company customer users.
 router.use('/users', require('./admin-users'));
 router.use('/companies/:companyId/users', require('./company-users-admin'));
+// Screenshot of an item / price update -> item rows (writes nothing; see the file).
+router.use('/companies/:companyId/catalog-image', requireCompanyAccess, require('./admin-catalog-image'));
+
+// People & activity: named groups, who ordered / how much, who signed in
+// (the `activity` module). Reading is open to super_admin, the company's own
+// admin and order_manager; group changes are full-admin only.
+const { makePeopleRouter } = require('./people-activity');
+function requirePeopleRead(req, res, next) {
+    const role = req.admin && req.admin.role;
+    if (role === 'super_admin' || role === 'order_manager') return next();
+    if (role === 'admin' && req.admin.company_id === req.params.companyId) return next();
+    return res.status(403).json({ error: 'Your account cannot view this customer\'s people and activity.' });
+}
+router.use('/companies/:companyId/people', makePeopleRouter({
+    side: 'staff',
+    companyIdOf: req => req.params.companyId,
+    readGuards: [requirePeopleRead],
+    manageGuards: [requireFullAdmin, requireCompanyAccess],
+    onChange: (req, company, action, detail) => supabaseAdmin.from('audit_log').insert({
+        admin_id: req.admin.id, action, entity_type: 'company', entity_id: company.id,
+        details: detail, ip_address: req.ip
+    })
+}));
 
 // Platform-level distributor onboarding (platform_admin only -- see
 // routes/distributors-admin.js for why this is separate from super_admin).
@@ -136,6 +160,10 @@ router.use('/companies/:companyId/library', require('./item-library'));
 // CRUD below. Order-desk accounts never reach it: restrictOrderDesk above is
 // an allow-list and /dashboard is not on it.
 router.use('/dashboard', require('./admin-dashboard'));
+
+// Weekly adoption: which shops entered the console each week, what they ordered
+// and who ordered it. Read-only; not on the order-desk allow-list.
+router.use('/adoption', require('./admin-adoption'));
 
 // The master table — maintaining item_library rather than only reading it.
 // Super-admin only, enforced inside that router. Mounted before the
@@ -580,6 +608,14 @@ router.put('/companies/:companyId/locations/:locationId', requireCompanyAccess, 
         delete updates.id;
         delete updates.company_id;
         if (updates.supplier_branch_id === '') updates.supplier_branch_id = null;
+        if (updates.orderer_names !== undefined) {
+            // One name per entry: trimmed, no blanks, no repeats (case-insensitive), sensible size.
+            const seen = new Set();
+            updates.orderer_names = (Array.isArray(updates.orderer_names) ? updates.orderer_names : [])
+                .map(n => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 80))
+                .filter(n => n && !seen.has(n.toLowerCase()) && seen.add(n.toLowerCase()))
+                .slice(0, 60);
+        }
 
         const { data, error } = await supabaseAdmin
             .from('company_locations')
@@ -1164,11 +1200,12 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         }
 
         // Normalize column headers
+        const vendor = String(req.body.vendor || '').replace(/[<>]/g, '').trim().slice(0, 80);
         const normalizedRows = rows.map((row, idx) => {
             try {
-                return normalizeProductRow(row);
+                return normalizeProductRow(row, { vendor });
             } catch (e) {
-                errors.push({ row: idx + 2, error: e.message });
+                errors.push({ row: row.__row || idx + 2, sku: String(row['Item #'] || row['SKU'] || row['sku'] || '').slice(0, 40), error: e.message });
                 return null;
             }
         }).filter(Boolean);
@@ -1272,7 +1309,9 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             mode,
             deleted,
             ppg_propagated: (typeof ppgPropagated !== 'undefined' ? ppgPropagated : 0),
-            ppg_unlocked: unlockPPG
+            ppg_unlocked: unlockPPG,
+            vendor: vendor || null,
+            rows_read: rows.length
         });
 
     } catch (err) {
@@ -2057,102 +2096,5 @@ async function logAction(adminId, action, entityType, entityId, details, ip) {
     }
 }
 
-function parseCSV(buffer) {
-    return new Promise((resolve, reject) => {
-        const rows = [];
-        const stream = Readable.from(buffer.toString());
-        stream
-            .pipe(csv())
-            .on('data', row => rows.push(row))
-            .on('end', () => resolve(rows))
-            .on('error', reject);
-    });
-}
-
-function parseExcel(buffer) {
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const allRows = [];
-
-    // Sheets to skip (internal/reference data, not product catalogs)
-    const skipSheets = ['itemswb11926', 'lastcost'];
-
-    for (const sheetName of workbook.SheetNames) {
-        if (skipSheets.includes(sheetName.trim().toLowerCase())) continue;
-
-        const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet);
-
-        // Use sheet name as brand if no brand column exists
-        const brandFromSheet = sheetName.trim();
-
-        for (const row of rows) {
-            // Skip empty rows (no SKU and no item name)
-            const sku = row['SKU'] || row['sku'] || row['Item #'] || row['item_number'];
-            const name = row['Item Name'] || row['item_name'] || row['Name'] || row['name'] || row['Product'];
-            if (!sku && !name) continue;
-            if (!name || String(name).trim() === '') continue;
-
-            // Inject sheet name as brand if not present
-            if (!row['Brand'] && !row['brand'] && !row['Manufacturer']) {
-                row['_sheet_brand'] = brandFromSheet;
-            }
-            allRows.push(row);
-        }
-    }
-    return allRows;
-}
-
-function normalizeProductRow(row) {
-    // Flexible column name mapping
-    const mappings = {
-        brand: ['brand', 'manufacturer', 'mfg', 'make', '_sheet_brand'],
-        name: ['item_name', 'name', 'product', 'product_name', 'productname', 'description', 'item'],
-        sku: ['sku', 'item_#', 'item_number', 'itemnumber', 'item_no', 'part_number', 'partnumber', 'part_no', 'upc'],
-        description: ['description', 'desc', 'details', 'product_description'],
-        category: ['category', 'cat', 'type', 'product_type', 'group', 'custom_list_#1'],
-        price: ['warehouse_sale_price', 'price', 'sale_price', 'saleprice', 'unit_price', 'selling_price', 'ae_selling_price', 'current_price'],
-        previous_price: ['previous_price', 'previousprice', 'regular_price', 'regularprice', 'msrp', 'list_price', 'listprice', 'was_price'],
-        case_qty: ['case_quantity', 'case_qty', 'caseqty', 'casequantity', 'qty_per_case', 'pack_size', 'packsize'],
-        unit: ['unit', 'uom', 'unit_of_measure'],
-        image_url: ['image_url', 'imageurl', 'image', 'photo', 'picture']
-    };
-
-    const normalized = {};
-    const lowerRow = {};
-    for (const [key, val] of Object.entries(row)) {
-        lowerRow[key.toLowerCase().trim().replace(/\s+/g, '_')] = val;
-    }
-
-    for (const [field, aliases] of Object.entries(mappings)) {
-        for (const alias of aliases) {
-            const val = lowerRow[alias];
-            if (val !== undefined && val !== null && String(val).trim() !== '') {
-                normalized[field] = val;
-                break;
-            }
-        }
-    }
-
-    // Validate required fields
-    if (!normalized.name) throw new Error('Missing product name');
-    if (!normalized.brand) normalized.brand = 'Uncategorized';
-
-    // Price required; allow 0 through (the import step skips non-positive prices).
-    if (normalized.price === undefined || normalized.price === null || String(normalized.price).trim() === '' || isNaN(parseFloat(normalized.price))) {
-        if (normalized.previous_price && !isNaN(parseFloat(normalized.previous_price))) {
-            normalized.price = normalized.previous_price;
-        } else {
-            throw new Error('Invalid or missing price');
-        }
-    }
-
-    // Type conversions
-    normalized.price = parseFloat(normalized.price);
-    if (normalized.previous_price) normalized.previous_price = parseFloat(normalized.previous_price);
-    if (normalized.case_qty) normalized.case_qty = parseInt(normalized.case_qty) || 1;
-    normalized.is_active = true;
-
-    return normalized;
-}
 
 module.exports = router;

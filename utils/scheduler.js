@@ -221,13 +221,54 @@ async function lowStockDigestJob() {
     return outcome;
 }
 
+/**
+ * Email the weekly adoption report, once, on Monday morning Toronto time.
+ *
+ * Covers the week that just ended (Monday to Sunday). One run per Monday: the
+ * claim is keyed on that Monday's date, so several instances or ticks agree on
+ * a single send. If the send fails (SendGrid down, not configured), the claim
+ * is released so the next tick tries again -- bounded by the same catch-up
+ * window as the digest, so a broken mail service means a few retries on Monday
+ * morning, not a loop.
+ */
+const ADOPTION_DIGEST_HOUR = 7;
+
+async function adoptionDigestJob() {
+    const weekday = new Intl.DateTimeFormat('en-US', { timeZone: DEFAULT_TZ, weekday: 'short' }).format(new Date());
+    if (weekday !== 'Mon') return { skipped: 'not_monday' };
+
+    const { date, hour } = localNow(DEFAULT_TZ);
+    const when = digestDue(hour, ADOPTION_DIGEST_HOUR);
+    if (!when.due) return { skipped: 'not_due' };
+
+    const runKey = `adoption:${date}`;
+    if (!await claim('adoption_digest', runKey, { hour, late: when.late })) return { skipped: 'already_claimed' };
+
+    try {
+        const { sendDigestNow } = require('./adoption-digest');
+        const result = await sendDigestNow();
+        if (!result.sent) {
+            await supabaseAdmin.from('scheduler_runs').delete().eq('job', 'adoption_digest').eq('run_key', runKey);
+            console.error('Scheduler: adoption digest not sent, will retry:', result.error || result.reason);
+            return { sent: false, retry: true, reason: result.error || result.reason };
+        }
+        await finish('adoption_digest', runKey, result);
+        return { sent: true, recipients: result.to.length, week: result.week };
+    } catch (err) {
+        await supabaseAdmin.from('scheduler_runs').delete().eq('job', 'adoption_digest').eq('run_key', runKey);
+        console.error('Scheduler: adoption digest failed, will retry:', err.message);
+        return { sent: false, retry: true, reason: err.message };
+    }
+}
+
 /** Where the emails should point people back to. */
 function publicBase() {
     return (process.env.PUBLIC_BASE_URL || 'https://chcsale.com').replace(/\/+$/, '');
 }
 
 const JOBS = {
-    low_stock_digest: lowStockDigestJob
+    low_stock_digest: lowStockDigestJob,
+    adoption_digest: adoptionDigestJob
 };
 
 // ============================================================
@@ -299,6 +340,6 @@ function status() {
 
 module.exports = {
     start, stop, status, tick,
-    localNow, claim, lowStockDigestJob, digestDue,
-    TICK_MS, DEFAULT_DIGEST_HOUR, DEFAULT_TZ, DIGEST_CATCHUP_HOURS
+    localNow, claim, lowStockDigestJob, adoptionDigestJob, digestDue,
+    TICK_MS, ADOPTION_DIGEST_HOUR, DEFAULT_DIGEST_HOUR, DEFAULT_TZ, DIGEST_CATCHUP_HOURS
 };
