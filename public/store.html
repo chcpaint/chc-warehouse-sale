@@ -1198,6 +1198,8 @@
             if (peopleBtn) peopleBtn.classList.toggle('hidden', !(actOn && state.companyUser.role === 'owner'));
         }
 
+        applyReportAccess();
+
         // Inventory is opt-in per company; initInventory() reveals the tab only
         // when the company has it switched on.
         initInventory();
@@ -1375,6 +1377,21 @@
         } catch (_) { /* private window — the menu still works, it just forgets */ }
     }
 
+    /**
+     * May this session open Reports? Only the "Reports for signed-in accounts
+     * only" module changes the answer: with it on, the shared access code does
+     * not get Reports. (The server enforces the same rule; this just hides the
+     * button so nobody is shown a screen that would refuse them.)
+     */
+    function reportsAllowed() {
+        const st = state.company && state.company.settings && state.company.settings.restricted_reports;
+        return !(st && st.enabled === true) || !!state.companyUser;
+    }
+    function applyReportAccess() {
+        const ok = reportsAllowed();
+        document.querySelectorAll('button[data-tab="reports"]').forEach(b => b.classList.toggle('hidden', !ok));
+    }
+
     /** Is a module switched on for this company? Mirrors the tab-bar rule. */
     function navModuleOn(name) {
         if (name === 'inventory') {
@@ -1394,7 +1411,9 @@
         const st = groupState();
         const current = document.querySelector('[data-tab].tab-active')?.dataset.tab || 'products';
 
-        host.innerHTML = NAV.filter(g => !g.requires || navModuleOn(g.requires)).map(g => {
+        const navGroups = NAV.filter(g => !g.requires || navModuleOn(g.requires))
+            .map(g => ({ ...g, items: g.items.filter(i => i.tab !== 'reports' || reportsAllowed()) }));
+        host.innerHTML = navGroups.map(g => {
             const holdsCurrent = g.items.some(i => i.tab === current);
             // A collapsed group hiding the screen you are on would be a lie
             // about where you are, so the current group is always open.
@@ -1523,6 +1542,7 @@
     });
 
     function showTab(tab) {
+        if (tab === 'reports' && !reportsAllowed()) tab = 'products';
         // The inventory panel does not exist in this file — RefinishAI injects
         // it at runtime. Mount it BEFORE looking for it, or the first click on
         // Inventory searches for an element that has not been created yet.
