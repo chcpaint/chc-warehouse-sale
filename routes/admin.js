@@ -38,6 +38,8 @@ router.use('/', require('./admin-password'));
 // CHC staff accounts (super-admin only) and per-company customer users.
 router.use('/users', require('./admin-users'));
 router.use('/companies/:companyId/users', require('./company-users-admin'));
+// Screenshot of an item / price update -> item rows (writes nothing; see the file).
+router.use('/companies/:companyId/catalog-image', requireCompanyAccess, require('./admin-catalog-image'));
 
 // People & activity: named groups, who ordered / how much, who signed in
 // (the `activity` module). Reading is open to super_admin, the company's own

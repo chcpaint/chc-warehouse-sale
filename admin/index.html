@@ -1918,6 +1918,7 @@
                     <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
                         <button type="button" id="src-file" onclick="setUploadSource('file')" class="px-4 py-1.5 bg-blue-700 text-white font-semibold"><i class="fas fa-upload mr-1"></i>Upload File</button>
                         <button type="button" id="src-manual" onclick="setUploadSource('manual')" class="px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50"><i class="fas fa-keyboard mr-1"></i>Enter Manually</button>
+                        <button type="button" id="src-image" onclick="setUploadSource('image')" class="px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50"><i class="fas fa-image mr-1"></i>From Screenshot</button>
                     </div>
                 </div>
                 <div id="upl-file-section">
@@ -1928,7 +1929,17 @@
                     <input type="text" id="upl-vendor" maxlength="80" placeholder="e.g. 3M" oninput="resetUploadState()" class="w-full px-3 py-2 border rounded-lg text-sm">
                     <p class="text-xs text-gray-400 mt-1">Filed against every item that has no Brand column of its own. New parts are added to this company's catalogue; parts it already has just get the new price.</p>
                 </div>
+                <div id="upl-image-section" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Screenshot of the item or price update</label>
+                    <input type="file" id="upl-image-file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" class="w-full px-3 py-2 border rounded-lg" onchange="resetUploadState(); imageStatus('')">
+                    <p class="text-xs text-gray-400 mt-1">Choose a PNG, JPG or WEBP &mdash; or just <b>paste</b> a screenshot here (Cmd+V). The console reads the part numbers, names and prices and fills in the item cards for you to check. <b>Nothing is saved until you press Preview Changes and then Apply Import.</b></p>
+                    <label for="upl-image-brand" class="block text-sm font-medium text-gray-700 mt-3 mb-1">Brand for items that show none <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <input type="text" id="upl-image-brand" maxlength="80" placeholder="e.g. 3M" class="w-full px-3 py-2 border rounded-lg text-sm">
+                    <button type="button" id="upl-image-read-btn" onclick="readScreenshot()" class="mt-3 w-full bg-gray-800 hover:bg-gray-900 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg"><i class="fas fa-wand-magic-sparkles mr-1"></i>Read screenshot</button>
+                    <p id="upl-image-status" class="text-sm mt-2" role="status" aria-live="polite"></p>
+                </div>
                 <div id="upl-manual-section" class="hidden">
+                    <div id="upl-image-banner" class="hidden bg-yellow-50 border border-yellow-300 text-yellow-900 text-xs rounded-lg px-3 py-2 mb-2"></div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Enter your items</label>
                     <p class="text-xs text-gray-500 mb-2">Fill in one card per product. Fields marked <span class="text-red-600 font-bold">*</span> are required; leave the others empty if you do not have them.</p>
                     <div id="upl-manual-rows" class="space-y-3 max-h-72 overflow-y-auto pr-1"></div>
@@ -6358,6 +6369,9 @@
         if (sel && up && sel.value) up.value = sel.value;
         const f = document.getElementById('upload-file'); if (f) f.value = '';
         resetManualRows();
+        const ib = document.getElementById('upl-image-banner'); if (ib) ib.classList.add('hidden');
+        const iff = document.getElementById('upl-image-file'); if (iff) iff.value = '';
+        imageStatus('');
         const vv = document.getElementById('upl-vendor'); if (vv) vv.value = '';
         const mm = document.getElementById('upl-mode-merge'); if (mm) mm.checked = true;
         resetUploadState();
@@ -6373,12 +6387,14 @@
         uploadSource = src;
         const active = 'px-4 py-1.5 bg-blue-700 text-white font-semibold';
         const idle = 'px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50';
-        const bf = document.getElementById('src-file'), bm = document.getElementById('src-manual');
+        const bf = document.getElementById('src-file'), bm = document.getElementById('src-manual'), bi = document.getElementById('src-image');
         if (bf) bf.className = src === 'file' ? active : idle;
         if (bm) bm.className = src === 'manual' ? active : idle;
-        const fs = document.getElementById('upl-file-section'), ms = document.getElementById('upl-manual-section');
+        if (bi) bi.className = src === 'image' ? active : idle;
+        const fs = document.getElementById('upl-file-section'), ms = document.getElementById('upl-manual-section'), is = document.getElementById('upl-image-section');
         if (fs) fs.classList.toggle('hidden', src !== 'file');
         if (ms) ms.classList.toggle('hidden', src !== 'manual');
+        if (is) is.classList.toggle('hidden', src !== 'image');
         resetUploadState();
     }
     function getUploadMode() {
@@ -6483,10 +6499,83 @@
         r.innerHTML = html;
     }
 
+    // ---- From Screenshot: read a picture of an item / price update ----------
+    function imageStatus(text, bad) {
+        const el = document.getElementById('upl-image-status');
+        if (!el) return;
+        el.textContent = text || '';
+        el.className = 'text-sm mt-2 ' + (bad ? 'text-red-700' : 'text-gray-600');
+    }
+    async function readScreenshot() {
+        const companyId = document.getElementById('upload-company').value;
+        if (!companyId) { alert('Select a company first.'); return; }
+        const file = (document.getElementById('upl-image-file').files || [])[0];
+        if (!file) { imageStatus('Choose a screenshot, or paste one with Cmd+V.', true); return; }
+        const btn = document.getElementById('upl-image-read-btn');
+        btn.disabled = true;
+        imageStatus('Reading the screenshot… this takes a few seconds.');
+        try {
+            const fd = new FormData();
+            fd.append('image', file);
+            const resp = await adminFetchRaw(`/companies/${companyId}/catalog-image`, { method: 'POST', body: fd });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) { imageStatus(data.error || 'Could not read that screenshot.', true); return; }
+            fillCardsFromImage(data);
+        } catch (err) {
+            imageStatus('Connection error. Please try again.', true);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+    function fillCardsFromImage(data) {
+        const items = data.items || [];
+        const brand = ((document.getElementById('upl-image-brand') || {}).value || '').trim();
+        const host = document.getElementById('upl-manual-rows');
+        host.innerHTML = '';
+        items.forEach((it, i) => {
+            host.insertAdjacentHTML('beforeend', manualRowHtml(i + 1));
+            const card = host.lastElementChild;
+            const set = (k, v) => { const el = card.querySelector('input[data-f="' + k + '"]'); if (el) el.value = v == null ? '' : String(v); };
+            set('sku', it.sku); set('name', it.name); set('brand', it.brand || brand); set('category', it.category);
+            set('price', it.price == null ? '' : Number(it.price).toFixed(2)); set('case_qty', it.case_qty);
+            if (it.uncertain) {
+                // Yellow = look at this one twice (hard to read, or no price found).
+                card.querySelectorAll('input').forEach(el => {
+                    el.classList.add('bg-yellow-50', 'border-yellow-400');
+                    el.addEventListener('input', () => el.classList.remove('bg-yellow-50', 'border-yellow-400'), { once: true });
+                });
+            }
+        });
+        if (!items.length) addManualRow();
+        setUploadSource('manual');
+        const banner = document.getElementById('upl-image-banner');
+        if (banner) {
+            const flagged = items.filter(i => i.uncertain).length;
+            banner.textContent = 'Read ' + items.length + ' item' + (items.length === 1 ? '' : 's') + ' from your screenshot. Check every part number and price against the picture' +
+                (flagged ? ' — ' + flagged + ' highlighted in yellow ' + (flagged === 1 ? 'was' : 'were') + ' hard to read' : '') + '.' +
+                (data.notes ? ' Note: ' + data.notes : '') + ' Nothing is saved yet: press Preview Changes, then Apply Import.';
+            banner.classList.remove('hidden');
+        }
+        resetUploadState();
+        const first = host.querySelector('input'); if (first && first.scrollIntoView) first.scrollIntoView({ block: 'nearest' });
+    }
+    // A screenshot pasted (Cmd+V) while the Add / Import window is on From Screenshot.
+    document.addEventListener('paste', ev => {
+        const modal = document.getElementById('upload-modal');
+        if (!modal || modal.classList.contains('hidden') || uploadSource !== 'image') return;
+        const files = [...((ev.clipboardData && ev.clipboardData.files) || [])].filter(f => /^image\//.test(f.type));
+        if (!files.length) return;
+        ev.preventDefault();
+        const input = document.getElementById('upl-image-file');
+        const dt = new DataTransfer(); dt.items.add(files[0]); input.files = dt.files;
+        imageStatus('Pasted ' + (files[0].name || 'screenshot') + '. Press Read screenshot.');
+    });
+
     async function catalogSend(dryRun) {
         const companyId = document.getElementById('upload-company').value;
         if (!companyId) { alert('Select a company.'); return null; }
         let file;
+        if (uploadSource === 'image') { alert('Press "Read screenshot" first. The items it finds appear as cards you can check and correct, then Preview Changes works.'); return null; }
         if (uploadSource === 'manual') {
             const m = buildManualCsv();
             if (m.problems.length) {
