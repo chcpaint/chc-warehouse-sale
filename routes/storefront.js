@@ -977,7 +977,21 @@ router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
  */
 router.get('/:slug/reports/orders', requireCompanyAuth, async (req, res) => {
     try {
-        const { location_id, from, to } = req.query;
+        let { location_id, from, to } = req.query;
+
+        // Opt-in per company (the "Reports for signed-in accounts only" module).
+        // Without it reports are open to anyone signed in, exactly as before.
+        // With it: the shared access code gets no reports at all, and a person
+        // tied to a location sees that location and nothing else, whatever
+        // they put in the query string. Enforced here, not by hiding a tab.
+        const { data: gate } = await supabaseAdmin.from('companies').select('settings').eq('id', req.company.id).maybeSingle();
+        if (moduleEnabled(gate && gate.settings, 'restricted_reports')) {
+            if (!req.companyUser) {
+                return res.status(403).json({ error: 'Reports are available to people with their own account. Please sign in with your account.', code: 'reports_need_account' });
+            }
+            if (req.companyUser.location_id) location_id = req.companyUser.location_id;
+        }
+
         let q = supabaseAdmin
             .from('orders')
             .select('id, order_number, contact_name, po_number, status, is_partial_shipment, subtotal, tax, tax_rate, total, location, location_id, created_at, items')

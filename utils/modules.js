@@ -87,6 +87,17 @@ const MODULES = {
         }
     },
 
+    restricted_reports: {
+        name: 'restricted_reports',
+        label: 'Reports for signed-in accounts only',
+        blurb: 'The store\u2019s Reports tab is hidden from people using the shared access code. People with their own account see reports for their own location only; an owner with no location sees every location.',
+        requires: ['users'],
+        released: true,
+        defaults: {
+            enabled: false
+        }
+    },
+
     kits: {
         name: 'kits',
         label: 'Repair kits',
