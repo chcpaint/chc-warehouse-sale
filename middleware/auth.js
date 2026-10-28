@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { supabaseAdmin } = require('../utils/supabase');
-const { orderInScope, companyInScope } = require('../utils/order-scope');
+const { orderInScope, companyInScope, isHeadOffice } = require('../utils/order-scope');
 
 /**
  * Verify a storefront session token.
@@ -187,6 +187,9 @@ function requireCompanyAccess(req, res, next) {
     if (req.admin.role === 'order_desk') {
         return res.status(403).json({ error: 'This area is not available to order-desk accounts.' });
     }
+    // Sales director: any customer of their own distributor. Which endpoints
+    // they can reach at all is decided earlier, by restrictOrderDesk.
+    if (req.admin.role === 'sales_director') return fenceToDistributor(req, res, next);
     const companyId = req.params.companyId || req.body.company_id;
     if (req.admin.company_id !== companyId) {
         return res.status(403).json({ error: 'Access denied for this company.' });
@@ -254,11 +257,31 @@ const ORDER_DESK_ALLOW = [
  * roles on one allow-list is what guarantees that stays true: widening access
  * for a manager would mean editing this list, which is a visible decision.
  */
-const ORDER_ONLY_ROLES = ['order_desk', 'order_manager'];
+const ORDER_ONLY_ROLES = ['order_desk', 'order_manager', 'sales_director'];
+
+/**
+ * What a sales director may do ON TOP of the order-manager list above: see the
+ * customer list, browse a customer's catalog, and add or edit items in it.
+ * Nothing else is added -- no creating or editing companies, locations,
+ * users, tax, modules, billing or fees; no deleting items. Prices on existing
+ * items go through the Customer Pricing endpoints already in the base list.
+ */
+const SALES_DIRECTOR_EXTRA = [
+    ['GET', /^\/companies$/],
+    ['GET', /^\/companies\/[^/]+\/products$/],
+    ['GET', /^\/companies\/[^/]+\/products\/filters$/],
+    ['POST', /^\/companies\/[^/]+\/products$/],
+    ['PUT', /^\/companies\/[^/]+\/products\/[^/]+$/],
+    ['POST', /^\/companies\/[^/]+\/catalog-upload$/],
+    ['POST', /^\/companies\/[^/]+\/catalog-image$/],
+    ['GET', /^\/companies\/[^/]+\/locations$/]
+];
 
 function restrictOrderDesk(req, res, next) {
     if (!req.admin || !ORDER_ONLY_ROLES.includes(req.admin.role)) return next();
-    const allowed = ORDER_DESK_ALLOW.some(([m, re]) => m === req.method && re.test(req.path));
+    const matches = list => list.some(([m, re]) => m === req.method && re.test(req.path));
+    const allowed = matches(ORDER_DESK_ALLOW) ||
+        (req.admin.role === 'sales_director' && matches(SALES_DIRECTOR_EXTRA));
     if (!allowed) {
         return res.status(403).json({ error: 'Your account has access to order management only.' });
     }
@@ -312,7 +335,7 @@ async function requireOrderAccess(req, res, next) {
     if (!req.admin) return res.status(403).json({ error: 'Admin authentication required.' });
     if (req.admin.role === 'super_admin') return next();
 
-    if (req.admin.role === 'order_desk' || req.admin.role === 'order_manager') {
+    if (req.admin.role === 'order_desk' || isHeadOffice(req.admin.role)) {
         const chk = await orderInScope(req, req.params.orderId);
         if (!chk.ok) return res.status(chk.code).json({ error: 'Access denied for this order.' });
         return next();
@@ -339,7 +362,7 @@ async function requireCompanyNotesAccess(req, res, next) {
     if (!req.admin) return res.status(403).json({ error: 'Admin authentication required.' });
     if (req.admin.role === 'super_admin') return next();
 
-    if (req.admin.role === 'order_desk' || req.admin.role === 'order_manager') {
+    if (req.admin.role === 'order_desk' || isHeadOffice(req.admin.role)) {
         const ok = await companyInScope(req, req.params.companyId);
         if (!ok) return res.status(403).json({ error: 'Access denied for this company.' });
         return next();

@@ -48,7 +48,7 @@ const router = express.Router({ mergeParams: true });
 // Everything here is super-admin only.
 router.use(requireSuperAdmin);
 
-const ROLES = ['order_desk', 'order_manager', 'super_admin'];
+const ROLES = ['order_desk', 'order_manager', 'sales_director', 'super_admin'];
 // Only order_desk has anything to assign — order_manager sees every branch
 // and customer by role, and super_admin sees everything in the console.
 const ASSIGNABLE_ROLES = ['order_desk'];
