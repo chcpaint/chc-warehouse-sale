@@ -5,6 +5,7 @@ const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
 const { sendOrderNotification, sendOrderNoteAdded, sendContactNote } = require('../utils/email');
 const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
 const { taxSettings, computeTax } = require('../utils/tax');
+const { clientSettings } = require('../utils/billing');
 const { resolveFees, loadFeeRules, groupIdForUser, publicRulesFor, feeLinesOf } = require('../utils/fee-rules');
 const { rebateReportFor } = require('../utils/rebates');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
@@ -83,7 +84,7 @@ router.get('/:slug/info', async (req, res) => {
             return res.status(404).json({ error: 'Company not found.' });
         }
 
-        res.json({ company });
+        res.json({ company: { ...company, settings: clientSettings(company.settings) } });
     } catch (err) {
         console.error('Company info error:', err);
         res.status(500).json({ error: 'Failed to load company info.' });
@@ -281,29 +282,27 @@ router.get('/:slug/promotions', requireCompanyAuth, async (req, res) => {
         }
         const now = new Date().toISOString();
 
-        // Fetch company-specific promotions
-        const { data: companyPromos } = await supabaseAdmin
-            .from('promotions')
-            .select(`
-                id, promo_price, promo_label, description, starts_at, ends_at, company_id,
+        // image_url arrives with migration 048. Until it has been run the column does
+        // not exist, and asking for it would blank the whole Promotions tab, so
+        // fall back to the same query without it.
+        const promoSelect = (withImage) => `
+                id, promo_price, promo_label, description, starts_at, ends_at, company_id${withImage ? ', image_url' : ''},
                 products (id, brand, name, sku, description, price, previous_price, case_qty, unit, image_url, category)
-            `)
-            .eq('company_id', companyId)
-            .eq('is_active', true)
-            .lte('starts_at', now)
-            .gte('ends_at', now);
-
-        // Fetch global promotions separately (avoids .or() interpolation)
-        const { data: globalPromos } = await supabaseAdmin
-            .from('promotions')
-            .select(`
-                id, promo_price, promo_label, description, starts_at, ends_at, company_id,
-                products (id, brand, name, sku, description, price, previous_price, case_qty, unit, image_url, category)
-            `)
-            .is('company_id', null)
-            .eq('is_active', true)
-            .lte('starts_at', now)
-            .gte('ends_at', now);
+            `;
+        const fetchPromos = async (scope) => {
+            for (const withImage of [true, false]) {
+                let q = supabaseAdmin.from('promotions').select(promoSelect(withImage))
+                    .eq('is_active', true).lte('starts_at', now).gte('ends_at', now);
+                q = scope === 'company' ? q.eq('company_id', companyId) : q.is('company_id', null);
+                const { data, error: qErr } = await q;
+                if (!qErr) return data || [];
+                if (!withImage || !/image_url/i.test(qErr.message || '')) { console.error('Promotions fetch error:', qErr); return []; }
+            }
+            return [];
+        };
+        const companyPromos = await fetchPromos('company');
+        // Global promotions are fetched separately (avoids .or() interpolation)
+        const globalPromos = await fetchPromos('global');
 
         const promotions = [...(companyPromos || []), ...(globalPromos || [])];
         const error = null;
@@ -769,7 +768,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         // has no price yet, so it cannot be taxed yet either. poCompany.settings
         // was already fetched above for the PO decision; reusing it here avoids
         // a second read of the same row for the same request.
-        const resolvedTax = taxSettings(poCompany?.settings);
+        const resolvedTax = taxSettings(poCompany?.settings, req.distributor?.settings);
         const tax = computeTax(subtotal, resolvedTax.rate);
 
         // Same priced subtotal, same reasoning as tax: a price-on-request
@@ -1353,7 +1352,7 @@ router.get('/:slug/tax/config', requireCompanyAuth, async (req, res) => {
         const { data: company } = await supabaseAdmin
             .from('companies').select('settings').eq('id', req.company.id).maybeSingle();
 
-        const settings = taxSettings(company?.settings);
+        const settings = taxSettings(company?.settings, req.distributor?.settings);
         res.json(settings);
     } catch (err) {
         console.error('Tax config error:', err);
@@ -1432,6 +1431,7 @@ router.use('/:slug/inventory', require('./inventory-store'));
 
 // Company-owner management of their own customer users (Customer-users module).
 router.use('/:slug/users', require('./company-users-store'));
+router.use('/:slug/billing', require('./billing-store'));
 
 // People & activity for the company's own owner (the `activity` module): who
 // ordered, how much each person spends, who signed in, and named groups.

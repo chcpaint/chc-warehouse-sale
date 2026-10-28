@@ -1,4 +1,5 @@
 const express = require('express');
+const { clientSettings } = require('../utils/billing');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { supabaseAdmin } = require('../utils/supabase');
@@ -371,7 +372,7 @@ router.post('/company-user-login', async (req, res) => {
 
         res.json({
             token,
-            company: { id: company.id, name: company.name, slug: company.slug, logo_url: company.logo_url, settings: company.settings },
+            company: { id: company.id, name: company.name, slug: company.slug, logo_url: company.logo_url, settings: clientSettings(company.settings) },
             user: { id: user.id, name: user.name, email: user.email, role: user.role, location_id: user.location_id }
         });
     } catch (err) {
@@ -448,7 +449,7 @@ router.post('/company-accept-invite', async (req, res) => {
 
         res.json({
             token: jwtToken,
-            company: { id: company.id, name: company.name, slug: company.slug, logo_url: company.logo_url, settings: company.settings },
+            company: { id: company.id, name: company.name, slug: company.slug, logo_url: company.logo_url, settings: clientSettings(company.settings) },
             user: { id: user.id, name: user.name, email: user.email, role: user.role, location_id: user.location_id }
         });
     } catch (err) {

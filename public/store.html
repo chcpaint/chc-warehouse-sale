@@ -306,6 +306,10 @@
                         class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
                         <i class="fas fa-chart-line mr-1"></i> Reports
                     </button>
+                    <button onclick="showTab('billing')" data-tab="billing" id="nav-billing"
+                        class="hidden px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-credit-card mr-1"></i> Plans &amp; billing
+                    </button>
                     <button onclick="showTab('contact')" data-tab="contact"
                         class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
                         <i class="fas fa-address-book mr-1"></i> Contact
@@ -646,6 +650,34 @@
             </section>
 
             <!-- ============ CONTACT TAB ============ -->
+            <!-- Plans & billing -->
+            <section id="tab-billing" class="hidden fade-in">
+                <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
+                    <i class="fas fa-arrow-left mr-1"></i>Back to Products
+                </button>
+                <h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-credit-card mr-2"></i>Plans &amp; billing</h2>
+                <p class="text-gray-500 mb-4" id="bp-free-note">Ordering is always free.</p>
+                <div id="bp-banner" class="hidden mb-4 rounded-lg px-4 py-3 text-sm" role="status"></div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 space-y-3" id="bp-items"></div>
+                    <div>
+                        <div class="bg-white rounded-xl shadow-sm border p-5 lg:sticky lg:top-24">
+                            <h3 class="font-bold text-gray-800 mb-3">Your plan</h3>
+                            <div class="inline-flex rounded-lg border overflow-hidden mb-3" role="group" aria-label="Billing period">
+                                <button type="button" id="bp-int-month" onclick="bpSetInterval('month')" class="px-4 py-1.5 text-sm font-semibold">Monthly</button>
+                                <button type="button" id="bp-int-year" onclick="bpSetInterval('year')" class="px-4 py-1.5 text-sm font-semibold border-l">Yearly <span class="text-xs font-normal">(2 months free)</span></button>
+                            </div>
+                            <label for="bp-locations" class="block text-xs font-semibold text-gray-600 mb-1">Locations</label>
+                            <input type="number" id="bp-locations" min="1" max="500" value="1" onchange="bpQuote()" class="w-24 px-3 py-2 border rounded-lg text-sm mb-4">
+                            <div id="bp-quote" class="text-sm text-gray-600 mb-4">Choose what you need.</div>
+                            <button id="bp-buy" onclick="bpCheckout()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>Subscribe</button>
+                            <p id="bp-err" class="text-sm text-red-600 mt-2" role="alert"></p>
+                            <button id="bp-portal" onclick="bpPortal()" class="hidden w-full mt-3 text-blue-700 hover:underline text-sm">Update card, switch plan or cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <section id="tab-contact" class="hidden fade-in">
                 <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
                     <i class="fas fa-arrow-left mr-1"></i>Back to Products
@@ -1383,6 +1415,7 @@
         ]},
         { group: 'Account', items: [
             { tab: 'reports',    label: 'Reports',       icon: 'fa-chart-line' },
+            { tab: 'billing',    label: 'Plans & billing', icon: 'fa-credit-card' },
             { tab: 'contact',    label: 'Contact CHC',   icon: 'fa-address-book' }
         ]}
     ];
@@ -1413,6 +1446,11 @@
     function applyReportAccess() {
         const ok = reportsAllowed();
         document.querySelectorAll('button[data-tab="reports"]').forEach(b => b.classList.toggle('hidden', !ok));
+        document.querySelectorAll('button[data-tab="billing"]').forEach(b => b.classList.toggle('hidden', !billingVisible()));
+    }
+    /** Plans & billing only appears for a customer their supplier has put on paid billing. */
+    function billingVisible() {
+        return !!(state.company && state.company.settings && state.company.settings.billing && state.company.settings.billing.mode === 'paid');
     }
 
     /** Is a module switched on for this company? Mirrors the tab-bar rule. */
@@ -1435,7 +1473,7 @@
         const current = document.querySelector('[data-tab].tab-active')?.dataset.tab || 'products';
 
         const navGroups = NAV.filter(g => !g.requires || navModuleOn(g.requires))
-            .map(g => ({ ...g, items: g.items.filter(i => i.tab !== 'reports' || reportsAllowed()) }));
+            .map(g => ({ ...g, items: g.items.filter(i => (i.tab !== 'reports' || reportsAllowed()) && (i.tab !== 'billing' || billingVisible())) }));
         host.innerHTML = navGroups.map(g => {
             const holdsCurrent = g.items.some(i => i.tab === current);
             // A collapsed group hiding the screen you are on would be a lie
@@ -1596,6 +1634,7 @@
         if (tab === 'cart') { renderCart(); loadCart(); }
         if (tab === 'orders') loadOrders();
         if (tab === 'reports') loadReports();
+        if (tab === 'billing') bpLoad();
         if (tab === 'contact') loadContactNotes();
 
         // Landing back on Products -- from the drawer, "Continue shopping" in
@@ -1614,6 +1653,105 @@
             else el.removeAttribute('aria-current');
         });
         syncDrawerBadges();
+    }
+
+
+    // ============================================================
+    // PLANS & BILLING — only for customers their supplier bills.
+    // /api/store/:slug/billing. Payment itself is Stripe Checkout.
+    // ============================================================
+    let bp = { plans: null, picked: new Set(), interval: 'month' };
+    const bpMoney = (c) => `${bp.plans.currency === 'usd' ? 'US$' : 'CA$'}${(c / 100).toFixed(2).replace(/\.00$/, '')}`;
+
+    async function bpLoad() {
+        const banner = document.getElementById('bp-banner');
+        const q = new URLSearchParams(location.search).get('billing');
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/billing/plans`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Could not load plans.');
+            bp.plans = data;
+            document.getElementById('bp-free-note').textContent = data.free.blurb;
+            document.getElementById('bp-locations').value = data.locations;
+            document.getElementById('bp-portal').classList.toggle('hidden', !(data.can_manage && data.can_manage_billing_portal));
+            if (q === 'success') { banner.className = 'mb-4 rounded-lg px-4 py-3 text-sm bg-green-50 text-green-800 border border-green-200'; banner.textContent = 'Thank you — your plan is being switched on. This can take a minute; refresh if it is not showing yet.'; }
+            else if (q === 'cancelled') { banner.className = 'mb-4 rounded-lg px-4 py-3 text-sm bg-gray-50 text-gray-700 border'; banner.textContent = 'Checkout was cancelled. Nothing was charged.'; }
+            else if (!data.can_manage) { banner.className = 'mb-4 rounded-lg px-4 py-3 text-sm bg-amber-50 text-amber-800 border border-amber-200'; banner.textContent = 'Only your account owner can change plans.'; }
+            else banner.className = 'hidden';
+            bpRender(); bpQuote();
+        } catch (err) {
+            banner.className = 'mb-4 rounded-lg px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200'; banner.textContent = err.message;
+        }
+    }
+
+    function bpStatusText(item) {
+        const sub = bp.plans.subscriptions.find(s => s.item === item) || bp.plans.subscriptions.find(s => s.item === 'complete' && bp.plans.items.find(i => i.item === 'complete').bundle.includes(item));
+        if (!sub) return '';
+        if (sub.source === 'comp') return 'Included free' + (sub.comp_until ? ` until ${new Date(sub.comp_until).toLocaleDateString()}` : '');
+        if (sub.source === 'free_price') return 'Included — no charge';
+        const st = { active: 'Active', trialing: 'Trial', past_due: 'Payment overdue', canceled: 'Cancelled', unpaid: 'Unpaid' }[sub.status] || sub.status;
+        return `${st}${sub.cancel_at_period_end ? ' — ends at period end' : ''}${sub.current_period_end ? ` · renews ${new Date(sub.current_period_end).toLocaleDateString()}` : ''}`;
+    }
+
+    function bpRender() {
+        const p = bp.plans;
+        document.getElementById('bp-items').innerHTML = p.items.map(i => {
+            const price = `${bpMoney(bp.interval === 'year' ? i.year_cents : i.month_cents)}${i.unit === 'location' ? ' per location' : ''} per ${bp.interval === 'year' ? 'year' : 'month'}`;
+            const note = bpStatusText(i.item);
+            return `<label class="flex gap-3 bg-white rounded-xl border shadow-sm p-4 ${i.owned ? 'opacity-80' : 'cursor-pointer hover:border-blue-300'}">
+                <input type="checkbox" class="mt-1 w-4 h-4" value="${i.item}" ${i.owned || !p.can_manage ? 'disabled' : ''} ${bp.picked.has(i.item) ? 'checked' : ''} onchange="bpToggle(this)">
+                <span class="flex-1"><span class="block font-semibold text-gray-800">${escapeHtml(i.label)} ${i.owned ? '<span class="ml-1 text-xs bg-green-100 text-green-800 rounded-full px-2 py-0.5">You have this</span>' : ''}</span>
+                <span class="block text-sm text-gray-500">${escapeHtml(i.blurb)}</span>
+                ${note ? `<span class="block text-xs text-gray-500 mt-1">${escapeHtml(note)}</span>` : ''}</span>
+                <span class="text-right text-sm font-semibold text-gray-800 whitespace-nowrap">${i.month_cents === 0 ? 'Free' : price}</span>
+            </label>`;
+        }).join('');
+        for (const iv of ['month', 'year']) {
+            const b = document.getElementById(`bp-int-${iv}`), on = bp.interval === iv;
+            b.className = 'px-4 py-1.5 text-sm font-semibold' + (iv === 'year' ? ' border-l' : '') + (on ? ' bg-blue-700 text-white' : ' bg-white text-gray-700');
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+    }
+
+    function bpToggle(el) { el.checked ? bp.picked.add(el.value) : bp.picked.delete(el.value); bpQuote(); }
+    function bpSetInterval(iv) { bp.interval = iv; bpRender(); bpQuote(); }
+
+    async function bpQuote() {
+        const box = document.getElementById('bp-quote'), btn = document.getElementById('bp-buy'), err = document.getElementById('bp-err');
+        err.textContent = '';
+        if (!bp.picked.size) { box.textContent = 'Choose what you need.'; btn.disabled = true; return; }
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/billing/quote`, { method: 'POST', body: JSON.stringify({ items: [...bp.picked], interval: bp.interval, locations: Number(document.getElementById('bp-locations').value) }) });
+            const q = await resp.json();
+            if (!resp.ok) { box.textContent = ''; err.textContent = q.error; btn.disabled = true; return; }
+            box.innerHTML = q.lines.map(l => `<div class="flex justify-between gap-2"><span>${escapeHtml(l.label)}${l.unit === 'location' ? ` &times; ${l.quantity}` : ''}</span><span class="tabular-nums">${bpMoney(l.amount_cents)}</span></div>`).join('') +
+                `<div class="flex justify-between font-bold text-gray-800 border-t mt-2 pt-2"><span>${bp.interval === 'year' ? 'Per year' : 'Per month'}</span><span class="tabular-nums">${bpMoney(q.total_cents)}</span></div>` +
+                (q.bundle_saves_cents ? `<p class="text-xs text-green-700 mt-2">Choosing Complete instead would save ${bpMoney(q.bundle_saves_cents)}.</p>` : '') +
+                '<p class="text-xs text-gray-400 mt-2">Taxes may be added at checkout.</p>';
+            btn.disabled = !bp.plans.can_manage;
+            btn.textContent = q.total_cents === 0 ? 'Switch on' : 'Subscribe';
+        } catch (e) { err.textContent = 'Could not price that.'; btn.disabled = true; }
+    }
+
+    async function bpCheckout() {
+        const btn = document.getElementById('bp-buy'), err = document.getElementById('bp-err');
+        btn.disabled = true; err.textContent = '';
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/billing/checkout`, { method: 'POST', body: JSON.stringify({ items: [...bp.picked], interval: bp.interval, locations: Number(document.getElementById('bp-locations').value) }) });
+            const data = await resp.json();
+            if (!resp.ok) { err.textContent = data.error || 'Could not start checkout.'; btn.disabled = false; return; }
+            if (data.activated) { bp.picked.clear(); await bpLoad(); return; }
+            window.location.href = data.url;
+        } catch (e) { err.textContent = 'Could not start checkout. Nothing was charged.'; btn.disabled = false; }
+    }
+
+    async function bpPortal() {
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/billing/portal`, { method: 'POST', body: '{}' });
+            const data = await resp.json();
+            if (!resp.ok) { document.getElementById('bp-err').textContent = data.error || 'Could not open billing.'; return; }
+            window.location.href = data.url;
+        } catch (e) { document.getElementById('bp-err').textContent = 'Could not open billing.'; }
     }
 
     // ============================================================
@@ -1993,6 +2131,20 @@
         }
     }
 
+    // The picture uploaded with the promotion; the product's own picture when
+    // it has one and the promotion does not. Only https URLs are ever used.
+    function promoImageUrl(p) {
+        const u = (p && p.image_url) || (p && p.products && p.products.image_url) || '';
+        return /^https:\/\//i.test(u) ? u : '';
+    }
+    function promoImageHtml(p) {
+        const u = promoImageUrl(p);
+        if (!u) return '';
+        return `<div class="mt-6 -mx-4 bg-gray-50 flex items-center justify-center" style="height:160px">
+                    <img src="${escapeHtml(u)}" alt="${escapeHtml((p.promo_label || (p.products && p.products.name) || 'Promotion'))}" loading="lazy" class="max-h-full max-w-full object-contain">
+                </div>`;
+    }
+
     function renderPromotions() {
         const grid = document.getElementById('promotions-grid');
         const noPromo = document.getElementById('no-promotions');
@@ -2018,7 +2170,8 @@
                     ${p.savings_pct}% OFF
                 </div>
                 ${p.is_global ? '<span class="absolute top-0 left-0 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-br-lg">GLOBAL</span>' : ''}
-                <div class="mt-6">
+                ${promoImageHtml(p)}
+                <div class="${promoImageUrl(p) ? 'mt-3' : 'mt-6'}">
                     <span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded">${escapeHtml(product.brand)}</span>
                     ${p.promo_label ? `<span class="ml-1 text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">${escapeHtml(p.promo_label)}</span>` : ''}
                 </div>

@@ -154,6 +154,11 @@ const MODULES = {
 
 const MODULE_NAMES = Object.keys(MODULES);
 
+// Billing gate (utils/billing.js). A company in 'free' mode -- every existing
+// one -- is never affected. In 'paid' mode a module that belongs to a sold item
+// only works while the company is entitled to that item.
+const { billingAllows, itemForModule, ITEMS: BILLING_ITEMS } = require('./billing');
+
 /**
  * The options block for one module, with defaults filled in.
  *
@@ -177,7 +182,7 @@ function moduleSettings(companySettings, name) {
     // turned off after the fact and the dependent must not keep working.
     out.enabled = raw.enabled === true && spec.requires.every(
         dep => moduleSettings(companySettings, dep).enabled
-    );
+    ) && billingAllows(companySettings, name);
 
     return out;
 }
@@ -211,7 +216,9 @@ function moduleStatus(companySettings) {
             // What is actually true.
             enabled: moduleEnabled(companySettings, name),
             blocked_by: missing,
-            available: spec.released && missing.length === 0
+            // True when this company is billed and has not got this item.
+            billing_locked: !billingAllows(companySettings, name),
+            available: spec.released && missing.length === 0 && billingAllows(companySettings, name)
         };
     });
 }
@@ -232,6 +239,11 @@ function canSetModule(companySettings, name, enabled) {
 
     if (!spec.released) {
         return { ok: false, error: `${spec.label} is not available yet. The switch is here so it can be turned on the day it ships.` };
+    }
+
+    if (!billingAllows(companySettings, name)) {
+        const item = BILLING_ITEMS[itemForModule(name)];
+        return { ok: false, error: `${spec.label} is part of ${item.label}, which this customer has not subscribed to. Give it to them free or have them subscribe under Billing.` };
     }
 
     const missing = spec.requires.filter(dep => !moduleEnabled(companySettings, dep));

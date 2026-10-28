@@ -153,6 +153,28 @@ function requireFullAdmin(req, res, next) {
 }
 
 /**
+ * A super admin sees everything inside THEIR OWN distributor, never another
+ * one's. A company id from a different distributor is treated as not found
+ * (same answer as a company that does not exist, so nothing is revealed).
+ * Admins with no distributor on file are unaffected.
+ */
+async function fenceToDistributor(req, res, next) {
+    try {
+        const companyId = req.params.companyId || req.body?.company_id;
+        if (!req.admin.distributor_id || !companyId) return next();
+        const { data: company } = await supabaseAdmin
+            .from('companies').select('distributor_id').eq('id', companyId).maybeSingle();
+        if (company && company.distributor_id && company.distributor_id !== req.admin.distributor_id) {
+            return res.status(404).json({ error: 'Company not found.' });
+        }
+        next();
+    } catch (err) {
+        console.error('Distributor fence check failed:', err);
+        res.status(500).json({ error: 'Could not verify access.' });
+    }
+}
+
+/**
  * Check admin has access to a specific company (via :companyId / body).
  * Super admins pass; company admins must match; order-desk is handled by the
  * order-scoped guard instead and is refused here.
@@ -161,7 +183,7 @@ function requireCompanyAccess(req, res, next) {
     if (!req.admin) {
         return res.status(403).json({ error: 'Admin authentication required.' });
     }
-    if (req.admin.role === 'super_admin') return next();
+    if (req.admin.role === 'super_admin') return fenceToDistributor(req, res, next);
     if (req.admin.role === 'order_desk') {
         return res.status(403).json({ error: 'This area is not available to order-desk accounts.' });
     }

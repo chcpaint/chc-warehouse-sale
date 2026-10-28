@@ -124,6 +124,12 @@
                 <button onclick="adminNav('reports')" data-nav="reports" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-chart-line w-5"></i> Reports
                 </button>
+                <button onclick="adminNav('tax')" data-nav="tax" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-tax">
+                    <i class="fas fa-percent w-5"></i> Tax &amp; Region
+                </button>
+                <button onclick="adminNav('billing')" data-nav="billing" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-billing">
+                    <i class="fas fa-credit-card w-5"></i> Billing
+                </button>
                 <button onclick="adminNav('admins')" data-nav="admins" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-admins">
                     <i class="fas fa-users-cog w-5"></i> Admin Users
                 </button>
@@ -1030,6 +1036,7 @@
                         <table class="w-full">
                             <thead class="bg-gray-50 border-b">
                                 <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase w-20">Picture</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Product</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Label</th>
                                     <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Company</th>
@@ -1411,6 +1418,82 @@
                     </div>
                 </section>
 
+                <!-- Tax & Region -->
+                <section id="section-tax" class="hidden fade-in">
+                    <div class="max-w-3xl space-y-6">
+                        <div class="bg-white rounded-xl shadow-sm border p-6">
+                            <h3 class="text-lg font-bold text-gray-800 mb-1">Where do you sell?</h3>
+                            <p class="text-sm text-gray-500 mb-4">Pick your country and home province or state. Every customer account picks up your tax rate automatically; you can still give any one customer its own rate, a different state, or mark it tax exempt under Companies.</p>
+                            <div class="inline-flex rounded-lg border overflow-hidden mb-4" role="group" aria-label="Country">
+                                <button type="button" id="dt-country-CA" onclick="dtSetCountry('CA')" class="px-5 py-2 text-sm font-semibold">Canada</button>
+                                <button type="button" id="dt-country-US" onclick="dtSetCountry('US')" class="px-5 py-2 text-sm font-semibold border-l">United States</button>
+                            </div>
+                            <div class="flex flex-wrap items-end gap-3">
+                                <div>
+                                    <label for="dt-region" id="dt-region-label" class="block text-xs font-semibold text-gray-600 mb-1">Home state</label>
+                                    <select id="dt-region" onchange="dtRegionChanged()" class="px-3 py-2 border rounded-lg text-sm min-w-[14rem]"></select>
+                                </div>
+                                <div>
+                                    <label for="dt-rate" class="block text-xs font-semibold text-gray-600 mb-1">Tax rate (%)</label>
+                                    <input type="number" id="dt-rate" step="0.001" min="0" max="100" class="px-3 py-2 border rounded-lg text-sm w-28">
+                                </div>
+                                <button type="button" onclick="dtUseReference()" class="text-sm text-blue-700 hover:underline mb-2">Use reference rate</button>
+                            </div>
+                            <p id="dt-ref-note" class="mt-2 text-xs text-gray-500"></p>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-sm border p-6">
+                            <h3 class="text-lg font-bold text-gray-800 mb-1">Rates for other <span id="dt-regions-word">states</span></h3>
+                            <p class="text-sm text-gray-500 mb-4">Selling into more than one place? Save a rate for each. Then set a customer&rsquo;s state under Companies &rarr; Tax and it is charged that rate.</p>
+                            <div id="dt-rates-list" class="divide-y border rounded-lg mb-4"></div>
+                            <div class="flex flex-wrap items-end gap-3">
+                                <div>
+                                    <label for="dt-add-region" class="block text-xs font-semibold text-gray-600 mb-1">Add</label>
+                                    <select id="dt-add-region" onchange="dtAddRegionChanged()" class="px-3 py-2 border rounded-lg text-sm min-w-[14rem]"></select>
+                                </div>
+                                <div>
+                                    <label for="dt-add-rate" class="block text-xs font-semibold text-gray-600 mb-1">Rate (%)</label>
+                                    <input type="number" id="dt-add-rate" step="0.001" min="0" max="100" class="px-3 py-2 border rounded-lg text-sm w-28">
+                                </div>
+                                <button type="button" onclick="dtAddRate()" class="bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-semibold">Add rate</button>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-4">
+                            <button type="button" onclick="dtSave()" class="bg-blue-700 hover:bg-blue-800 text-white px-6 py-2.5 rounded-lg font-semibold">Save tax setup</button>
+                            <p id="dt-msg" class="text-sm text-gray-600" role="status"></p>
+                        </div>
+                        <p id="dt-disclaimer" class="text-xs text-gray-400"></p>
+                    </div>
+                </section>
+
+                <!-- Billing -->
+                <section id="section-billing" class="hidden fade-in">
+                    <div class="max-w-5xl space-y-6">
+                        <div id="bl-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+
+                        <div class="bg-white rounded-xl shadow-sm border p-6">
+                            <h3 class="text-lg font-bold text-gray-800 mb-1">Your prices</h3>
+                            <p class="text-sm text-gray-500 mb-1">What your customers pay for the optional parts. The sales portal &mdash; ordering, price list, promotions, order history &mdash; is always free. Annual is priced at ten months by default. Set a price to 0 to make an item free for everyone.</p>
+                            <p id="bl-stripe" class="text-xs text-gray-500 mb-4"></p>
+                            <div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-2 pr-3">Item</th><th class="py-2 pr-3">Charged</th><th class="py-2 pr-3">Per month</th><th class="py-2 pr-3">Per year</th><th></th></tr></thead>
+                                <tbody id="bl-prices"></tbody>
+                            </table></div>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-sm border p-6">
+                            <h3 class="text-lg font-bold text-gray-800 mb-1">Your customers</h3>
+                            <p class="text-sm text-gray-500 mb-4"><strong>Free</strong> customers keep everything you have switched on, at no charge. <strong>Paid</strong> customers only get the optional parts they subscribe to &mdash; or that you give them free.</p>
+                            <div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-2 pr-3">Customer</th><th class="py-2 pr-3">Billing</th><th class="py-2 pr-3">Has</th><th class="py-2 pr-3 text-right">Per month</th><th></th></tr></thead>
+                                <tbody id="bl-companies"></tbody>
+                            </table></div>
+                        </div>
+                        <p id="bl-msg" class="text-sm text-gray-600" role="status"></p>
+                    </div>
+                </section>
+
                 <!-- Branding -->
                 <section id="section-branding" class="hidden fade-in">
                     <div class="max-w-2xl">
@@ -1478,6 +1561,27 @@
     <!-- ============================================================ -->
     <!-- MODALS -->
     <!-- ============================================================ -->
+
+    <!-- Give free (billing) -->
+    <div id="bl-comp-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xl font-bold">Give free of charge</h3>
+                <button onclick="hideModal('bl-comp-modal')" class="text-gray-400 hover:text-gray-600" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-600 mb-3"><span id="bl-comp-name" class="font-semibold"></span> will have these at $0. You can take it back at any time.</p>
+            <div id="bl-comp-items" class="space-y-2 mb-3"></div>
+            <label for="bl-comp-reason" class="block text-xs font-semibold text-gray-600 mb-1">Reason (kept in the audit log)</label>
+            <input id="bl-comp-reason" type="text" maxlength="300" class="w-full px-3 py-2 border rounded-lg text-sm mb-3" placeholder="e.g. Founding partner">
+            <label for="bl-comp-until" class="block text-xs font-semibold text-gray-600 mb-1">Free until (optional)</label>
+            <input id="bl-comp-until" type="date" class="px-3 py-2 border rounded-lg text-sm mb-4">
+            <p id="bl-comp-err" class="text-sm text-red-600 mb-2" role="alert"></p>
+            <div class="flex justify-end gap-2">
+                <button onclick="hideModal('bl-comp-modal')" class="px-4 py-2 text-sm text-gray-600">Cancel</button>
+                <button onclick="blSaveComp()" class="bg-blue-700 hover:bg-blue-800 text-white px-5 py-2 rounded-lg text-sm font-semibold">Give free</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Locations Modal -->
     <!-- Access Code Modal -->
@@ -1648,8 +1752,8 @@
             <div class="mt-5 pt-5 border-t">
                 <h4 class="font-bold text-gray-800 mb-1"><i class="fas fa-percent text-blue-500 mr-2"></i>Sales tax</h4>
                 <p class="text-sm text-gray-500 mb-3">
-                    Applied to every order's subtotal so the order total matches CHC's invoice.
-                    Every customer defaults to 13% (Ontario HST) until set otherwise here.
+                    Applied to every order's subtotal so the order total matches the invoice.
+                    A customer uses your distributor tax rate (Tax &amp; Region) unless you give it its own rate, a province/state, or mark it exempt here.
                 </p>
 
                 <div class="flex flex-wrap items-end gap-3">
@@ -1657,6 +1761,10 @@
                         <label class="block text-xs font-semibold text-gray-600 mb-1">Rate (%)</label>
                         <input type="number" id="tax-rate" step="0.01" min="0" max="100" placeholder="13"
                                oninput="onTaxRateInput()" class="px-3 py-2 border rounded-lg text-sm w-28">
+                    </div>
+ <div id="tax-region-wrap" class="hidden">
+                        <label for="tax-region" class="block text-xs font-semibold text-gray-600 mb-1">Province / state</label>
+                        <select id="tax-region" class="px-3 py-2 border rounded-lg text-sm"></select>
                     </div>
                     <label class="flex items-center gap-2 text-sm text-gray-700 mb-2.5">
                         <input type="checkbox" id="tax-exempt" onchange="onTaxExemptChange()"
@@ -2069,6 +2177,17 @@
                         <input type="datetime-local" id="promo-end" required class="w-full px-3 py-2 border rounded-lg">
                     </div>
                 </div>
+                <div>
+                    <label for="promo-image" class="block text-sm font-medium text-gray-700 mb-1">Picture (optional)</label>
+                    <input type="file" id="promo-image" accept="image/png,image/jpeg,image/gif,image/webp" onchange="promoImageChosen(this)"
+                           class="w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200">
+                    <p class="text-xs text-gray-400 mt-1">PNG, JPEG, GIF or WEBP, up to 3 MB. Shown on the Promotions tab with the item and its price.</p>
+                    <div id="promo-image-preview" class="hidden mt-2 flex items-center gap-3">
+                        <img id="promo-image-thumb" alt="Selected picture" class="h-20 max-w-[8rem] object-contain border rounded bg-gray-50">
+                        <button type="button" onclick="promoImageClear()" class="text-sm text-red-600 hover:underline">Remove</button>
+                    </div>
+                    <p id="promo-image-error" class="hidden text-xs text-red-600 mt-1"></p>
+                </div>
                 <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg">Create Promotion</button>
             </form>
         </div>
@@ -2402,6 +2521,8 @@
         // Hide super-admin-only nav items
         if (admin.user.role !== 'super_admin') {
             document.getElementById('nav-admins').classList.add('hidden');
+            document.getElementById('nav-tax').classList.add('hidden');
+            document.getElementById('nav-billing').classList.add('hidden');
             // The master table defines parts for every customer, so it is
             // super-admin only. The API refuses anyone else regardless; this
             // just stops a dead menu item being offered.
@@ -2456,7 +2577,7 @@
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products', pricing: 'Customer Pricing',
             library: 'Item Library', master: 'Master Table', kits: 'Kits',
-            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding' };
+            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding', tax: 'Tax & Region', billing: 'Billing' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
         if (section === 'dashboard') dbLoad();
@@ -2471,6 +2592,8 @@
         if (section === 'admins') loadAdminUsers();
         if (section === 'audit') loadAuditLog();
         if (section === 'branding') loadBrandingInfo();
+        if (section === 'tax') dtLoad();
+        if (section === 'billing') blLoad();
     }
 
     // ============================================================
@@ -5465,6 +5588,265 @@
     // into and the default every company gets until this is touched.
     // ============================================================
 
+
+    // ============================================================
+    // TAX & REGION (distributor-wide) — country toggle, home state/province,
+    // rate, and a saved rate per other state/province. Saved to
+    // distributors.settings.tax via /api/admin/distributor-tax; each client
+    // company inherits it (utils/tax.js). Reference rates only pre-fill.
+    // ============================================================
+    let dtCfg = null;      // { countries, country, region, rate, rates }
+    const dtPct = (r) => (Number(r) * 100).toFixed(3).replace(/\.?0+$/, '');
+
+    function dtCountry() { return dtCfg.countries.find(c => c.code === dtCfg.country); }
+    function dtRegionName(code) { return dtCountry().regions.find(r => r.code === code)?.name || code; }
+
+    async function dtLoad() {
+        const msg = document.getElementById('dt-msg');
+        msg.textContent = 'Loading...';
+        try {
+            const resp = await adminFetch('/distributor-tax');
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to load tax setup.');
+            dtCfg = { countries: data.countries, country: data.country, region: data.region, rate: data.rate, rates: { ...data.rates }, note: data.note };
+            if (!dtCfg.region) { dtCfg.region = dtCfg.country === 'US' ? 'TX' : 'ON'; dtCfg.rate = null; }
+            document.getElementById('dt-disclaimer').textContent = data.note;
+            msg.textContent = data.configured ? '' : 'Not set up yet — your customers are charged the 13% Ontario default.';
+            dtRender();
+            dtUseReference(!!data.configured && data.rate !== null);
+        } catch (err) { msg.textContent = err.message; }
+    }
+
+    function dtRender() {
+        const c = dtCountry();
+        for (const code of ['CA', 'US']) {
+            const b = document.getElementById(`dt-country-${code}`);
+            const on = code === dtCfg.country;
+            b.className = 'px-5 py-2 text-sm font-semibold' + (code === 'US' ? ' border-l' : '') + (on ? ' bg-blue-700 text-white' : ' bg-white text-gray-700 hover:bg-gray-50');
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        const word = c.code === 'US' ? 'states' : 'provinces and territories';
+        document.getElementById('dt-regions-word').textContent = word;
+        document.getElementById('dt-region-label').textContent = c.code === 'US' ? 'Home state' : 'Home province / territory';
+        const opts = c.regions.map(r => `<option value="${r.code}">${r.name} (${r.code})</option>`).join('');
+        const sel = document.getElementById('dt-region');
+        sel.innerHTML = opts; sel.value = dtCfg.region;
+        const add = document.getElementById('dt-add-region');
+        add.innerHTML = `<option value="">Choose…</option>` + opts;
+        dtRenderRates();
+    }
+
+    function dtRenderRates() {
+        const list = document.getElementById('dt-rates-list');
+        const codes = Object.keys(dtCfg.rates).filter(c => c !== dtCfg.region).sort((a, b) => dtRegionName(a).localeCompare(dtRegionName(b)));
+        const home = `<div class="flex items-center justify-between px-4 py-2 text-sm bg-gray-50"><span><strong>${dtRegionName(dtCfg.region)}</strong> <span class="text-gray-500">— home</span></span><span class="font-semibold">${document.getElementById('dt-rate').value || dtPct(dtCfg.rate ?? 0)}%</span></div>`;
+        list.innerHTML = home + (codes.length ? codes.map(c => `
+            <div class="flex items-center justify-between px-4 py-2 text-sm">
+                <span>${dtRegionName(c)} <span class="text-gray-400">(${c})</span></span>
+                <span class="flex items-center gap-3"><span class="font-semibold">${dtPct(dtCfg.rates[c])}%</span>
+                <button type="button" onclick="dtRemoveRate('${c}')" class="text-red-600 hover:underline text-xs" aria-label="Remove ${dtRegionName(c)}">Remove</button></span>
+            </div>`).join('') : '<div class="px-4 py-3 text-sm text-gray-400">No other places saved.</div>');
+    }
+
+    function dtSetCountry(code) {
+        if (dtCfg.country === code) return;
+        dtCfg.country = code;
+        dtCfg.region = code === 'US' ? 'TX' : 'ON';
+        dtCfg.rates = {};
+        dtRender();
+        dtUseReference(false);
+    }
+
+    function dtRegionChanged() {
+        dtCfg.region = document.getElementById('dt-region').value;
+        dtUseReference(false);
+        dtRenderRates();
+    }
+
+    // Pre-fills the rate box. keepSaved=true leaves a rate the distributor already saved alone.
+    function dtUseReference(keepSaved) {
+        const ref = dtCountry().regions.find(r => r.code === dtCfg.region);
+        const input = document.getElementById('dt-rate');
+        if (!(keepSaved === true)) input.value = dtPct(ref.reference_rate);
+        else input.value = dtPct(dtCfg.rate);
+        document.getElementById('dt-ref-note').textContent =
+            `Reference for ${ref.name}: ${dtPct(ref.reference_rate)}% (${ref.kind}). ` + (dtCfg.country === 'US' ? 'State rate only — counties and cities may add more, so confirm with your accountant.' : 'Confirm with your accountant.');
+        dtRenderRates();
+    }
+
+    function dtAddRegionChanged() {
+        const code = document.getElementById('dt-add-region').value;
+        const ref = dtCountry().regions.find(r => r.code === code);
+        document.getElementById('dt-add-rate').value = ref ? dtPct(ref.reference_rate) : '';
+    }
+
+    function dtAddRate() {
+        const code = document.getElementById('dt-add-region').value;
+        const raw = document.getElementById('dt-add-rate').value.trim();
+        if (!code || raw === '') { document.getElementById('dt-msg').textContent = 'Choose a place and a rate first.'; return; }
+        const n = Number(raw) / 100;
+        if (!(n >= 0 && n <= 1)) { document.getElementById('dt-msg').textContent = 'Rate must be between 0 and 100.'; return; }
+        dtCfg.rates[code] = n;
+        document.getElementById('dt-add-region').value = ''; document.getElementById('dt-add-rate').value = '';
+        document.getElementById('dt-msg').textContent = 'Added — press Save tax setup to keep it.';
+        dtRenderRates();
+    }
+
+    function dtRemoveRate(code) { delete dtCfg.rates[code]; dtRenderRates(); }
+
+    async function dtSave() {
+        const msg = document.getElementById('dt-msg');
+        const raw = document.getElementById('dt-rate').value.trim();
+        const rate = raw === '' ? null : Number(raw) / 100;
+        const rates = { ...dtCfg.rates }; delete rates[dtCfg.region];
+        try {
+            const resp = await adminFetch('/distributor-tax', { method: 'PUT', body: JSON.stringify({ country: dtCfg.country, region: dtCfg.region, rate, rates }) });
+            const data = await resp.json();
+            if (!resp.ok) { msg.textContent = data.error || 'Failed to save.'; return; }
+            msg.textContent = data.message;
+            dtCfg.rate = data.rate; dtCfg.rates = data.rates;
+            dtRenderRates();
+        } catch (err) { msg.textContent = 'Failed to save tax setup.'; }
+    }
+
+
+    // ============================================================
+    // BILLING — prices, free vs paid customers, $0 grants.
+    // /api/admin/billing (super admin). See utils/billing.js.
+    // ============================================================
+    let blData = { prices: null, companies: null, compFor: null };
+    const blMoney = (c, cur) => `${cur === 'usd' ? 'US$' : 'CA$'}${(Number(c) / 100).toFixed(2).replace(/\.00$/, '')}`;
+    const blLabel = { inventory: 'Inventory', kits: 'Repair kits', people: 'People & activity', shopsafe: 'ShopSafe', complete: 'Complete' };
+
+    async function blLoad() {
+        const msg = document.getElementById('bl-msg');
+        msg.textContent = 'Loading...';
+        try {
+            const [p, c] = await Promise.all([adminFetch('/billing/prices'), adminFetch('/billing/companies')]);
+            const pd = await p.json(), cd = await c.json();
+            if (!p.ok) throw new Error(pd.error || 'Failed to load prices.');
+            if (!c.ok) throw new Error(cd.error || 'Failed to load customers.');
+            blData.prices = pd; blData.companies = cd;
+            msg.textContent = '';
+            blRender();
+        } catch (err) { msg.textContent = err.message; }
+    }
+
+    function blRender() {
+        const { prices, companies } = blData;
+        const cur = prices.currency, sm = companies.summary;
+        const tile = (label, value) => `<div class="bg-white rounded-xl border shadow-sm p-4"><p class="text-xs text-gray-500">${label}</p><p class="text-xl font-bold text-gray-800 mt-1">${value}</p></div>`;
+        document.getElementById('bl-summary').innerHTML =
+            tile('Paying customers', sm.paid_companies) + tile('Free customers', sm.free_companies) +
+            tile('Monthly recurring', blMoney(sm.mrr_cents, cur)) + tile('Yearly run rate', blMoney(sm.arr_cents, cur));
+        document.getElementById('bl-stripe').textContent = prices.stripe.connected
+            ? 'Payments go to your connected Stripe account.'
+            : 'Online payment is collected by the platform until you connect your own Stripe account.';
+
+        document.getElementById('bl-prices').innerHTML = prices.items.map(i => `
+            <tr class="border-t">
+                <td class="py-2 pr-3"><div class="font-semibold text-gray-800">${i.label}</div><div class="text-xs text-gray-500 max-w-sm">${i.blurb}</div></td>
+                <td class="py-2 pr-3 text-gray-600">${i.unit === 'location' ? 'per location' : 'per customer'}</td>
+                <td class="py-2 pr-3"><input type="number" min="0" step="0.01" id="bl-p-${i.item}-month" value="${(i.month_cents / 100).toFixed(2)}" aria-label="${i.label} per month" class="w-24 px-2 py-1 border rounded text-sm ${i.month_overridden ? 'bg-blue-50' : ''}"></td>
+                <td class="py-2 pr-3"><input type="number" min="0" step="0.01" id="bl-p-${i.item}-year" value="${(i.year_cents / 100).toFixed(2)}" aria-label="${i.label} per year" class="w-24 px-2 py-1 border rounded text-sm ${i.year_overridden ? 'bg-blue-50' : ''}"></td>
+                <td class="py-2 text-right whitespace-nowrap"><button onclick="blSavePrice('${i.item}')" class="text-blue-700 hover:underline text-sm font-semibold">Save</button>
+                    ${(i.month_overridden || i.year_overridden) ? `<button onclick="blResetPrice('${i.item}')" class="ml-3 text-gray-500 hover:underline text-xs">Reset</button>` : ''}</td>
+            </tr>`).join('');
+
+        document.getElementById('bl-companies').innerHTML = companies.companies.map(c => {
+            const chips = c.items.map(it => {
+                const label = blLabel[it.item] || it.item;
+                if (it.source === 'comp') return `<span class="inline-flex items-center gap-1 bg-green-50 text-green-800 border border-green-200 rounded-full px-2 py-0.5 text-xs" title="${(it.comp_reason || '').replace(/"/g, '&quot;')}">${label} &middot; free <button onclick="blRevoke('${c.id}','${it.item}')" class="hover:text-red-600" aria-label="Take back free ${label}">&times;</button></span>`;
+                const st = it.status === 'active' ? '' : ` (${it.status.replace('_', ' ')})`;
+                return `<span class="inline-flex bg-blue-50 text-blue-800 border border-blue-200 rounded-full px-2 py-0.5 text-xs">${label}${st}</span>`;
+            }).join(' ') || '<span class="text-xs text-gray-400">Sales portal only</span>';
+            return `<tr class="border-t">
+                <td class="py-2 pr-3 font-semibold text-gray-800">${escapeHtmlAdmin(c.name)}</td>
+                <td class="py-2 pr-3"><select onchange="blSetMode('${c.id}', this)" aria-label="Billing for ${escapeHtmlAdmin(c.name)}" class="px-2 py-1 border rounded text-sm">
+                    <option value="free" ${c.mode === 'free' ? 'selected' : ''}>Free</option><option value="paid" ${c.mode === 'paid' ? 'selected' : ''}>Paid</option></select></td>
+                <td class="py-2 pr-3"><div class="flex flex-wrap gap-1">${chips}</div></td>
+                <td class="py-2 pr-3 text-right tabular-nums">${c.monthly_cents ? blMoney(c.monthly_cents, cur) : '&mdash;'}</td>
+                <td class="py-2 text-right"><button onclick="blOpenComp('${c.id}')" class="text-blue-700 hover:underline text-sm whitespace-nowrap">Give free…</button></td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="5" class="py-4 text-gray-400">No customers yet.</td></tr>';
+    }
+
+    function escapeHtmlAdmin(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
+
+    async function blSavePrice(item) {
+        const msg = document.getElementById('bl-msg');
+        try {
+            for (const interval of ['month', 'year']) {
+                const v = document.getElementById(`bl-p-${item}-${interval}`).value;
+                const cur = blData.prices.items.find(i => i.item === item)[interval + '_cents'];
+                if (Math.round(Number(v) * 100) === cur) continue;
+                const resp = await adminFetch('/billing/prices', { method: 'PUT', body: JSON.stringify({ item, interval, amount: v === '' ? null : Number(v) }) });
+                const data = await resp.json();
+                if (!resp.ok) { msg.textContent = data.error || 'Failed to save.'; return; }
+                msg.textContent = data.message;
+            }
+            await blLoadQuiet();
+        } catch (err) { msg.textContent = 'Failed to save the price.'; }
+    }
+    async function blResetPrice(item) {
+        for (const interval of ['month', 'year']) await adminFetch('/billing/prices', { method: 'PUT', body: JSON.stringify({ item, interval, amount: null }) });
+        document.getElementById('bl-msg').textContent = 'Back to the standard price.';
+        await blLoadQuiet();
+    }
+    async function blLoadQuiet() { const m = document.getElementById('bl-msg').textContent; await blLoad(); document.getElementById('bl-msg').textContent = m; }
+
+    async function blSetMode(companyId, selectEl) {
+        const mode = selectEl.value, msg = document.getElementById('bl-msg');
+        const send = (extra) => adminFetch(`/billing/companies/${companyId}/mode`, { method: 'PUT', body: JSON.stringify({ mode, ...extra }) });
+        try {
+            let resp = await send({}), data = await resp.json();
+            if (resp.status === 409 && data.affected_modules) {
+                const keep = confirm(`${data.error}\n\nPress OK to keep those free for this customer. Press Cancel for more options.`);
+                if (keep) { resp = await send({ grandfather: true }); }
+                else if (confirm('Switch those parts off for this customer until they subscribe?')) { resp = await send({ confirm: true }); }
+                else { selectEl.value = 'free'; return; }
+                data = await resp.json();
+            }
+            if (!resp.ok) { msg.textContent = data.error || 'Failed.'; selectEl.value = mode === 'paid' ? 'free' : 'paid'; return; }
+            msg.textContent = data.message;
+            await blLoadQuiet();
+        } catch (err) { msg.textContent = 'Failed to change billing.'; }
+    }
+
+    function blOpenComp(companyId) {
+        const c = blData.companies.companies.find(x => x.id === companyId);
+        blData.compFor = companyId;
+        document.getElementById('bl-comp-name').textContent = c.name;
+        document.getElementById('bl-comp-items').innerHTML = blData.prices.items.map(i => `
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" value="${i.item}" class="bl-comp-item w-4 h-4"> ${i.label}</label>`).join('');
+        document.getElementById('bl-comp-reason').value = '';
+        document.getElementById('bl-comp-until').value = '';
+        document.getElementById('bl-comp-err').textContent = '';
+        showModal('bl-comp-modal');
+    }
+
+    async function blSaveComp() {
+        const err = document.getElementById('bl-comp-err');
+        const items = [...document.querySelectorAll('.bl-comp-item:checked')].map(e => e.value);
+        const until = document.getElementById('bl-comp-until').value;
+        try {
+            const resp = await adminFetch(`/billing/companies/${blData.compFor}/comp`, { method: 'POST', body: JSON.stringify({ items, reason: document.getElementById('bl-comp-reason').value.trim(), until: until || undefined }) });
+            const data = await resp.json();
+            if (!resp.ok) { err.textContent = data.error || 'Failed.'; return; }
+            hideModal('bl-comp-modal');
+            document.getElementById('bl-msg').textContent = data.message + (data.note ? ' ' + data.note : '');
+            await blLoadQuiet();
+        } catch (e) { err.textContent = 'Failed to save.'; }
+    }
+
+    async function blRevoke(companyId, item) {
+        if (!confirm(`Take back free ${blLabel[item] || item}? If this customer is on Paid billing they will lose it.`)) return;
+        const resp = await adminFetch(`/billing/companies/${companyId}/comp/${item}`, { method: 'DELETE' });
+        const data = await resp.json();
+        document.getElementById('bl-msg').textContent = data.message || data.error || '';
+        await blLoadQuiet();
+    }
+
     async function loadTaxSettings() {
         const rateInput = document.getElementById('tax-rate');
         const exemptInput = document.getElementById('tax-exempt');
@@ -5482,8 +5864,19 @@
             rateInput.disabled = data.exempt;
             rateInput.placeholder = (Number(data.default_rate) * 100).toFixed(0);
 
+            const regSel = document.getElementById('tax-region');
+            const regWrap = document.getElementById('tax-region-wrap');
+            if (regSel) {
+                const saved = Object.keys(data.region_rates || {});
+                regSel.innerHTML = '<option value="">Use distributor rate</option>' +
+                    data.regions.filter(r => saved.includes(r.code)).map(r => `<option value="${r.code}">${r.name} — ${(data.region_rates[r.code] * 100).toFixed(3).replace(/\.?0+$/, '')}%</option>`).join('');
+                regSel.value = data.region && saved.includes(data.region) ? data.region : '';
+                regWrap.classList.toggle('hidden', !saved.length);
+            }
             note.textContent = data.exempt
                 ? 'This customer is not charged tax.'
+                : data.source === 'region' || data.source === 'distributor'
+                ? `Charged ${(Number(data.rate) * 100).toFixed(3).replace(/\.?0+$/, '')}% from your Tax & Region setup.`
                 : data.is_default
                     ? `Using the default rate of ${(Number(data.default_rate) * 100).toFixed(0)}% — nobody has set this customer's rate.`
                     : `Set to ${(Number(data.rate) * 100).toFixed(2).replace(/\.?0+$/, '')}%, different from the ${(Number(data.default_rate) * 100).toFixed(0)}% default.`;
@@ -5517,6 +5910,8 @@
         // Empty clears any override and falls back to the default — sent as
         // null rather than omitted, since PUT replaces the whole tax block.
         payload.rate = (exempt || rateRaw === '') ? null : Number(rateRaw) / 100;
+        const regEl = document.getElementById('tax-region');
+        payload.region = (!exempt && regEl && regEl.value) ? regEl.value : null;
 
         try {
             const resp = await adminFetch(`/companies/${modulesCompanyId}/tax`, {
@@ -7088,15 +7483,22 @@
                 const isLive = p.is_active && new Date(p.starts_at) <= now && new Date(p.ends_at) >= now;
                 return `
                 <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3">${p.image_url
+                        ? `<img src="${escA(p.image_url)}" alt="" class="h-12 w-16 object-contain border rounded bg-gray-50">`
+                        : '<span class="text-xs text-gray-300">None</span>'}</td>
                     <td class="px-4 py-3 text-sm">${esc(p.products?.name || 'N/A')} <span class="text-xs text-gray-400">${esc(p.products?.brand || '')}</span></td>
                     <td class="px-4 py-3 text-sm">${esc(p.promo_label || '-')}</td>
                     <td class="px-4 py-3 text-sm">${p.company_id ? esc(p.companies?.name || 'Specific') : '<span class="text-yellow-600 font-semibold">GLOBAL</span>'}</td>
                     <td class="px-4 py-3 text-right font-bold text-red-600">$${parseFloat(p.promo_price).toFixed(2)}</td>
                     <td class="px-4 py-3 text-xs text-gray-500">${new Date(p.starts_at).toLocaleDateString()} - ${new Date(p.ends_at).toLocaleDateString()}</td>
                     <td class="px-4 py-3 text-center"><span class="px-2 py-1 rounded-full text-xs font-semibold ${isLive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}">${isLive ? 'Live' : 'Inactive'}</span></td>
-                    <td class="px-4 py-3 text-right"><button onclick="deletePromotion('${p.id}')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i></button></td>
+                    <td class="px-4 py-3 text-right whitespace-nowrap">
+                        <button onclick="promoPickImage('${p.id}')" class="text-blue-600 hover:text-blue-800 text-sm mr-2" title="${p.image_url ? 'Replace picture' : 'Add a picture'}"><i class="fas fa-image"></i></button>
+                        ${p.image_url ? `<button onclick="promoRemoveImage('${p.id}')" class="text-gray-400 hover:text-gray-600 text-sm mr-2" title="Remove picture"><i class="fas fa-eraser"></i></button>` : ''}
+                        <button onclick="deletePromotion('${p.id}')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i></button>
+                    </td>
                 </tr>`;
-            }).join('') || '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No promotions.</td></tr>';
+            }).join('') || '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No promotions.</td></tr>';
         } catch (err) { console.error('Promotions load failed:', err); }
     }
 
@@ -7115,23 +7517,90 @@
         } catch (err) { console.error(err); }
     }
 
+    const PROMO_IMAGE_MAX = 3 * 1024 * 1024;
+    const PROMO_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+    // Quick check in the browser so a wrong file is caught before the upload;
+    // the server checks the real bytes again.
+    function promoImageProblem(file) {
+        if (!file) return '';
+        if (!PROMO_IMAGE_TYPES.includes(file.type)) return 'Choose a PNG, JPEG, GIF or WEBP picture.';
+        if (file.size > PROMO_IMAGE_MAX) return 'That picture is over 3 MB. Save it smaller and try again.';
+        return '';
+    }
+    function promoImageChosen(input) {
+        const file = input.files && input.files[0];
+        const err = document.getElementById('promo-image-error');
+        const prev = document.getElementById('promo-image-preview');
+        const problem = promoImageProblem(file);
+        err.textContent = problem; err.classList.toggle('hidden', !problem);
+        if (!file || problem) { if (problem) input.value = ''; prev.classList.add('hidden'); return; }
+        const thumb = document.getElementById('promo-image-thumb');
+        if (thumb.dataset.url) URL.revokeObjectURL(thumb.dataset.url);
+        thumb.dataset.url = URL.createObjectURL(file);
+        thumb.src = thumb.dataset.url;
+        prev.classList.remove('hidden');
+    }
+    function promoImageClear() {
+        document.getElementById('promo-image').value = '';
+        document.getElementById('promo-image-preview').classList.add('hidden');
+        document.getElementById('promo-image-error').classList.add('hidden');
+    }
+
     async function createPromotion(e) {
         e.preventDefault();
         try {
-            const resp = await adminFetch('/promotions', {
-                method: 'POST',
-                body: JSON.stringify({
-                    company_id: document.getElementById('promo-company').value || null,
-                    product_id: document.getElementById('promo-product').value,
-                    promo_price: document.getElementById('promo-price').value,
-                    promo_label: document.getElementById('promo-label').value,
-                    starts_at: new Date(document.getElementById('promo-start').value).toISOString(),
-                    ends_at: new Date(document.getElementById('promo-end').value).toISOString()
-                })
-            });
-            if (resp.ok) { hideModal('promo-modal'); loadAdminPromotions(); loadDashboard(); }
-            else { const d = await resp.json(); alert(d.error); }
+            const fields = {
+                company_id: document.getElementById('promo-company').value || '',
+                product_id: document.getElementById('promo-product').value,
+                promo_price: document.getElementById('promo-price').value,
+                promo_label: document.getElementById('promo-label').value,
+                starts_at: new Date(document.getElementById('promo-start').value).toISOString(),
+                ends_at: new Date(document.getElementById('promo-end').value).toISOString()
+            };
+            const file = document.getElementById('promo-image').files[0];
+            const problem = promoImageProblem(file);
+            if (problem) { alert(problem); return; }
+
+            let resp;
+            if (file) {
+                // A picture goes as a form upload (the browser sets the boundary itself).
+                const fd = new FormData();
+                Object.entries(fields).forEach(([k, v]) => { if (v !== '') fd.append(k, v); });
+                fd.append('image', file);
+                resp = await adminFetchRaw('/promotions', { method: 'POST', body: fd });
+            } else {
+                resp = await adminFetch('/promotions', { method: 'POST', body: JSON.stringify({ ...fields, company_id: fields.company_id || null }) });
+            }
+            if (resp.ok) { hideModal('promo-modal'); promoImageClear(); loadAdminPromotions(); loadDashboard(); }
+            else { const d = await resp.json().catch(() => ({})); alert(d.error || 'Failed to create promotion.'); }
         } catch (err) { alert('Failed to create promotion.'); }
+    }
+
+    // Add or replace the picture on an existing promotion.
+    function promoPickImage(id) {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = PROMO_IMAGE_TYPES.join(',');
+        input.onchange = async () => {
+            const file = input.files[0]; if (!file) return;
+            const problem = promoImageProblem(file);
+            if (problem) { alert(problem); return; }
+            const fd = new FormData(); fd.append('image', file);
+            try {
+                const resp = await adminFetchRaw(`/promotions/${id}`, { method: 'PUT', body: fd });
+                if (!resp.ok) { const d = await resp.json().catch(() => ({})); alert(d.error || 'Could not save the picture.'); return; }
+                loadAdminPromotions();
+            } catch (err) { alert('Could not save the picture.'); }
+        };
+        input.click();
+    }
+    async function promoRemoveImage(id) {
+        if (!confirm('Remove the picture from this promotion?')) return;
+        try {
+            const resp = await adminFetch(`/promotions/${id}`, { method: 'PUT', body: JSON.stringify({ remove_image: true }) });
+            if (!resp.ok) { const d = await resp.json().catch(() => ({})); alert(d.error || 'Could not remove the picture.'); return; }
+            loadAdminPromotions();
+        } catch (err) { alert('Could not remove the picture.'); }
     }
 
     async function deletePromotion(id) {

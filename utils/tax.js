@@ -35,22 +35,81 @@
 /** Ontario HST. What every company is charged unless configured otherwise. */
 const DEFAULT_RATE = 0.13;
 
+const { isCountry } = require('./tax-regions');
+
 function isFiniteRate(v) {
     return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
 }
 
-/** The tax block of a company's settings, with defaults filled in. */
-function taxSettings(companySettings) {
+/**
+ * A distributor's own tax block (distributors.settings.tax), normalised.
+ *
+ *   { country: 'CA'|'US', region: 'ON', rate: 0.13, rates: { TX: 0.0825, ... } }
+ *
+ * `rate` is the distributor's default rate for every client that has no rate
+ * of its own. `rates` is the per-state/province table, used when a client is
+ * tagged with a region (companies.settings.tax.region). Returns null when the
+ * distributor has configured nothing, which keeps every existing tenant on
+ * the old 13% default.
+ */
+function distributorTax(distributorSettings) {
+    const raw = (distributorSettings && typeof distributorSettings === 'object' && distributorSettings.tax) || null;
+    if (!raw || typeof raw !== 'object') return null;
+    const country = isCountry(raw.country) ? raw.country : null;
+    const rates = {};
+    if (raw.rates && typeof raw.rates === 'object') {
+        for (const [code, v] of Object.entries(raw.rates)) {
+            if (isFiniteRate(v) && /^[A-Z]{2}$/.test(code)) rates[code] = Number(v);
+        }
+    }
+    const rate = isFiniteRate(raw.rate) ? Number(raw.rate) : null;
+    if (!country && rate === null && !Object.keys(rates).length) return null;
+    return {
+        country: country || 'CA',
+        region: typeof raw.region === 'string' && /^[A-Z]{2}$/.test(raw.region) ? raw.region : null,
+        rate,
+        rates
+    };
+}
+
+/**
+ * The tax a company is charged, with defaults filled in.
+ *
+ * Resolution order (first match wins):
+ *   1. company marked exempt                        -> 0%
+ *   2. company has its own rate                     -> that rate
+ *   3. company tagged with a region the distributor
+ *      has a saved rate for                         -> that region's rate
+ *   4. distributor default rate (their home region) -> that rate
+ *   5. nothing configured                           -> 13% (Ontario HST)
+ *
+ * `distributorSettings` is optional; callers that omit it get exactly the old
+ * behaviour.
+ */
+function taxSettings(companySettings, distributorSettings) {
     const raw = (companySettings && typeof companySettings === 'object' && companySettings.tax) || {};
     const exempt = raw.exempt === true;
     const hasCustomRate = !exempt && isFiniteRate(raw.rate);
+    const dist = distributorTax(distributorSettings);
+    const region = typeof raw.region === 'string' && /^[A-Z]{2}$/.test(raw.region) ? raw.region : null;
+
+    let rate = DEFAULT_RATE;
+    let source = 'default';
+    if (exempt) { rate = 0; source = 'exempt'; }
+    else if (hasCustomRate) { rate = Number(raw.rate); source = 'company'; }
+    else if (dist && region && dist.rates[region] !== undefined) { rate = dist.rates[region]; source = 'region'; }
+    else if (dist && dist.rate !== null) { rate = dist.rate; source = 'distributor'; }
+
     return {
-        rate: exempt ? 0 : (hasCustomRate ? Number(raw.rate) : DEFAULT_RATE),
+        rate,
         exempt,
-        // True only when nothing has been configured for this company — the
-        // admin screen uses this to show "13% (default)" rather than making
-        // it look like someone deliberately chose 13%.
-        is_default: !exempt && !hasCustomRate
+        // True only when nothing has been configured at any level — the admin
+        // screen uses this to show "13% (default)" rather than making it look
+        // like someone deliberately chose 13%.
+        is_default: source === 'default',
+        source,
+        region,
+        country: dist ? dist.country : 'CA'
     };
 }
 
@@ -91,6 +150,7 @@ function validateRate(value) {
 module.exports = {
     DEFAULT_RATE,
     taxSettings,
+    distributorTax,
     computeTax,
     validateRate
 };
