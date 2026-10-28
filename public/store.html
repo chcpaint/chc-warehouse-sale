@@ -1849,6 +1849,17 @@
         });
     }
 
+    /**
+     * A short line a shop may have under an item's price (for example "Price is shown as
+     * list less 45%"). Held in the item's metadata as price_note, set by CHC. Shown only for
+     * priced items: a Call-for-price item has no price for the note to explain.
+     */
+    function priceNoteHtml(p) {
+        const note = p && !p.price_on_request && p.metadata && typeof p.metadata.price_note === 'string'
+            ? p.metadata.price_note.trim() : '';
+        return note ? `<p class="text-xs text-gray-500 italic mb-3 -mt-2" data-price-note>${escapeHtml(note)}</p>` : '';
+    }
+
     function renderProducts() {
         const grid = document.getElementById('products-grid');
 
@@ -1876,6 +1887,7 @@
                     <!-- Product "was" price hidden in catalog; sale pricing/strikethrough is handled by Promotions. -->
                     ${p.case_qty > 1 ? `<span class="text-xs text-gray-400">/ case of ${p.case_qty}</span>` : ''}
                 </div>
+                ${priceNoteHtml(p)}
                 <div class="flex items-center gap-2">
                     ${qty > 0 ? `
                         <button onclick="updateCart('${p.id}', ${qty - 1})" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 font-bold">-</button>
