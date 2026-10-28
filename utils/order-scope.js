@@ -31,6 +31,16 @@
 
 const { supabaseAdmin } = require('./supabase');
 
+/**
+ * Head-office roles: see every branch's orders and every customer. They are
+ * still fenced to an allow-list of endpoints (middleware/auth.js), so "sees
+ * every customer" never means "reaches the whole console".
+ *   order_manager  -- operations: orders and Customer Pricing.
+ *   sales_director -- sales: the same, plus adding items to a customer's catalog.
+ */
+const HEAD_OFFICE_ROLES = ['order_manager', 'sales_director'];
+const isHeadOffice = role => HEAD_OFFICE_ROLES.includes(role);
+
 // A location id that can never exist, used to force an empty result rather than
 // accidentally returning everything when a desk has no branch/locations.
 const NO_MATCH = '00000000-0000-0000-0000-000000000000';
@@ -133,7 +143,7 @@ function applyOrderScope(query, req, ids, companyId) {
 
     // Head office: every branch's orders, but only through the order screens —
     // restrictOrderDesk fences the rest of the console for this role too.
-    if (role === 'order_manager') {
+    if (isHeadOffice(role)) {
         return companyId ? query.eq('company_id', companyId) : query;
     }
 
@@ -160,7 +170,7 @@ async function orderInScope(req, orderId) {
 
     const role = req.admin.role;
     if (role === 'super_admin') return { ok: true, order };
-    if (role === 'order_manager') return { ok: true, order };
+    if (isHeadOffice(role)) return { ok: true, order };
 
     if (role === 'order_desk') {
         const ids = await staffLocationIds(req.admin);
@@ -185,7 +195,7 @@ async function orderInScope(req, orderId) {
  */
 async function companyInScope(req, companyId) {
     const role = req.admin.role;
-    if (role === 'super_admin' || role === 'order_manager') return true;
+    if (role === 'super_admin' || isHeadOffice(role)) return true;
 
     if (role === 'order_desk') {
         const ids = await staffLocationIds(req.admin);
@@ -204,5 +214,6 @@ async function companyInScope(req, companyId) {
 
 module.exports = {
     branchLocationIds, staffBranchIds, staffCompanyIds, staffLocationIds,
-    orderScopeIds, applyOrderScope, orderInScope, companyInScope
+    orderScopeIds, applyOrderScope, orderInScope, companyInScope,
+    HEAD_OFFICE_ROLES, isHeadOffice
 };

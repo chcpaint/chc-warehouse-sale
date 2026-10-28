@@ -10,7 +10,7 @@ const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/uplo
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed, sendOrderStatusUpdate, sendOrderNoteAdded } = require('../utils/email');
-const { orderScopeIds, applyOrderScope, orderInScope, staffLocationIds } = require('../utils/order-scope');
+const { orderScopeIds, applyOrderScope, orderInScope, staffLocationIds, isHeadOffice } = require('../utils/order-scope');
 const { redactSecrets } = require('../utils/audit');
 const { ALL_STATUSES, statusOptionsFor, labelFor, isSimplified } = require('../utils/order-status');
 const { hidePricingEnabled } = require('../utils/pricing-visibility');
@@ -51,7 +51,7 @@ router.use('/companies/:companyId/catalog-image', requireCompanyAccess, require(
 const { makePeopleRouter } = require('./people-activity');
 function requirePeopleRead(req, res, next) {
     const role = req.admin && req.admin.role;
-    if (role === 'super_admin' || role === 'order_manager') return next();
+    if (role === 'super_admin' || isHeadOffice(role)) return next();
     if (role === 'admin' && req.admin.company_id === req.params.companyId) return next();
     return res.status(403).json({ error: 'Your account cannot view this customer\'s people and activity.' });
 }
@@ -117,7 +117,7 @@ router.get('/notes/inbox', async (req, res) => {
             const companyIds = [...new Set((locs || []).map(l => l.company_id))];
             if (!companyIds.length) return res.json({ notes: [], unread_count: 0 });
             query = query.in('company_id', companyIds);
-        } else if (role !== 'super_admin' && role !== 'order_manager') {
+        } else if (role !== 'super_admin' && !isHeadOffice(role)) {
             query = query.eq('company_id', req.admin.company_id);
         }
 
@@ -255,14 +255,19 @@ router.get('/stats', async (req, res) => {
  */
 router.get('/companies', async (req, res) => {
     try {
+        // A sales director picks a customer to add items to; they get the list
+        // but not the settings / email configuration behind it.
+        const salesDirector = req.admin.role === 'sales_director';
         let query = supabaseAdmin
             .from('companies')
-            .select('id, name, slug, logo_url, contact_email, email_config, settings, is_active, created_at, updated_at')
+            .select(salesDirector
+                ? 'id, name, slug, logo_url, is_active, created_at, updated_at'
+                : 'id, name, slug, logo_url, contact_email, email_config, settings, is_active, created_at, updated_at')
             .order('name');
 
         if (req.distributor) query = query.eq('distributor_id', req.distributor.id);
 
-        if (req.admin.role !== 'super_admin') {
+        if (req.admin.role !== 'super_admin' && !salesDirector) {
             query = query.eq('id', req.admin.company_id);
         }
 
@@ -1156,7 +1161,10 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         const ext = req.file.originalname.split('.').pop().toLowerCase();
         // Preview mode (dry run): analyze and report, write nothing.
         const dryRun = ['1', 'true', 'yes'].includes(String(req.body.dry_run || req.query.preview || '').toLowerCase());
-        const mode = String(req.body.mode || 'merge').toLowerCase() === 'replace' ? 'replace' : 'merge';
+        // A sales director adds and updates items; replacing a customer's whole
+        // catalog is a full-admin action.
+        const salesDirector = req.admin.role === 'sales_director';
+        const mode = !salesDirector && String(req.body.mode || 'merge').toLowerCase() === 'replace' ? 'replace' : 'merge';
         // PPG LIST-PRICE RULE
         //
         // PPG prices are not per customer: one list price applies everywhere.
@@ -1171,7 +1179,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         // are the same part here as they are everywhere else.
         //
         // unlock_ppg still lets an admin upload a deliberate exception.
-        const unlockPPG = ['1','true','yes'].includes(String(req.body.unlock_ppg || '').toLowerCase());
+        const unlockPPG = !salesDirector && ['1','true','yes'].includes(String(req.body.unlock_ppg || '').toLowerCase());
         const masterPPG = {};
         {
             for (let from = 0; ; from += 1000) {

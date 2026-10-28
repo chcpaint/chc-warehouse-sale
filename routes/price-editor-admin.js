@@ -60,7 +60,7 @@ const { priceVerdict } = require('../utils/price-rules');
 const router = express.Router();
 
 const MAX_PRICE = 1000000;
-const PRICE_EDIT_ROLES = ['super_admin', 'admin', 'order_manager'];
+const PRICE_EDIT_ROLES = ['super_admin', 'admin', 'order_manager', 'sales_director'];
 const PPG_UNLOCK_ROLES = ['super_admin', 'admin'];
 
 function canEditPrices(admin) {
