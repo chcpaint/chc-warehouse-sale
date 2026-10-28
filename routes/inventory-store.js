@@ -21,7 +21,7 @@ const { stripHtml, isValidUUID } = require('../utils/sanitize');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendOrderNotification } = require('../utils/email');
 const { notifyReorderRaised } = require('../utils/inventory-alerts');
-const { deliveryFeeSettings, computeDeliveryFee } = require('../utils/delivery-fee');
+const { resolveFees, loadFeeRules } = require('../utils/fee-rules');
 const {
     STORE_MOVEMENT_TYPES,
     MOVEMENT_TYPES,
@@ -1011,7 +1011,11 @@ router.post('/replenishment/:id/approve', async (req, res) => {
         // has never charged it (a pre-existing gap, not this feature's to fix).
         const { data: feeCompany } = await supabaseAdmin
             .from('companies').select('settings').eq('id', companyId).maybeSingle();
-        const deliveryFee = computeDeliveryFee(subtotal, deliveryFeeSettings(feeCompany?.settings).enabled);
+        // Same fee rules a hand-placed order gets (utils/fee-rules.js). A replenishment
+        // is approved by a person without a user group, so only company-wide rules apply.
+        const feeRules = await loadFeeRules(supabaseAdmin, companyId);
+        const fees = resolveFees({ subtotal, rules: feeRules, settings: feeCompany?.settings, groupId: null });
+        const deliveryFee = fees.delivery_fee;
 
         const notes = text(req.body?.notes, 500);
         const orderNotes = [`refinishAI Inventory replenishment, approved by ${actor}`, notes].filter(Boolean).join(' — ');
@@ -1030,7 +1034,9 @@ router.post('/replenishment/:id/approve', async (req, res) => {
                 items,
                 subtotal,
                 delivery_fee: deliveryFee,
-                total: subtotal + deliveryFee,
+                fuel_surcharge: fees.fuel_surcharge,
+                fee_lines: fees.lines,
+                total: Math.round((subtotal + fees.total) * 100) / 100,
                 notes: orderNotes,
                 status: 'pending',
                 status_history: [{

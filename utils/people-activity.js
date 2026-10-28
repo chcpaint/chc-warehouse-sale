@@ -462,7 +462,7 @@ async function resolveOrderingUser(companyId, tokenUser) {
     }
     return {
         ok: true,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, group_name: user.company_user_groups?.name || null }
+        user: { id: user.id, name: user.name, email: user.email, role: user.role, group_id: user.group_id || null, group_name: user.company_user_groups?.name || null }
     };
 }
 

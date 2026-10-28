@@ -1071,8 +1071,9 @@
                                     <input type="checkbox" id="delivery-fee-checkbox" onchange="onDeliveryFeeToggle(this)"
                                            class="w-4 h-4 rounded border-gray-300 text-blue-600">
                                     <i class="fas fa-truck text-gray-400"></i>
-                                    <span class="text-gray-600">$10 fee under $300</span>
+                                    <span id="delivery-fee-label" class="text-gray-600">$10 fee under $300</span>
                                 </label>
+                                <button id="delivery-fee-manage" type="button" class="hidden text-xs text-blue-700 hover:underline ml-1">Fees &amp; rebates</button>
                             </div>
                         </div>
                         <div class="flex gap-2 items-center flex-wrap">
@@ -1164,6 +1165,7 @@
                     <div class="flex gap-1 mb-4 border-b" role="tablist">
                         <button id="rep-tab-orders" role="tab" onclick="repShowTab('orders')" class="px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700">Orders &amp; dollars</button>
                         <button id="rep-tab-adopt" role="tab" onclick="repShowTab('adopt')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Weekly adoption</button>
+                        <button id="rep-tab-rebate" role="tab" onclick="repShowTab('rebate')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Rebates</button>
                     </div>
                     <div id="rep-orders-pane">
                     <div class="flex flex-wrap gap-3 items-end mb-4">
@@ -1250,6 +1252,33 @@
                         </table></div>
                     </div>
                     </div><!-- /rep-orders-pane -->
+
+                    <div id="rep-rebate-pane" class="hidden">
+                        <div class="flex flex-wrap gap-3 items-end mb-3">
+                            <div>
+                                <label for="rebate-period" class="block text-xs font-semibold text-gray-500 mb-1">Period</label>
+                                <select id="rebate-period" onchange="rebateReportLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="this_month">This month</option>
+                                    <option value="last_month">Last month</option>
+                                    <option value="this_quarter">This quarter</option>
+                                    <option value="this_year" selected>This year</option>
+                                    <option value="last_year">Last year</option>
+                                    <option value="all">All time</option>
+                                </select>
+                            </div>
+                            <div class="ml-auto"><button onclick="rebateReportCSV()" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Rebates CSV</button></div>
+                        </div>
+                        <p class="text-xs text-gray-400 mb-3">Rebates earned by every company that has one set up, on item dollars before tax. Set them per company with the % button on the Companies screen. These are amounts owed, tracked here &mdash; nothing is taken off orders.</p>
+                        <div id="rebate-report-summary" class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4"></div>
+                        <div class="bg-white rounded-xl shadow-sm border overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                                <th class="text-left px-4 py-2">Company</th><th class="text-left px-4 py-2">Period</th><th class="text-left px-4 py-2">Rebate</th>
+                                <th class="text-right px-4 py-2">Orders</th><th class="text-right px-4 py-2">Eligible spend</th><th class="text-right px-4 py-2">Rate</th>
+                                <th class="text-right px-4 py-2">Rebate earned</th><th class="text-left px-4 py-2">Status</th>
+                            </tr></thead>
+                            <tbody id="rebate-report-body"></tbody>
+                        </table></div></div>
+                    </div>
 
                     <div id="rep-adopt-pane" class="hidden">
                         <div class="flex flex-wrap gap-3 items-end mb-3">
@@ -1518,6 +1547,37 @@
             <!-- Locations list -->
             <div id="locations-list" class="space-y-2">
                 <p class="text-center text-gray-400 py-4">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fees & rebates modal -->
+    <div id="fees-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-percent text-emerald-600 mr-2"></i> Fees &amp; rebates &mdash; <span id="fees-company-name"></span></h3>
+                <button onclick="hideModal('fees-modal')" class="text-gray-400 hover:text-gray-600" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <p id="fees-readonly-note" class="hidden text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">You can look at these rules but only an admin can change them.</p>
+
+            <div class="mt-3">
+                <div class="flex justify-between items-center mb-1">
+                    <h4 class="font-bold text-gray-800"><i class="fas fa-truck text-blue-500 mr-2"></i>Delivery fee &amp; fuel surcharge</h4>
+                    <button id="fee-add-btn" onclick="feeEdit(null)" class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm"><i class="fas fa-plus mr-1"></i>Add a fee</button>
+                </div>
+                <p id="fee-mode-note" class="text-sm text-gray-500 mb-3"></p>
+                <div id="fee-rules-list" class="space-y-2"></div>
+                <div id="fee-form" class="hidden mt-3 border rounded-xl p-4 bg-gray-50"></div>
+            </div>
+
+            <div class="mt-6 pt-5 border-t">
+                <div class="flex justify-between items-center mb-1">
+                    <h4 class="font-bold text-gray-800"><i class="fas fa-piggy-bank text-green-600 mr-2"></i>Rebates</h4>
+                    <button id="rebate-add-btn" onclick="rebateEdit(null)" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-plus mr-1"></i>Add a rebate</button>
+                </div>
+                <p class="text-sm text-gray-500 mb-3">A percent of what this company spends, worked out on item dollars before tax. It is tracked in reporting for CHC and for the customer; it is never taken off an order. Where two rebates cover the same item, the higher percent is used for that item.</p>
+                <div id="rebate-rules-list" class="space-y-2"></div>
+                <div id="rebate-form" class="hidden mt-3 border rounded-xl p-4 bg-gray-50"></div>
             </div>
         </div>
     </div>
@@ -2481,13 +2541,56 @@
     // ============================================================
     function repShowTab(which) {
         const adopt = which === 'adopt';
-        document.getElementById('rep-orders-pane').classList.toggle('hidden', adopt);
+        const rebate = which === 'rebate';
+        document.getElementById('rep-orders-pane').classList.toggle('hidden', adopt || rebate);
         document.getElementById('rep-adopt-pane').classList.toggle('hidden', !adopt);
+        document.getElementById('rep-rebate-pane').classList.toggle('hidden', !rebate);
         const on = 'px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700';
         const off = 'px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700';
-        document.getElementById('rep-tab-orders').className = adopt ? off : on;
+        document.getElementById('rep-tab-orders').className = (adopt || rebate) ? off : on;
         document.getElementById('rep-tab-adopt').className = adopt ? on : off;
+        document.getElementById('rep-tab-rebate').className = rebate ? on : off;
         if (adopt) adoptLoad();
+        if (rebate) rebateReportLoad();
+    }
+
+    let rebateReportData = null;
+    async function rebateReportLoad() {
+        const body = document.getElementById('rebate-report-body');
+        const sum = document.getElementById('rebate-report-summary');
+        const { from, to, label } = arPeriodRange(document.getElementById('rebate-period').value);
+        const params = new URLSearchParams();
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        body.innerHTML = '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        try {
+            const resp = await adminFetch(`/reports/rebates?${params}`);
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || 'Failed to load.');
+            rebateReportData = d;
+            const rows = [];
+            d.companies.forEach(c => c.rows.forEach(r => rows.push({ company: c.name, ...r })));
+            sum.innerHTML = [['Companies with a rebate', d.companies.length], ['Eligible spend', '$' + Number(d.totals.eligible_spend).toFixed(2)], ['Rebate earned', '$' + Number(d.totals.rebate).toFixed(2)]].map(c => `
+                <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-gray-400 uppercase">${c[0]}</p><p class="text-2xl font-bold text-gray-800 mt-1">${c[1]}</p></div>`).join('');
+            body.innerHTML = rows.length ? rows.map(r => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-2 font-medium">${escA(r.company)}</td><td class="px-4 py-2">${escA(r.period_label)}</td><td class="px-4 py-2">${escA(r.label)}</td>
+                    <td class="px-4 py-2 text-right">${r.orders}</td><td class="px-4 py-2 text-right">$${Number(r.eligible_spend).toFixed(2)}</td>
+                    <td class="px-4 py-2 text-right">${Number(r.percent)}%</td><td class="px-4 py-2 text-right font-semibold text-green-700">$${Number(r.rebate).toFixed(2)}</td>
+                    <td class="px-4 py-2 text-xs ${r.complete ? 'text-gray-500' : 'text-amber-600'}">${r.complete ? 'Period complete' : 'In progress'}</td>
+                </tr>`).join('') : `<tr><td colspan="8" class="px-4 py-6 text-center text-gray-400">${d.companies.length ? 'No eligible purchases in ' + escA(label) + '.' : 'No company has a rebate set up yet.'}</td></tr>`;
+        } catch (e) {
+            sum.innerHTML = '';
+            body.innerHTML = `<tr><td colspan="8" class="px-4 py-6 text-center text-red-500">${escA(e.message || 'Failed to load.')}</td></tr>`;
+        }
+    }
+    function rebateReportCSV() {
+        if (!rebateReportData) return;
+        const cell = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+        const rows = [['Company', 'Period', 'Rebate', 'Frequency', 'Orders', 'Eligible spend', 'Rate %', 'Rebate earned', 'Status']];
+        rebateReportData.companies.forEach(c => c.rows.forEach(r => rows.push([c.name, r.period_label, r.label, r.frequency, r.orders, Number(r.eligible_spend).toFixed(2), r.percent, Number(r.rebate).toFixed(2), r.complete ? 'Period complete' : 'In progress'])));
+        const blob = new Blob([rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'CHC-rebates.csv'; a.click(); URL.revokeObjectURL(a.href);
     }
     function adoptParams() {
         const p = new URLSearchParams();
@@ -3851,6 +3954,7 @@
                     <button onclick="editNotificationEmail('${c.id}', '${esc(c.contact_email || '').replace(/'/g, "\\'")}')" class="text-orange-500 hover:text-orange-700 text-sm mr-3" title="Change company contact email"><i class="fas fa-envelope"></i></button>
                     <button onclick="manageManagerEmails('${c.id}', '${esc((c.email_config?.manager_emails || []).join(', ')).replace(/'/g, "\\'")}')" class="text-purple-500 hover:text-purple-700 text-sm mr-3" title="Manager / general group emails (${(c.email_config?.manager_emails || []).length})"><i class="fas fa-users"></i></button>
                     <button onclick="openEmailRecipients('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-teal-600 hover:text-teal-800 text-sm mr-3" title="Email recipients — company, per-location & branch"><i class="fas fa-envelope-open-text"></i></button>
+                    <button onclick="openFeesModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-emerald-600 hover:text-emerald-800 text-sm mr-3" title="Delivery fee, fuel surcharge &amp; rebate rules"><i class="fas fa-percent"></i></button>
                     <button onclick="openModulesModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.inventory?.enabled ? 'text-green-600 hover:text-green-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Modules this customer has"><i class="fas fa-boxes-stacked"></i></button>
                     <button onclick="openKitsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.inventory?.enabled ? 'text-indigo-500 hover:text-indigo-700' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Repair kits"><i class="fas fa-boxes-packing"></i></button>
                     <button onclick="openCompanyUsers('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.users?.enabled ? 'text-amber-600 hover:text-amber-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Customer users (who can order)"><i class="fas fa-users"></i></button>
@@ -4027,6 +4131,280 @@
         } catch (err) {
             alert('Failed to change that module.');
         }
+    }
+
+
+    // ============================================================
+    // FEES & REBATES (per company)
+    //
+    // Delivery fee / fuel surcharge rules and rebate rules, edited per company.
+    // The rules live in company_fee_rules / company_rebate_rules (migration 047)
+    // and are applied by utils/fee-rules.js (orders) and utils/rebates.js
+    // (reporting). Writes are for admin / super admin only; everyone else sees
+    // the rules read-only.
+    // ============================================================
+    // Safe in text AND in a quoted attribute (esc() above does not escape quotes).
+    function escA(t) {
+        return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    let feesCompanyId = null;
+    let feesData = null;
+
+    async function openFeesModal(companyId, companyName) {
+        feesCompanyId = companyId;
+        document.getElementById('fees-company-name').textContent = companyName || '';
+        document.getElementById('fee-form').classList.add('hidden');
+        document.getElementById('rebate-form').classList.add('hidden');
+        showModal('fees-modal');
+        await feesLoad();
+    }
+
+    async function feesLoad() {
+        const feeHost = document.getElementById('fee-rules-list');
+        const rebHost = document.getElementById('rebate-rules-list');
+        feeHost.innerHTML = rebHost.innerHTML = '<p class="text-center text-gray-400 py-3">Loading...</p>';
+        try {
+            const resp = await adminFetch(`/companies/${feesCompanyId}/fees-rebates`);
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || 'Failed to load.');
+            feesData = d;
+            document.getElementById('fees-readonly-note').classList.toggle('hidden', !!d.can_manage);
+            document.getElementById('fee-add-btn').classList.toggle('hidden', !d.can_manage);
+            document.getElementById('rebate-add-btn').classList.toggle('hidden', !d.can_manage);
+            feesRender();
+        } catch (err) {
+            feeHost.innerHTML = `<p class="text-center text-red-600 py-3">${escA(err.message)}</p>`;
+            rebHost.innerHTML = '';
+        }
+    }
+
+    const FEE_COND = { always: 'on every order', below: 'on orders under', at_or_above: 'on orders of' };
+    function feeRuleSummary(r) {
+        const amt = r.calc === 'percent' ? `${Number(r.amount)}% of the order` : `$${Number(r.amount).toFixed(2)} per order`;
+        const cond = r.condition === 'always' ? 'on every order'
+            : r.condition === 'below' ? `on orders under $${Number(r.threshold).toFixed(2)}`
+            : `on orders of $${Number(r.threshold).toFixed(2)} or more`;
+        const grp = (r.group_ids || []).length
+            ? 'for ' + r.group_ids.map(id => ((feesData.groups || []).find(g => g.id === id) || {}).name || 'a removed group').join(', ')
+            : 'for everyone';
+        return `${amt}, ${cond}, ${grp}`;
+    }
+
+    function feesRender() {
+        const d = feesData; const can = d.can_manage;
+        const note = document.getElementById('fee-mode-note');
+        if (d.fee_mode === 'legacy') {
+            note.innerHTML = d.legacy_delivery_fee_enabled
+                ? 'No rules set up yet, so the standard fee applies: <b>$10 on orders under $300</b>. Add a rule to replace it.'
+                : 'No rules set up yet and the standard $10 fee is <b>turned off</b> for this company, so no fees are charged.';
+        } else {
+            const active = d.fee_rules.filter(r => r.is_active).length;
+            note.textContent = active
+                ? 'These rules decide every fee on this company’s orders. Fees are not taxed.'
+                : 'Every rule is paused, so no fees are charged on this company’s orders.';
+        }
+        const legacyRow = (d.fee_mode === 'legacy' && can) ? `
+            <div class="flex items-center justify-between border rounded-lg px-4 py-3 ${d.legacy_delivery_fee_enabled ? 'bg-white' : 'bg-gray-50'}">
+                <div><p class="font-semibold text-gray-800">Standard delivery fee</p><p class="text-sm text-gray-500">$10.00 per order, on orders under $300.00, for everyone</p></div>
+                <button onclick="feesLegacyToggle(${d.legacy_delivery_fee_enabled ? 'false' : 'true'})" class="px-3 py-1.5 rounded-lg text-sm ${d.legacy_delivery_fee_enabled ? 'border border-red-300 text-red-700 hover:bg-red-50' : 'bg-blue-700 text-white hover:bg-blue-800'}">${d.legacy_delivery_fee_enabled ? 'Turn off' : 'Turn on'}</button>
+            </div>` : '';
+        document.getElementById('fee-rules-list').innerHTML = legacyRow + d.fee_rules.map(r => `
+            <div class="flex items-center justify-between gap-3 border rounded-lg px-4 py-3 ${r.is_active ? 'bg-white' : 'bg-gray-50 opacity-70'}">
+                <div class="min-w-0">
+                    <p class="font-semibold text-gray-800">${escA(r.label)}
+                        <span class="ml-1 text-xs rounded px-2 py-0.5 ${r.kind === 'fuel' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}">${r.kind === 'fuel' ? 'Fuel surcharge' : 'Delivery fee'}</span>
+                        ${r.is_active ? '' : '<span class="ml-1 text-xs bg-gray-200 text-gray-600 rounded px-2 py-0.5">Paused</span>'}</p>
+                    <p class="text-sm text-gray-500">${escA(feeRuleSummary(r))}</p>
+                </div>
+                ${can ? `<div class="flex gap-3 text-sm whitespace-nowrap">
+                    <button onclick="feeToggleActive('${r.id}', ${r.is_active ? 'false' : 'true'})" class="text-gray-500 hover:text-gray-800">${r.is_active ? 'Pause' : 'Resume'}</button>
+                    <button onclick="feeEdit('${r.id}')" class="text-blue-700 hover:underline">Edit</button>
+                    <button onclick="feeDelete('${r.id}')" class="text-red-600 hover:underline">Delete</button>
+                </div>` : ''}
+            </div>`).join('') || (legacyRow ? '' : '<p class="text-sm text-gray-400">No fees.</p>');
+
+        document.getElementById('rebate-rules-list').innerHTML = d.rebate_rules.map(r => {
+            const scope = r.applies_to === 'selected'
+                ? [(r.categories || []).length ? 'categories: ' + r.categories.join(', ') : '', (r.brands || []).length ? 'brands: ' + r.brands.join(', ') : ''].filter(Boolean).join('; ')
+                : 'all items purchased';
+            const dates = (r.starts_on || r.ends_on) ? ` · ${r.starts_on || 'start'} to ${r.ends_on || 'no end date'}` : '';
+            return `
+            <div class="flex items-center justify-between gap-3 border rounded-lg px-4 py-3 ${r.is_active ? 'bg-white' : 'bg-gray-50 opacity-70'}">
+                <div class="min-w-0">
+                    <p class="font-semibold text-gray-800">${escA(r.label)} <span class="ml-1 text-xs bg-green-100 text-green-800 rounded px-2 py-0.5">${Number(r.percent)}%</span>
+                        ${r.is_active ? '' : '<span class="ml-1 text-xs bg-gray-200 text-gray-600 rounded px-2 py-0.5">Paused</span>'}</p>
+                    <p class="text-sm text-gray-500">${escA(Number(r.percent) + '% of ' + scope + ', paid ' + r.frequency + dates)}</p>
+                </div>
+                ${can ? `<div class="flex gap-3 text-sm whitespace-nowrap">
+                    <button onclick="rebateToggleActive('${r.id}', ${r.is_active ? 'false' : 'true'})" class="text-gray-500 hover:text-gray-800">${r.is_active ? 'Pause' : 'Resume'}</button>
+                    <button onclick="rebateEdit('${r.id}')" class="text-blue-700 hover:underline">Edit</button>
+                    <button onclick="rebateDelete('${r.id}')" class="text-red-600 hover:underline">Delete</button>
+                </div>` : ''}
+            </div>`;
+        }).join('') || '<p class="text-sm text-gray-400">No rebate set up for this company.</p>';
+    }
+
+    async function feesRequest(path, method, body) {
+        const resp = await adminFetch(`/companies/${feesCompanyId}/fees-rebates${path}`, { method, body: body ? JSON.stringify(body) : undefined });
+        const d = await resp.json().catch(() => ({}));
+        if (!resp.ok) { alert(d.error || 'That did not save.'); return null; }
+        return d;
+    }
+
+    async function feesLegacyToggle(enabled) {
+        const resp = await adminFetch(`/companies/${feesCompanyId}/delivery-fee`, { method: 'PUT', body: JSON.stringify({ enabled }) });
+        const d = await resp.json().catch(() => ({}));
+        if (!resp.ok) { alert(d.error || 'That did not save.'); return; }
+        await feesLoad();
+    }
+
+    // ---- fee rule form ----
+    function feeEdit(id) {
+        const r = id ? feesData.fee_rules.find(x => x.id === id) : null;
+        const v = r || { kind: 'delivery', label: '', calc: 'flat', amount: '', condition: 'always', threshold: '', group_ids: [], is_active: true };
+        const groups = feesData.groups || [];
+        const f = document.getElementById('fee-form');
+        f.dataset.id = id || '';
+        f.innerHTML = `
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div><label for="ff-kind" class="block text-xs font-semibold text-gray-500 mb-1">Type</label>
+                    <select id="ff-kind" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        <option value="delivery" ${v.kind === 'delivery' ? 'selected' : ''}>Delivery fee</option>
+                        <option value="fuel" ${v.kind === 'fuel' ? 'selected' : ''}>Fuel surcharge</option></select></div>
+                <div><label for="ff-label" class="block text-xs font-semibold text-gray-500 mb-1">Name on the order (optional)</label>
+                    <input id="ff-label" type="text" maxlength="80" value="${escA(v.label || '')}" placeholder="Delivery fee" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                <div><label for="ff-calc" class="block text-xs font-semibold text-gray-500 mb-1">How it is charged</label>
+                    <select id="ff-calc" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        <option value="flat" ${v.calc === 'flat' ? 'selected' : ''}>Flat dollar amount per order</option>
+                        <option value="percent" ${v.calc === 'percent' ? 'selected' : ''}>Percent of the order</option></select></div>
+                <div><label for="ff-amount" class="block text-xs font-semibold text-gray-500 mb-1">Amount ($ or %)</label>
+                    <input id="ff-amount" type="number" min="0" step="0.01" value="${escA(v.amount)}" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                <div><label for="ff-cond" class="block text-xs font-semibold text-gray-500 mb-1">When it applies</label>
+                    <select id="ff-cond" onchange="feeFormCond()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        <option value="always" ${v.condition === 'always' ? 'selected' : ''}>Every order</option>
+                        <option value="below" ${v.condition === 'below' ? 'selected' : ''}>Only orders below a dollar amount</option>
+                        <option value="at_or_above" ${v.condition === 'at_or_above' ? 'selected' : ''}>Only orders at or above a dollar amount</option></select></div>
+                <div id="ff-thr-wrap"><label for="ff-thr" class="block text-xs font-semibold text-gray-500 mb-1">Order amount ($, before tax)</label>
+                    <input id="ff-thr" type="number" min="0" step="0.01" value="${escA(v.threshold == null ? '' : v.threshold)}" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+            </div>
+            <div class="mt-3"><p class="block text-xs font-semibold text-gray-500 mb-1">Who is charged</p>
+                <label class="flex items-center gap-2 text-sm mb-1"><input type="radio" name="ff-who" value="all" ${(v.group_ids || []).length ? '' : 'checked'} onchange="feeFormWho()"> Everyone ordering for this company</label>
+                <label class="flex items-center gap-2 text-sm"><input type="radio" name="ff-who" value="groups" ${(v.group_ids || []).length ? 'checked' : ''} onchange="feeFormWho()" ${groups.length ? '' : 'disabled'}> Only certain user groups${groups.length ? '' : ' (this company has no user groups yet)'}</label>
+                <div id="ff-groups" class="${(v.group_ids || []).length ? '' : 'hidden'} flex flex-wrap gap-3 mt-2 ml-6">
+                    ${groups.map(g => `<label class="flex items-center gap-1.5 text-sm"><input type="checkbox" class="ff-group" value="${escA(g.id)}" ${(v.group_ids || []).includes(g.id) ? 'checked' : ''}> ${escA(g.name)}</label>`).join('')}
+                </div></div>
+            <div class="flex gap-2 mt-4">
+                <button onclick="feeSave()" class="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm">Save fee</button>
+                <button onclick="document.getElementById('fee-form').classList.add('hidden')" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-white">Cancel</button>
+            </div>`;
+        f.classList.remove('hidden');
+        feeFormCond();
+    }
+    function feeFormCond() {
+        document.getElementById('ff-thr-wrap').classList.toggle('hidden', document.getElementById('ff-cond').value === 'always');
+    }
+    function feeFormWho() {
+        const groups = document.querySelector('input[name="ff-who"]:checked').value === 'groups';
+        document.getElementById('ff-groups').classList.toggle('hidden', !groups);
+    }
+    async function feeSave() {
+        const f = document.getElementById('fee-form'); const id = f.dataset.id;
+        const cond = document.getElementById('ff-cond').value;
+        const groupsOn = document.querySelector('input[name="ff-who"]:checked').value === 'groups';
+        const group_ids = groupsOn ? [...document.querySelectorAll('.ff-group:checked')].map(c => c.value) : [];
+        if (groupsOn && !group_ids.length) { alert('Tick at least one user group, or choose Everyone.'); return; }
+        const existing = id ? feesData.fee_rules.find(x => x.id === id) : null;
+        const body = {
+            kind: document.getElementById('ff-kind').value,
+            label: document.getElementById('ff-label').value.trim(),
+            calc: document.getElementById('ff-calc').value,
+            amount: document.getElementById('ff-amount').value,
+            condition: cond,
+            threshold: cond === 'always' ? null : document.getElementById('ff-thr').value,
+            group_ids,
+            is_active: existing ? existing.is_active : true
+        };
+        const d = await feesRequest(id ? `/fee-rules/${id}` : '/fee-rules', id ? 'PUT' : 'POST', body);
+        if (d) { f.classList.add('hidden'); await feesLoad(); }
+    }
+    async function feeToggleActive(id, active) {
+        const r = feesData.fee_rules.find(x => x.id === id); if (!r) return;
+        const d = await feesRequest(`/fee-rules/${id}`, 'PUT', { ...r, is_active: active });
+        if (d) await feesLoad();
+    }
+    async function feeDelete(id) {
+        if (!confirm('Delete this fee? Orders already placed keep what they were charged.')) return;
+        const d = await feesRequest(`/fee-rules/${id}`, 'DELETE');
+        if (d) await feesLoad();
+    }
+
+    // ---- rebate form ----
+    function rebateEdit(id) {
+        const r = id ? feesData.rebate_rules.find(x => x.id === id) : null;
+        const v = r || { label: 'Rebate', percent: '', applies_to: 'all', categories: [], brands: [], frequency: 'monthly', starts_on: '', ends_on: '', is_active: true };
+        const f = document.getElementById('rebate-form');
+        f.dataset.id = id || '';
+        const chk = (cls, list, picked) => (list.length
+            ? list.map(x => `<label class="flex items-center gap-1.5 text-sm"><input type="checkbox" class="${cls}" value="${escA(x)}" ${picked.includes(x) ? 'checked' : ''}> ${escA(x)}</label>`).join('')
+            : '<span class="text-sm text-gray-400">None on file.</span>');
+        f.innerHTML = `
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div><label for="rf-label" class="block text-xs font-semibold text-gray-500 mb-1">Name</label>
+                    <input id="rf-label" type="text" maxlength="80" value="${escA(v.label)}" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                <div><label for="rf-percent" class="block text-xs font-semibold text-gray-500 mb-1">Rebate percent</label>
+                    <input id="rf-percent" type="number" min="0" max="100" step="0.01" value="${escA(v.percent)}" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                <div><label for="rf-freq" class="block text-xs font-semibold text-gray-500 mb-1">Paid</label>
+                    <select id="rf-freq" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        ${['monthly', 'quarterly', 'annual'].map(x => `<option value="${x}" ${v.frequency === x ? 'selected' : ''}>${x[0].toUpperCase() + x.slice(1)}</option>`).join('')}</select></div>
+                <div><label for="rf-applies" class="block text-xs font-semibold text-gray-500 mb-1">Applies to</label>
+                    <select id="rf-applies" onchange="rebateFormScope()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        <option value="all" ${v.applies_to === 'all' ? 'selected' : ''}>All items purchased</option>
+                        <option value="selected" ${v.applies_to === 'selected' ? 'selected' : ''}>Selected categories and/or brands</option></select></div>
+                <div><label for="rf-from" class="block text-xs font-semibold text-gray-500 mb-1">Starts (optional)</label>
+                    <input id="rf-from" type="date" value="${escA(v.starts_on || '')}" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                <div><label for="rf-to" class="block text-xs font-semibold text-gray-500 mb-1">Ends (optional)</label>
+                    <input id="rf-to" type="date" value="${escA(v.ends_on || '')}" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+            </div>
+            <div id="rf-scope" class="${v.applies_to === 'selected' ? '' : 'hidden'} mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><p class="text-xs font-semibold text-gray-500 mb-1">Categories</p><div class="flex flex-wrap gap-x-4 gap-y-1 max-h-32 overflow-y-auto">${chk('rf-cat', feesData.categories || [], v.categories || [])}</div></div>
+                <div><p class="text-xs font-semibold text-gray-500 mb-1">Brands</p><div class="flex flex-wrap gap-x-4 gap-y-1 max-h-32 overflow-y-auto">${chk('rf-brand', feesData.brands || [], v.brands || [])}</div></div>
+            </div>
+            <div class="flex gap-2 mt-4">
+                <button onclick="rebateSave()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm">Save rebate</button>
+                <button onclick="document.getElementById('rebate-form').classList.add('hidden')" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-white">Cancel</button>
+            </div>`;
+        f.classList.remove('hidden');
+    }
+    function rebateFormScope() {
+        document.getElementById('rf-scope').classList.toggle('hidden', document.getElementById('rf-applies').value !== 'selected');
+    }
+    async function rebateSave() {
+        const f = document.getElementById('rebate-form'); const id = f.dataset.id;
+        const applies = document.getElementById('rf-applies').value;
+        const existing = id ? feesData.rebate_rules.find(x => x.id === id) : null;
+        const body = {
+            label: document.getElementById('rf-label').value.trim(),
+            percent: document.getElementById('rf-percent').value,
+            frequency: document.getElementById('rf-freq').value,
+            applies_to: applies,
+            categories: applies === 'selected' ? [...document.querySelectorAll('.rf-cat:checked')].map(c => c.value) : [],
+            brands: applies === 'selected' ? [...document.querySelectorAll('.rf-brand:checked')].map(c => c.value) : [],
+            starts_on: document.getElementById('rf-from').value || null,
+            ends_on: document.getElementById('rf-to').value || null,
+            is_active: existing ? existing.is_active : true
+        };
+        const d = await feesRequest(id ? `/rebate-rules/${id}` : '/rebate-rules', id ? 'PUT' : 'POST', body);
+        if (d) { f.classList.add('hidden'); await feesLoad(); }
+    }
+    async function rebateToggleActive(id, active) {
+        const r = feesData.rebate_rules.find(x => x.id === id); if (!r) return;
+        const d = await feesRequest(`/rebate-rules/${id}`, 'PUT', { ...r, is_active: active });
+        if (d) await feesLoad();
+    }
+    async function rebateDelete(id) {
+        if (!confirm('Delete this rebate? It will disappear from reporting for this company.')) return;
+        const d = await feesRequest(`/rebate-rules/${id}`, 'DELETE');
+        if (d) await feesLoad();
     }
 
     // ============================================================
@@ -6869,9 +7247,26 @@
             if (!resp.ok) { wrap.classList.add('hidden'); wrap.classList.remove('flex'); return; }
             const d = await resp.json();
             const cb = document.getElementById('delivery-fee-checkbox');
+            const label = document.getElementById('delivery-fee-label');
+            const manage = document.getElementById('delivery-fee-manage');
             cb.checked = !!d.enabled;
-            cb.disabled = !d.can_manage;
             cb.dataset.companyId = companyId;
+            if (d.managed_by_rules) {
+                // This company has its own fee rules: the old switch no longer does anything,
+                // so show what is happening and point at where to change it.
+                cb.disabled = true;
+                label.textContent = d.active_rule_count ? `${d.active_rule_count} fee rule${d.active_rule_count === 1 ? '' : 's'} active` : 'No fees (rules paused)';
+                wrap.title = 'This company has its own fee rules. Change them under Fees & rebates.';
+                manage.classList.remove('hidden');
+                manage.onclick = () => openFeesModal(companyId, d.company?.name || '');
+                wrap.classList.remove('opacity-60');
+                wrap.classList.remove('hidden');
+                wrap.classList.add('flex');
+                return;
+            }
+            label.textContent = '$10 fee under $300';
+            manage.classList.add('hidden');
+            cb.disabled = !d.can_manage;
             wrap.title = d.can_manage
                 ? `Orders under $${Number(d.threshold).toFixed(2)} add a $${Number(d.fee).toFixed(2)} delivery fee for ${d.company?.name || 'this account'} unless turned off here.`
                 : `Only a branch manager or admin can change this. Orders under $${Number(d.threshold).toFixed(2)} add a $${Number(d.fee).toFixed(2)} delivery fee.`;
@@ -6883,6 +7278,15 @@
             wrap.classList.add('hidden');
             wrap.classList.remove('flex');
         }
+    }
+
+    // Fee lines of an order: the itemised list when it has one, else the older delivery_fee column.
+    function orderFeeLinesAdmin(o) {
+        if (Array.isArray(o.fee_lines) && o.fee_lines.length) return o.fee_lines.filter(l => Number(l.amount) > 0);
+        const out = [];
+        if (Number(o.delivery_fee) > 0) out.push({ label: 'Delivery fee', amount: Number(o.delivery_fee) });
+        if (Number(o.fuel_surcharge) > 0) out.push({ label: 'Fuel surcharge', amount: Number(o.fuel_surcharge) });
+        return out;
     }
 
     async function onDeliveryFeeToggle(checkbox) {
@@ -6980,7 +7384,7 @@
                 <td class="px-4 py-3 text-right font-semibold align-top">
                     $${parseFloat(o.total).toFixed(2)}
                     ${Number(o.tax) > 0 ? `<div class="text-xs font-normal text-gray-400" title="Subtotal $${parseFloat(o.subtotal).toFixed(2)} + tax">+ $${parseFloat(o.tax).toFixed(2)} tax${o.tax_rate ? ` (${(Number(o.tax_rate) * 100).toFixed(0)}%)` : ''}</div>` : ''}
-                    ${Number(o.delivery_fee) > 0 ? `<div class="text-xs font-normal text-gray-400" title="Order was under $300 when placed">+ $${parseFloat(o.delivery_fee).toFixed(2)} delivery</div>` : ''}
+                    ${orderFeeLinesAdmin(o).map(l => `<div class="text-xs font-normal text-gray-400">+ $${Number(l.amount).toFixed(2)} ${escA(String(l.label).toLowerCase())}</div>`).join('')}
                 </td>
                 <td class="px-4 py-3 align-top">
                     <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold border ${st.color}">${st.label}</span>

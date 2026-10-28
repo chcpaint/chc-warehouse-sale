@@ -49,6 +49,8 @@ const KNOWN_COLUMNS = {
         'handled_by', 'handled_by_name', 'handled_at',
         // The flat delivery fee on an order under $300 — see utils/delivery-fee.js.
         'delivery_fee',
+        // Added by migration 047: itemised fee rules + fuel surcharge.
+        'fuel_surcharge', 'fee_lines',
         // Added by migration 038: CHC's simplified-status "Partial Shipment
         // with Backorder" flag on out_on_delivery, a running notes/messages
         // log distinct from the original checkout `notes`, and who adjusted

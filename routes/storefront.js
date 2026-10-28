@@ -5,7 +5,8 @@ const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
 const { sendOrderNotification, sendOrderNoteAdded, sendContactNote } = require('../utils/email');
 const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
 const { taxSettings, computeTax } = require('../utils/tax');
-const { deliveryFeeSettings, computeDeliveryFee, THRESHOLD, FEE } = require('../utils/delivery-fee');
+const { resolveFees, loadFeeRules, groupIdForUser, publicRulesFor, feeLinesOf } = require('../utils/fee-rules');
+const { rebateReportFor } = require('../utils/rebates');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
 const { resolveOrderRecipients } = require('../utils/recipients');
@@ -678,7 +679,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         const productIds = items.map(i => i.product_id);
         const { data: products } = await supabaseAdmin
             .from('products')
-            .select('id, name, sku, price, case_qty, category, price_on_request')
+            .select('id, name, sku, price, case_qty, category, brand, price_on_request')
             .eq('company_id', companyId)
             .in('id', productIds);
 
@@ -747,6 +748,10 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 product_id: product.id,
                 name: product.name,
                 sku: product.sku,
+                // Frozen so a rebate on a category or brand still counts this line
+                // the way it was filed when it was bought, if the product is edited later.
+                brand: product.brand || null,
+                category: product.category || null,
                 quantity: qty,
                 unit_price: effectivePrice,
                 was_promo: !!promoPrice,
@@ -770,8 +775,18 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         // Same priced subtotal, same reasoning as tax: a price-on-request
         // line can't push an order over the $300 threshold any more than it
         // can be taxed, because nobody knows its price yet.
-        const deliveryFee = computeDeliveryFee(subtotal, deliveryFeeSettings(poCompany?.settings).enabled);
-        const total = subtotal + tax + deliveryFee;
+        //
+        // The company's fee rules (delivery fee, fuel surcharge) decide what is charged. A company
+        // with no rules keeps the old $10-under-$300 setting. A rule can be limited to user groups;
+        // the shared access code has no group, so group rules never match it.
+        const fees = resolveFees({
+            subtotal,
+            rules: await loadFeeRules(supabaseAdmin, companyId),
+            settings: poCompany?.settings,
+            groupId: orderer ? orderer.group_id || null : null
+        });
+        const deliveryFee = fees.delivery_fee;
+        const total = Math.round((subtotal + tax + fees.total) * 100) / 100;
 
         // ------------------------------------------------------------------
         // Allocate the PO number LAST, immediately before the insert.
@@ -828,6 +843,8 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 tax,
                 tax_rate: resolvedTax.rate,
                 delivery_fee: deliveryFee,
+                fuel_surcharge: fees.fuel_surcharge,
+                fee_lines: fees.lines,
                 total,
                 notes: stripHtml(notes || ''),
                 status: 'pending',
@@ -848,6 +865,14 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         }
 
         let { data: order, error } = await supabaseAdmin.from('orders').insert(orderRow).select().single();
+
+        // Migration 047 adds fuel_surcharge and fee_lines. Until it has been applied, place the
+        // order without them (the delivery fee column still carries any delivery fee) rather than refuse it.
+        if (error && /fuel_surcharge|fee_lines/i.test(error.message || '')) {
+            console.error('Order placed without itemised fees -- apply migration 047:', error.message);
+            delete orderRow.fuel_surcharge; delete orderRow.fee_lines;
+            ({ data: order, error } = await supabaseAdmin.from('orders').insert(orderRow).select().single());
+        }
 
         // Migration 045 adds those three columns. If it has not been applied to
         // this database yet, place the order without them rather than refuse it
@@ -932,6 +957,8 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 tax: order.tax,
                 tax_rate: order.tax_rate,
                 delivery_fee: order.delivery_fee,
+                fuel_surcharge: order.fuel_surcharge || 0,
+                fee_lines: feeLinesOf(order),
                 total: order.total,
                 status: order.status,
                 created_at: order.created_at
@@ -950,12 +977,15 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
  */
 router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
-        const { data: orders, error } = await supabaseAdmin
-            .from('orders')
-            .select('id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, is_partial_shipment, backorder_items, notes, notes_log, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at')
-            .eq('company_id', req.company.id)
-            .order('created_at', { ascending: false })
-            .limit(50);
+        const historyCols = 'id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, is_partial_shipment, backorder_items, notes, notes_log, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at';
+        const readHistory = (cols) => supabaseAdmin.from('orders').select(cols)
+            .eq('company_id', req.company.id).order('created_at', { ascending: false }).limit(50);
+        // fuel_surcharge / fee_lines arrive with migration 047; until then history reads without them.
+        let { data: orders, error } = await readHistory(historyCols + ', fuel_surcharge, fee_lines');
+        if (error && /fuel_surcharge|fee_lines/i.test(error.message || '')) {
+            ({ data: orders, error } = await readHistory(historyCols));
+        }
+        if (orders) orders = orders.map(o => ({ ...o, fee_lines: feeLinesOf(o) }));
 
         if (error) {
             console.error('Orders fetch error:', error);
@@ -1343,12 +1373,58 @@ router.get('/:slug/delivery-fee/config', requireCompanyAuth, async (req, res) =>
     try {
         const { data: company } = await supabaseAdmin
             .from('companies').select('settings').eq('id', req.company.id).maybeSingle();
-
-        const settings = deliveryFeeSettings(company?.settings);
-        res.json({ enabled: settings.enabled, threshold: THRESHOLD, fee: FEE });
+        const rules = await loadFeeRules(supabaseAdmin, req.company.id);
+        const groupId = req.companyUser ? await groupIdForUser(supabaseAdmin, req.companyUser.id) : null;
+        const publicRules = publicRulesFor({ rules, settings: company?.settings, groupId });
+        // `enabled/threshold/fee` are kept for any older page still open; `rules` is what the cart uses.
+        const legacy = publicRules.find(r => r.kind === 'delivery' && r.calc === 'flat' && r.condition === 'below');
+        res.json({
+            rules: publicRules,
+            enabled: !!legacy, threshold: legacy ? legacy.threshold : 0, fee: legacy ? legacy.amount : 0
+        });
     } catch (err) {
         console.error('Delivery fee config error:', err);
         res.status(500).json({ error: 'Failed to load delivery fee settings.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/reports/rebate?from=ISO&to=ISO&location_id=
+ * What this company has earned in rebates, by rule and period. Nothing at all
+ * (has_rebate: false) when the company has no rebate rules, so a company without
+ * a rebate never sees the section. Follows the same rules as the other reports:
+ * hidden when pricing is hidden, closed to the shared code when reports are
+ * restricted, and narrowed to a person's own location when they have one.
+ */
+router.get('/:slug/reports/rebate', requireCompanyAuth, async (req, res) => {
+    try {
+        let { location_id, from, to } = req.query;
+        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', req.company.id).maybeSingle();
+        const settings = company && company.settings;
+        if (moduleEnabled(settings, 'restricted_reports')) {
+            if (!req.companyUser) {
+                return res.status(403).json({ error: 'Reports are available to people with their own account. Please sign in with your account.', code: 'reports_need_account' });
+            }
+            if (req.companyUser.location_id) location_id = req.companyUser.location_id;
+        }
+        if (hidePricingEnabled(settings)) return res.json({ has_rebate: false, rows: [], totals: { eligible_spend: 0, rebate: 0 } });
+
+        const report = await rebateReportFor(supabaseAdmin, {
+            companyId: req.company.id, from, to, locationId: location_id || null
+        });
+        if (!report.rules.length) return res.json({ has_rebate: false, rows: [], totals: { eligible_spend: 0, rebate: 0 } });
+        res.json({
+            has_rebate: true,
+            rules: report.rules.filter(r => r.is_active !== false).map(r => ({
+                label: r.label, percent: Number(r.percent), applies_to: r.applies_to, categories: r.categories || [], brands: r.brands || [],
+                frequency: r.frequency, starts_on: r.starts_on, ends_on: r.ends_on
+            })),
+            rows: report.rows,
+            totals: report.totals
+        });
+    } catch (err) {
+        console.error('Rebate report error:', err);
+        res.status(500).json({ error: 'Failed to load the rebate report.' });
     }
 });
 
