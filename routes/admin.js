@@ -17,6 +17,9 @@ const { hidePricingEnabled } = require('../utils/pricing-visibility');
 const { computeTax } = require('../utils/tax');
 const { resolveFees, loadFeeRules, groupIdForUser } = require('../utils/fee-rules');
 const { rebateReportFor } = require('../utils/rebates');
+const { optionalImage, checkImageUpload } = require('../utils/image-upload');
+const { PromotionImageError, storePromotionImage, removePromotionImage, missingImageColumns } = require('../utils/promotion-images');
+const crypto = require('crypto');
 
 const router = express.Router();
 
@@ -145,6 +148,8 @@ router.use('/companies/:companyId/modules', require('./modules-admin'));
 router.use('/companies/:companyId/po', require('./po-admin'));
 router.use('/companies/:companyId/notes', require('./contact-notes-admin'));
 router.use('/companies/:companyId/tax', require('./tax-admin'));
+router.use('/distributor-tax', require('./distributor-tax-admin'));
+router.use('/billing', require('./billing-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));
 // Delivery-fee / fuel-surcharge rules and rebate rules, per company.
 router.use('/companies/:companyId/fees-rebates', require('./fee-rules-admin'));
@@ -1405,10 +1410,15 @@ router.get('/promotions', async (req, res) => {
 
 /**
  * POST /api/admin/promotions
+ *
+ * JSON, or multipart/form-data with the same fields plus an optional picture in
+ * the field "image" (PNG, JPEG, GIF or WEBP, up to 3 MB) shown on the store's
+ * Promotions tab next to the item and its price.
  */
-router.post('/promotions', async (req, res) => {
+router.post('/promotions', optionalImage('image'), async (req, res) => {
+    let uploaded = null;
     try {
-        const promo = sanitizeObject(req.body);
+        const promo = sanitizeObject(req.body || {});
 
         if (!promo.product_id || !promo.promo_price || !promo.starts_at || !promo.ends_at) {
             return res.status(400).json({ error: 'Product, promotional price, start date, and end date are required.' });
@@ -1419,30 +1429,51 @@ router.post('/promotions', async (req, res) => {
             promo.company_id = req.admin.company_id;
         }
 
+        const promoId = crypto.randomUUID();
+        const row = {
+            id: promoId,
+            company_id: promo.company_id || null, // null = global
+            product_id: promo.product_id,
+            promo_price: parseFloat(promo.promo_price),
+            promo_label: promo.promo_label || null,
+            description: promo.description || null,
+            starts_at: promo.starts_at,
+            ends_at: promo.ends_at,
+            is_active: true
+        };
+
+        // Check and store the picture first, so a bad file stops the whole create
+        // rather than leaving a promotion that silently has no picture.
+        if (req.file) {
+            const check = checkImageUpload(req.file);
+            if (!check.ok) return res.status(400).json({ error: check.error });
+            uploaded = await storePromotionImage(supabaseAdmin, promoId, req.file, check);
+            row.image_url = uploaded.url;
+            row.image_path = uploaded.path;
+        }
+
         const { data, error } = await supabaseAdmin
             .from('promotions')
-            .insert({
-                company_id: promo.company_id || null, // null = global
-                product_id: promo.product_id,
-                promo_price: parseFloat(promo.promo_price),
-                promo_label: promo.promo_label || null,
-                description: promo.description || null,
-                starts_at: promo.starts_at,
-                ends_at: promo.ends_at,
-                is_active: true
-            })
+            .insert(row)
             .select(`*, products (id, name, sku, brand, price)`)
             .single();
 
-        if (error) throw error;
+        if (error) {
+            await removePromotionImage(supabaseAdmin, uploaded && uploaded.path);
+            if (uploaded && missingImageColumns(error)) {
+                return res.status(409).json({ error: 'Promotion pictures are not set up yet. Run migration 048_promotion_images.sql in Supabase, then try again.' });
+            }
+            throw error;
+        }
 
         await logAction(req.admin.id, 'promotion_created', 'promotion', data.id, {
-            product: promo.product_id, promo_price: promo.promo_price
+            product: promo.product_id, promo_price: promo.promo_price, image: !!uploaded
         }, req.ip);
 
         res.status(201).json({ promotion: data });
 
     } catch (err) {
+        if (err instanceof PromotionImageError) return res.status(err.status).json({ error: err.message });
         console.error('Create promotion error:', err);
         res.status(500).json({ error: 'Failed to create promotion.' });
     }
@@ -1450,25 +1481,48 @@ router.post('/promotions', async (req, res) => {
 
 /**
  * PUT /api/admin/promotions/:promotionId
+ *
+ * JSON or multipart. A picture in the field "image" replaces the current one;
+ * remove_image=true takes it off.
  */
-router.put('/promotions/:promotionId', async (req, res) => {
+router.put('/promotions/:promotionId', optionalImage('image'), async (req, res) => {
+    let uploaded = null;
     try {
         // Authorization: verify admin has access to this promotion
-        const { data: existing } = await supabaseAdmin
-            .from('promotions').select('id, company_id').eq('id', req.params.promotionId).single();
+        let { data: existing, error: exErr } = await supabaseAdmin
+            .from('promotions').select('id, company_id, image_path').eq('id', req.params.promotionId).maybeSingle();
+        if (exErr && missingImageColumns(exErr)) {
+            ({ data: existing } = await supabaseAdmin
+                .from('promotions').select('id, company_id').eq('id', req.params.promotionId).maybeSingle());
+        }
         if (!existing) return res.status(404).json({ error: 'Promotion not found.' });
         if (req.admin.role !== 'super_admin' && existing.company_id !== req.admin.company_id) {
             return res.status(403).json({ error: 'Access denied for this promotion.' });
         }
 
-        const updates = sanitizeObject(req.body);
+        const updates = sanitizeObject(req.body || {});
         const allowedFields = ['promo_price', 'promo_label', 'description', 'starts_at', 'ends_at', 'is_active'];
         const filtered = {};
         for (const key of allowedFields) {
             if (updates[key] !== undefined) filtered[key] = updates[key];
         }
+        // multipart sends everything as text
+        if (typeof filtered.is_active === 'string') filtered.is_active = filtered.is_active === 'true';
 
         if (filtered.promo_price) filtered.promo_price = parseFloat(filtered.promo_price);
+
+        if (req.file) {
+            const check = checkImageUpload(req.file);
+            if (!check.ok) return res.status(400).json({ error: check.error });
+            uploaded = await storePromotionImage(supabaseAdmin, existing.id, req.file, check);
+            filtered.image_url = uploaded.url;
+            filtered.image_path = uploaded.path;
+        } else if (updates.remove_image === true || updates.remove_image === 'true') {
+            filtered.image_url = null;
+            filtered.image_path = null;
+        }
+
+        if (!Object.keys(filtered).length) return res.status(400).json({ error: 'Nothing to change.' });
 
         const { data, error } = await supabaseAdmin
             .from('promotions')
@@ -1477,12 +1531,25 @@ router.put('/promotions/:promotionId', async (req, res) => {
             .select()
             .single();
 
-        if (error) throw error;
+        if (error) {
+            await removePromotionImage(supabaseAdmin, uploaded && uploaded.path);
+            if (missingImageColumns(error)) {
+                return res.status(409).json({ error: 'Promotion pictures are not set up yet. Run migration 048_promotion_images.sql in Supabase, then try again.' });
+            }
+            throw error;
+        }
 
-        await logAction(req.admin.id, 'promotion_updated', 'promotion', data.id, filtered, req.ip);
+        // The old picture is only deleted once the row no longer points at it.
+        if ((uploaded || filtered.image_path === null) && existing.image_path && existing.image_path !== filtered.image_path) {
+            await removePromotionImage(supabaseAdmin, existing.image_path);
+        }
+
+        await logAction(req.admin.id, 'promotion_updated', 'promotion', data.id,
+            { ...filtered, image_url: undefined, image_path: undefined, image: uploaded ? 'replaced' : (filtered.image_path === null ? 'removed' : undefined) }, req.ip);
         res.json({ promotion: data });
 
     } catch (err) {
+        if (err instanceof PromotionImageError) return res.status(err.status).json({ error: err.message });
         console.error('Update promotion error:', err);
         res.status(500).json({ error: 'Failed to update promotion.' });
     }
@@ -1494,8 +1561,12 @@ router.put('/promotions/:promotionId', async (req, res) => {
 router.delete('/promotions/:promotionId', async (req, res) => {
     try {
         // Authorization: verify admin has access to this promotion
-        const { data: existing } = await supabaseAdmin
-            .from('promotions').select('id, company_id').eq('id', req.params.promotionId).single();
+        let { data: existing, error: exErr } = await supabaseAdmin
+            .from('promotions').select('id, company_id, image_path').eq('id', req.params.promotionId).maybeSingle();
+        if (exErr && missingImageColumns(exErr)) {
+            ({ data: existing } = await supabaseAdmin
+                .from('promotions').select('id, company_id').eq('id', req.params.promotionId).maybeSingle());
+        }
         if (!existing) return res.status(404).json({ error: 'Promotion not found.' });
         if (req.admin.role !== 'super_admin' && existing.company_id !== req.admin.company_id) {
             return res.status(403).json({ error: 'Access denied for this promotion.' });
@@ -1508,6 +1579,7 @@ router.delete('/promotions/:promotionId', async (req, res) => {
 
         if (error) throw error;
 
+        await removePromotionImage(supabaseAdmin, existing.image_path);
         await logAction(req.admin.id, 'promotion_deleted', 'promotion', req.params.promotionId, {}, req.ip);
         res.json({ message: 'Promotion deleted.' });
 

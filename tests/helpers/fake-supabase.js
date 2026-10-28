@@ -682,6 +682,34 @@ function createFakeSupabase(seed = {}) {
         }
     };
 
+    // In-memory Storage, enough for upload / remove / public URL. Set
+    // client.__storageFail to a message to make the next uploads fail.
+    client.__storage = {};
+    client.__storageFail = null;
+    client.storage = {
+        from(bucket) {
+            const files = () => (client.__storage[bucket] = client.__storage[bucket] || {});
+            return {
+                async upload(path, body, opts = {}) {
+                    if (client.__storageFail) return { data: null, error: { message: client.__storageFail } };
+                    files()[path] = { body, contentType: opts.contentType || null };
+                    return { data: { path }, error: null };
+                },
+                async remove(paths) {
+                    for (const p of paths || []) delete files()[p];
+                    return { data: paths, error: null };
+                },
+                getPublicUrl(path) {
+                    return { data: { publicUrl: `https://storage.example.invalid/${bucket}/${path}` } };
+                },
+                async createSignedUrl(path) {
+                    return { data: { signedUrl: `https://storage.example.invalid/signed/${bucket}/${path}` }, error: null };
+                },
+                async list() { return { data: Object.keys(files()).map(name => ({ name })), error: null }; }
+            };
+        }
+    };
+
     return client;
 }
 

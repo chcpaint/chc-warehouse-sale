@@ -86,6 +86,9 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
         } else if (event.type === 'payment_intent.payment_failed') {
             await supabaseAdmin.from('orders').update({ payment_status: 'failed' })
                 .eq('payment_intent_id', event.data.object.id);
+        } else if (event.type === 'checkout.session.completed' || event.type.startsWith('customer.subscription.')) {
+            // Console subscriptions (utils/billing-db.js). Idempotent per event id.
+            await require('./utils/billing-db').handleStripeEvent(supabaseAdmin, event);
         }
         res.json({ received: true });
     } catch (err) {
