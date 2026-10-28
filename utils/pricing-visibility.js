@@ -49,6 +49,8 @@ function stripOrderPricing(order) {
         tax: null,
         tax_rate: null,
         delivery_fee: null,
+        fuel_surcharge: null,
+        fee_lines: [],
         total: null,
         pricing_hidden: true
     };

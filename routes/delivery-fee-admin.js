@@ -21,6 +21,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { deliveryFeeSettings, THRESHOLD, FEE } = require('../utils/delivery-fee');
+const { loadFeeRules } = require('../utils/fee-rules');
 
 const router = express.Router({ mergeParams: true });
 
@@ -66,9 +67,15 @@ router.get('/', async (req, res) => {
         if (!company) return res.status(404).json({ error: 'Company not found.' });
 
         const settings = deliveryFeeSettings(company.settings);
+        // Once a company has fee rules (Company > Fees & rebates) they decide
+        // everything and this old on/off switch no longer does anything.
+        const rules = await loadFeeRules(supabaseAdmin, companyId);
+        const managedByRules = rules.length > 0;
         res.json({
             company: { id: company.id, name: company.name },
-            enabled: settings.enabled,
+            managed_by_rules: managedByRules,
+            active_rule_count: rules.filter(r => r.is_active).length,
+            enabled: managedByRules ? rules.some(r => r.is_active) : settings.enabled,
             threshold: THRESHOLD,
             fee: FEE,
             can_manage: canManageDeliveryFee(req.admin)
@@ -95,6 +102,14 @@ router.put('/', async (req, res) => {
         const { data: company } = await supabaseAdmin
             .from('companies').select('id, name, settings').eq('id', companyId).maybeSingle();
         if (!company) return res.status(404).json({ error: 'Company not found.' });
+
+        const rules = await loadFeeRules(supabaseAdmin, companyId);
+        if (rules.length) {
+            return res.status(409).json({
+                error: `${company.name} has its own fee rules, so this switch no longer applies. Change them under Companies > Fees & rebates.`,
+                managed_by_rules: true
+            });
+        }
 
         const enabled = req.body.enabled;
         const settings = {

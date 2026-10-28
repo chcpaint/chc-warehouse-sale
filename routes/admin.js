@@ -15,7 +15,8 @@ const { redactSecrets } = require('../utils/audit');
 const { ALL_STATUSES, statusOptionsFor, labelFor, isSimplified } = require('../utils/order-status');
 const { hidePricingEnabled } = require('../utils/pricing-visibility');
 const { computeTax } = require('../utils/tax');
-const { deliveryFeeSettings, computeDeliveryFee } = require('../utils/delivery-fee');
+const { resolveFees, loadFeeRules, groupIdForUser } = require('../utils/fee-rules');
+const { rebateReportFor } = require('../utils/rebates');
 
 const router = express.Router();
 
@@ -145,6 +146,8 @@ router.use('/companies/:companyId/po', require('./po-admin'));
 router.use('/companies/:companyId/notes', require('./contact-notes-admin'));
 router.use('/companies/:companyId/tax', require('./tax-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));
+// Delivery-fee / fuel-surcharge rules and rebate rules, per company.
+router.use('/companies/:companyId/fees-rebates', require('./fee-rules-admin'));
 // Per-customer, per-item price editor. Its own role gate (super_admin, company
 // admin, order_manager) and the matching ORDER_DESK_ALLOW entries in
 // middleware/auth.js -- see the header of the route file.
@@ -1569,19 +1572,24 @@ router.get('/orders', async (req, res) => {
 router.get('/orders/export', async (req, res) => {
     try {
         const { company_id, status, from_date, to_date, location_id } = req.query;
-        let query = supabaseAdmin
-            .from('orders')
-            .select('order_number, created_at, company_name, location, po_number, contact_name, contact_email, contact_phone, status, subtotal, tax, tax_rate, delivery_fee, total, items, companies(name), company_locations(name)')
-            .order('created_at', { ascending: false });
-
         const _scopeIds = await orderScopeIds(req);
-        query = applyOrderScope(query, req, _scopeIds, company_id);
-        if (status) query = query.eq('status', status);
-        if (location_id) query = query.eq('location_id', location_id);
-        if (from_date) query = query.gte('created_at', from_date);
-        if (to_date) query = query.lte('created_at', to_date);
-
-        const { data, error } = await query.limit(10000);
+        const baseCols = 'order_number, created_at, company_name, location, po_number, contact_name, contact_email, contact_phone, status, subtotal, tax, tax_rate, delivery_fee, total, items, companies(name), company_locations(name)';
+        const build = (cols) => {
+            let q = supabaseAdmin.from('orders').select(cols).order('created_at', { ascending: false });
+            q = applyOrderScope(q, req, _scopeIds, company_id);
+            if (status) q = q.eq('status', status);
+            if (location_id) q = q.eq('location_id', location_id);
+            if (from_date) q = q.gte('created_at', from_date);
+            if (to_date) q = q.lte('created_at', to_date);
+            return q.limit(10000);
+        };
+        // fuel_surcharge arrives with migration 047; until it is applied the export simply has no such column.
+        let { data, error } = await build(baseCols + ', fuel_surcharge');
+        let hasFuel = true;
+        if (error && /fuel_surcharge/i.test(error.message || '')) {
+            hasFuel = false;
+            ({ data, error } = await build(baseCols));
+        }
         if (error) throw error;
 
         const esc = (v) => {
@@ -1589,13 +1597,13 @@ router.get('/orders/export', async (req, res) => {
             v = String(v);
             return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
         };
-        const headers = ['Order #', 'Date', 'Company', 'Location', 'PO Number', 'Contact', 'Email', 'Phone', 'Status', 'Item Count', 'Subtotal', 'Tax', 'Tax Rate', 'Delivery Fee', 'Total'];
+        const headers = ['Order #', 'Date', 'Company', 'Location', 'PO Number', 'Contact', 'Email', 'Phone', 'Status', 'Item Count', 'Subtotal', 'Tax', 'Tax Rate', 'Delivery Fee', ...(hasFuel ? ['Fuel Surcharge'] : []), 'Total'];
         const rows = (data || []).map(o => {
             const itemCount = Array.isArray(o.items) ? o.items.reduce((n, i) => n + (parseInt(i.quantity) || 0), 0) : '';
             const locName = (o.company_locations && o.company_locations.name) || o.location || '';
             const compName = (o.companies && o.companies.name) || o.company_name || '';
             const taxRatePct = (o.tax_rate === null || o.tax_rate === undefined) ? '' : `${(Number(o.tax_rate) * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
-            return [o.order_number, o.created_at, compName, locName, o.po_number, o.contact_name, o.contact_email, o.contact_phone, o.status, itemCount, o.subtotal, o.tax, taxRatePct, o.delivery_fee, o.total].map(esc).join(',');
+            return [o.order_number, o.created_at, compName, locName, o.po_number, o.contact_name, o.contact_email, o.contact_phone, o.status, itemCount, o.subtotal, o.tax, taxRatePct, o.delivery_fee, ...(hasFuel ? [o.fuel_surcharge] : []), o.total].map(esc).join(',');
         });
         const csvText = [headers.map(esc).join(','), ...rows].join('\n');
 
@@ -1605,6 +1613,46 @@ router.get('/orders/export', async (req, res) => {
     } catch (err) {
         console.error('Orders export error:', err);
         res.status(500).json({ error: 'Failed to export orders.' });
+    }
+});
+
+/**
+ * GET /api/admin/reports/rebates?from=ISO&to=ISO
+ * Every company that has rebate rules, with what it has earned by rule and period.
+ * Account-wide commercial terms, so super admin only (order-desk is refused by the
+ * allow-list in middleware/auth.js).
+ */
+router.get('/reports/rebates', requireSuperAdmin, async (req, res) => {
+    try {
+        const { from, to } = req.query;
+        const { data: ruleRows, error } = await supabaseAdmin
+            .from('company_rebate_rules').select('company_id').eq('is_active', true);
+        if (error) {
+            if (/company_rebate_rules|relation .* does not exist|schema cache/i.test(error.message || '')) {
+                return res.json({ companies: [], totals: { eligible_spend: 0, rebate: 0 } });
+            }
+            throw error;
+        }
+        const ids = [...new Set((ruleRows || []).map(r => r.company_id))];
+        const { data: companies } = ids.length
+            ? await supabaseAdmin.from('companies').select('id, name').in('id', ids).order('name')
+            : { data: [] };
+        const out = [];
+        for (const c of companies || []) {
+            const r = await rebateReportFor(supabaseAdmin, { companyId: c.id, from, to });
+            out.push({ company_id: c.id, name: c.name, rows: r.rows, totals: r.totals });
+        }
+        const round = n => Math.round(n * 100) / 100;
+        res.json({
+            companies: out,
+            totals: {
+                eligible_spend: round(out.reduce((s, c) => s + c.totals.eligible_spend, 0)),
+                rebate: round(out.reduce((s, c) => s + c.totals.rebate, 0))
+            }
+        });
+    } catch (err) {
+        console.error('Rebates report error:', err);
+        res.status(500).json({ error: 'Failed to build the rebate report.' });
     }
 });
 
@@ -1931,7 +1979,7 @@ router.put('/companies/:companyId/orders/:orderId/items', requireOrderAccess, as
 
         const { data: order, error: oErr } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, company_id, location_id, contact_email, status, tax_rate, status_history')
+            .select('id, order_number, company_id, location_id, contact_email, status, tax_rate, status_history, placed_by_user_id')
             .eq('id', orderId).eq('company_id', companyId).single();
         if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
 
@@ -1956,8 +2004,16 @@ router.put('/companies/:companyId/orders/:orderId/items', requireOrderAccess, as
         // Same tax rate the order already carries — pricing edits correct a
         // dollar amount, not the tax jurisdiction the order was placed under.
         const tax = computeTax(subtotal, Number(order.tax_rate) || 0);
-        const deliveryFee = computeDeliveryFee(subtotal, deliveryFeeSettings(company?.settings).enabled);
-        const total = Math.round((subtotal + tax + deliveryFee) * 100) / 100;
+        // Fees are re-evaluated on the new subtotal with the company's rules (or the old
+        // delivery-fee setting when it has none), for the group the order was placed under.
+        const fees = resolveFees({
+            subtotal,
+            rules: await loadFeeRules(supabaseAdmin, companyId),
+            settings: company?.settings,
+            groupId: await groupIdForUser(supabaseAdmin, order.placed_by_user_id)
+        });
+        const deliveryFee = fees.delivery_fee;
+        const total = Math.round((subtotal + tax + fees.total) * 100) / 100;
 
         const now = new Date().toISOString();
         const statusHistory = order.status_history || [];
@@ -1972,7 +2028,7 @@ router.put('/companies/:companyId/orders/:orderId/items', requireOrderAccess, as
             .from('orders')
             .update({
                 items: verifiedItems,
-                subtotal, tax, delivery_fee: deliveryFee, total,
+                subtotal, tax, delivery_fee: deliveryFee, fuel_surcharge: fees.fuel_surcharge, fee_lines: fees.lines, total,
                 price_edited_at: now,
                 price_edited_by: req.admin.id,
                 price_edit_reason: reason || null,
@@ -1983,7 +2039,7 @@ router.put('/companies/:companyId/orders/:orderId/items', requireOrderAccess, as
             .single();
         if (updErr) throw updErr;
 
-        await logAction(req.admin.id, 'order_pricing_edited', 'order', orderId, { reason, subtotal, tax, delivery_fee: deliveryFee, total }, req.ip);
+        await logAction(req.admin.id, 'order_pricing_edited', 'order', orderId, { reason, subtotal, tax, delivery_fee: deliveryFee, fuel_surcharge: fees.fuel_surcharge, total }, req.ip);
 
         res.json({ message: 'Pricing updated.', order: updated });
     } catch (err) {

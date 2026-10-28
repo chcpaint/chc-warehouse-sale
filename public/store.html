@@ -443,10 +443,7 @@
                             <span id="cart-tax-label">Tax:</span>
                             <span id="cart-tax">$0.00</span>
                         </div>
-                        <div id="cart-delivery-fee-row" class="hidden flex justify-between text-sm text-gray-500 mb-1">
-                            <span id="cart-delivery-fee-label">Delivery fee:</span>
-                            <span id="cart-delivery-fee">$0.00</span>
-                        </div>
+                        <div id="cart-fee-rows"></div>
                         <div class="flex justify-between text-xl font-bold mb-4 pt-2 border-t">
                             <span>Total:</span>
                             <span id="cart-total">$0.00</span>
@@ -581,6 +578,32 @@
                 </div>
 
                 <div id="rep-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
+
+                <div id="rep-rebate" class="hidden bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+                    <div class="px-4 py-3 border-b bg-green-50 flex flex-wrap justify-between items-center gap-2">
+                        <span class="font-semibold text-green-800 text-sm"><i class="fas fa-piggy-bank mr-1"></i>Rebate</span>
+                        <span class="flex items-center gap-3">
+                            <span id="rep-rebate-meta" class="text-xs text-green-700"></span>
+                            <button onclick="downloadReportCSV('rebate')" class="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs"><i class="fas fa-file-csv mr-1"></i>CSV</button>
+                        </span>
+                    </div>
+                    <p id="rep-rebate-terms" class="px-4 pt-3 text-sm text-gray-600"></p>
+                    <div class="overflow-x-auto"><table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                            <tr>
+                                <th class="text-left px-4 py-2">Period</th>
+                                <th class="text-left px-4 py-2">Rebate</th>
+                                <th class="text-right px-4 py-2">Orders</th>
+                                <th class="text-right px-4 py-2">Eligible spend</th>
+                                <th class="text-right px-4 py-2">Rate</th>
+                                <th class="text-right px-4 py-2">Rebate earned</th>
+                                <th class="text-left px-4 py-2">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rep-rebate-body"></tbody>
+                    </table></div>
+                    <p class="px-4 py-2 text-xs text-gray-400">Calculated on item dollars before tax. Delivery fees, fuel surcharges and cancelled orders are not included. Items still to be priced count once they are priced.</p>
+                </div>
 
                 <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
                     <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
@@ -1654,6 +1677,7 @@
         if (from) params.set('from', from);
         if (to) params.set('to', to);
         document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        loadRebateReport(params);
         try {
             const resp = await apiFetch(`/store/${state.slug}/reports/orders?${params}`);
             const data = await resp.json();
@@ -1662,6 +1686,50 @@
         } catch (e) {
             document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-red-500">Failed to load report.</td></tr>';
         }
+    }
+
+    // The rebate card is separate from the orders report: it only appears for a
+    // company CHC has set a rebate up for, and a failure here never blanks the
+    // orders report.
+    async function loadRebateReport(params) {
+        const box = document.getElementById('rep-rebate');
+        repState.rebate = null;
+        try {
+            const resp = await apiFetch(`/store/${state.slug}/reports/rebate?${params}`);
+            if (!resp.ok) { box.classList.add('hidden'); return; }
+            const data = await resp.json();
+            if (!data.has_rebate) { box.classList.add('hidden'); return; }
+            repState.rebate = data;
+            renderRebate();
+        } catch (e) { box.classList.add('hidden'); }
+    }
+
+    function rebateScopeText(r) {
+        if (r.applies_to !== 'selected') return 'all items purchased';
+        const parts = [];
+        if ((r.categories || []).length) parts.push('categories: ' + r.categories.join(', '));
+        if ((r.brands || []).length) parts.push('brands: ' + r.brands.join(', '));
+        return parts.join('; ') || 'selected items';
+    }
+
+    function renderRebate() {
+        const d = repState.rebate; const box = document.getElementById('rep-rebate');
+        if (!d) { box.classList.add('hidden'); return; }
+        box.classList.remove('hidden');
+        document.getElementById('rep-rebate-terms').innerHTML = (d.rules || []).map(r =>
+            `<b>${escapeHtml(r.label)}</b>: ${Number(r.percent)}% of ${escapeHtml(rebateScopeText(r))}, paid ${escapeHtml(r.frequency)}.`).join('<br>');
+        document.getElementById('rep-rebate-meta').textContent =
+            `${repState.periodLabel} \u00b7 $${Number(d.totals.rebate).toFixed(2)} earned on $${Number(d.totals.eligible_spend).toFixed(2)}`;
+        document.getElementById('rep-rebate-body').innerHTML = d.rows.length ? d.rows.map(r => `
+            <tr class="border-b">
+                <td class="px-4 py-2">${escapeHtml(r.period_label)}</td>
+                <td class="px-4 py-2">${escapeHtml(r.label)}</td>
+                <td class="px-4 py-2 text-right">${r.orders}</td>
+                <td class="px-4 py-2 text-right">$${Number(r.eligible_spend).toFixed(2)}</td>
+                <td class="px-4 py-2 text-right">${Number(r.percent)}%</td>
+                <td class="px-4 py-2 text-right font-semibold text-green-700">$${Number(r.rebate).toFixed(2)}</td>
+                <td class="px-4 py-2 text-xs ${r.complete ? 'text-gray-500' : 'text-amber-600'}">${r.complete ? 'Period complete' : 'In progress'}</td>
+            </tr>`).join('') : '<tr><td colspan="7" class="px-4 py-4 text-center text-gray-400">No eligible purchases in this range.</td></tr>';
     }
 
     function applyReportFilters() {
@@ -1743,6 +1811,11 @@
             rows = [['SKU', 'Item', 'Qty', 'Orders', 'Spend']];
             repState.items.slice().sort((a, b) => b.spend - a.spend).forEach(i => rows.push([i.sku, i.name, i.qty, i.orders, i.spend.toFixed(2)]));
             name = 'item-summary';
+        } else if (kind === 'rebate') {
+            const d = repState.rebate; if (!d) return;
+            rows = [['Period', 'Rebate', 'Frequency', 'Orders', 'Eligible spend', 'Rate %', 'Rebate earned', 'Status']];
+            d.rows.forEach(r => rows.push([r.period_label, r.label, r.frequency, r.orders, Number(r.eligible_spend).toFixed(2), r.percent, Number(r.rebate).toFixed(2), r.complete ? 'Period complete' : 'In progress']));
+            name = 'rebate';
         } else {
             rows = [['Date', 'Order #', 'Shop', 'PO', 'Ordered by', 'Status', 'Items', 'Total']];
             repState.filteredOrders.forEach(o => rows.push([new Date(o.created_at).toLocaleDateString(), o.order_number, o.location || '', o.po_number || '', o.contact_name || '', o.status || '', (o.items || []).length, parseFloat(o.total).toFixed(2)]));
@@ -2712,9 +2785,8 @@
         // Same story as tax: a preview of what the order route will charge,
         // computed on the same priced subtotal (a quoted line can't push an
         // order past the threshold any more than it can be taxed).
-        const deliveryFeeApplies = deliveryFeeConfig.enabled && total < deliveryFeeConfig.threshold;
-        const deliveryFee = deliveryFeeApplies ? deliveryFeeConfig.fee : 0;
-        const grandTotal = total + tax + deliveryFee;
+        const cartFees = computeCartFees(total);
+        const grandTotal = total + tax + cartFees.total;
 
         document.getElementById('cart-subtotal').textContent = `$${total.toFixed(2)}`;
         const taxRow = document.getElementById('cart-tax-row');
@@ -2724,18 +2796,21 @@
         document.getElementById('cart-tax').textContent = `$${tax.toFixed(2)}`;
         document.getElementById('cart-total').textContent = `$${grandTotal.toFixed(2)}`;
 
-        const feeRow = document.getElementById('cart-delivery-fee-row');
-        if (feeRow) feeRow.classList.toggle('hidden', !deliveryFeeApplies);
-        document.getElementById('cart-delivery-fee').textContent = `$${deliveryFee.toFixed(2)}`;
+        const feeRows = document.getElementById('cart-fee-rows');
+        if (feeRows) feeRows.innerHTML = cartFees.lines.map(l => `
+            <div class="flex justify-between text-sm text-gray-500 mb-1">
+                <span>${escapeHtml(l.label)}:</span>
+                <span>$${l.amount.toFixed(2)}</span>
+            </div>`).join('');
 
         // A quiet nudge, not a warning — telling a shop that $23 more clears
         // the fee is more useful than just showing them a surprise charge at
         // the total.
         const feeNote = document.getElementById('cart-delivery-fee-note');
         if (feeNote) {
-            if (deliveryFeeApplies) {
-                const toGo = deliveryFeeConfig.threshold - total;
-                feeNote.textContent = `Add $${toGo.toFixed(2)} more to clear the $${deliveryFeeConfig.threshold.toFixed(2)} order minimum and avoid the $${deliveryFeeConfig.fee.toFixed(2)} delivery fee.`;
+            const nudge = cartFees.nudge;
+            if (nudge) {
+                feeNote.textContent = `Add $${nudge.toGo.toFixed(2)} more to reach $${nudge.threshold.toFixed(2)} and avoid the $${nudge.amount.toFixed(2)} ${nudge.label.toLowerCase()}.`;
                 feeNote.classList.remove('hidden');
             } else {
                 feeNote.classList.add('hidden');
@@ -2868,7 +2943,42 @@
     // this itself from the same company settings and the real priced
     // subtotal at submit time.
     // ------------------------------------------------------------
-    let deliveryFeeConfig = { enabled: true, threshold: 300, fee: 10 };
+    let deliveryFeeConfig = { rules: [{ kind: 'delivery', label: 'Delivery fee', calc: 'flat', amount: 10, condition: 'below', threshold: 300 }] };
+
+    // The itemised fee lines of a placed order. Older orders only have the
+    // delivery_fee column; newer ones carry fee_lines (and fuel_surcharge).
+    function orderFeeLines(o) {
+        if (!o) return [];
+        if (Array.isArray(o.fee_lines) && o.fee_lines.length) return o.fee_lines.filter(l => Number(l.amount) > 0);
+        const out = [];
+        if (Number(o.delivery_fee) > 0) out.push({ label: 'Delivery fee', amount: Number(o.delivery_fee) });
+        if (Number(o.fuel_surcharge) > 0) out.push({ label: 'Fuel surcharge', amount: Number(o.fuel_surcharge) });
+        return out;
+    }
+
+    // The cart's preview of what utils/fee-rules.js resolveFees() will charge.
+    // `rules` arrives already filtered to this person's user group. Mirrors the
+    // server: percent fees are of the item subtotal, rounded to the cent, and the
+    // "add $X more" nudge only appears for a flat/percent fee that an order under
+    // a threshold pays (a larger order would drop it).
+    function computeCartFees(subtotal) {
+        const rules = Array.isArray(deliveryFeeConfig.rules) ? deliveryFeeConfig.rules : [];
+        const c = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+        const lines = []; let nudge = null;
+        for (const r of rules) {
+            const t = Number(r.threshold);
+            const applies = r.condition === 'below' ? subtotal < t
+                : r.condition === 'at_or_above' ? subtotal >= t : true;
+            if (!applies) continue;
+            const amount = r.calc === 'percent' ? c(subtotal * Number(r.amount) / 100) : c(r.amount);
+            if (!(amount > 0)) continue;
+            lines.push({ kind: r.kind, label: r.label, amount });
+            if (r.condition === 'below' && (!nudge || (t - subtotal) < nudge.toGo)) {
+                nudge = { toGo: c(t - subtotal), threshold: t, amount, label: r.label };
+            }
+        }
+        return { lines, total: c(lines.reduce((s, l) => s + l.amount, 0)), nudge };
+    }
 
     async function loadDeliveryFeeConfig() {
         try {
@@ -2997,7 +3107,7 @@
             columnStyles: { 2:{halign:'center'}, 3:{halign:'right'}, 4:{halign:'right'} }
         });
         const tax = taxConfig.exempt ? 0 : Math.round((total * taxConfig.rate + Number.EPSILON) * 100) / 100;
-        const deliveryFee = (deliveryFeeConfig.enabled && total < deliveryFeeConfig.threshold) ? deliveryFeeConfig.fee : 0;
+        const pdfFees = computeCartFees(total);
         let y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 60) + 8;
         doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(90,90,90);
         doc.text('Subtotal: $' + total.toFixed(2), 140, y);
@@ -3005,13 +3115,13 @@
             y += 6;
             doc.text(`Tax (${(taxConfig.rate * 100).toFixed(0)}%): $` + tax.toFixed(2), 140, y);
         }
-        if (deliveryFee > 0) {
+        pdfFees.lines.forEach(l => {
             y += 6;
-            doc.text(`Delivery fee (order under $${deliveryFeeConfig.threshold.toFixed(2)}): $` + deliveryFee.toFixed(2), 140, y);
-        }
+            doc.text(`${l.label}: $` + l.amount.toFixed(2), 140, y);
+        });
         y += 8;
         doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(20,20,20);
-        doc.text('Total: $' + (total + tax + deliveryFee).toFixed(2), 140, y);
+        doc.text('Total: $' + (total + tax + pdfFees.total).toFixed(2), 140, y);
         doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(120,120,120);
         const closingLine = poConfig.mode === 'off'
             ? 'This is a quote, not an invoice. Prices, and tax, are subject to change and final confirmation. To place the order, return to the store and click "Place Order".'
@@ -3077,7 +3187,7 @@
             if (totalLine) {
                 const parts = [`Subtotal $${Number(data.order.subtotal).toFixed(2)}`];
                 if (Number(data.order.tax) > 0) parts.push(`tax $${Number(data.order.tax).toFixed(2)}`);
-                if (Number(data.order.delivery_fee) > 0) parts.push(`delivery fee $${Number(data.order.delivery_fee).toFixed(2)}`);
+                orderFeeLines(data.order).forEach(l => parts.push(`${l.label.toLowerCase()} $${Number(l.amount).toFixed(2)}`));
                 totalLine.textContent = parts.length > 1
                     ? `${parts.join(' + ')} = $${Number(data.order.total).toFixed(2)}`
                     : `Total: $${Number(data.order.total).toFixed(2)}`;
@@ -3168,7 +3278,7 @@
             <div style="margin-top:15px;text-align:right">
                 <p class="meta" style="margin:2px 0">Subtotal: $${parseFloat(o.subtotal).toFixed(2)}</p>
                 ${Number(o.tax) > 0 ? `<p class="meta" style="margin:2px 0">Tax${o.tax_rate ? ` (${(Number(o.tax_rate) * 100).toFixed(0)}%)` : ''}: $${parseFloat(o.tax).toFixed(2)}</p>` : ''}
-                ${Number(o.delivery_fee) > 0 ? `<p class="meta" style="margin:2px 0">Delivery fee: $${parseFloat(o.delivery_fee).toFixed(2)}</p>` : ''}
+                ${orderFeeLines(o).map(l => `<p class="meta" style="margin:2px 0">${escapeHtml(l.label)}: $${Number(l.amount).toFixed(2)}</p>`).join('')}
                 <p class="total" style="margin-top:6px">Total: $${parseFloat(o.total).toFixed(2)}</p>
             </div>
             <scr` + `ipt>window.onload=function(){window.print();}</scr` + `ipt>
@@ -3189,7 +3299,7 @@
         );
         rows.push(`"${o.order_number}","","","SUBTOTAL","","","${parseFloat(o.subtotal).toFixed(2)}"`);
         if (Number(o.tax) > 0) rows.push(`"${o.order_number}","","","TAX${o.tax_rate ? ` (${(Number(o.tax_rate) * 100).toFixed(0)}%)` : ''}","","","${parseFloat(o.tax).toFixed(2)}"`);
-        if (Number(o.delivery_fee) > 0) rows.push(`"${o.order_number}","","","DELIVERY FEE","","","${parseFloat(o.delivery_fee).toFixed(2)}"`);
+        orderFeeLines(o).forEach(l => rows.push(`"${o.order_number}","","","${String(l.label).toUpperCase().replace(/"/g, '""')}","","","${Number(l.amount).toFixed(2)}"`));
         rows.push(`"${o.order_number}","","","TOTAL","","","${parseFloat(o.total).toFixed(2)}"`);
         const csv = [header, ...rows].join('\n');
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -3317,10 +3427,10 @@
                                         <td colspan="4" class="px-3 py-2 text-right text-gray-500">Tax${o.tax_rate ? ` (${(Number(o.tax_rate) * 100).toFixed(0)}%)` : ''}:</td>
                                         <td class="px-3 py-2 text-right text-gray-500">$${parseFloat(o.tax).toFixed(2)}</td>
                                     </tr>` : ''}
-                                    ${Number(o.delivery_fee) > 0 ? `<tr>
-                                        <td colspan="4" class="px-3 py-2 text-right text-gray-500">Delivery fee:</td>
-                                        <td class="px-3 py-2 text-right text-gray-500">$${parseFloat(o.delivery_fee).toFixed(2)}</td>
-                                    </tr>` : ''}
+                                    ${orderFeeLines(o).map(l => `<tr>
+                                        <td colspan="4" class="px-3 py-2 text-right text-gray-500">${escapeHtml(l.label)}:</td>
+                                        <td class="px-3 py-2 text-right text-gray-500">$${Number(l.amount).toFixed(2)}</td>
+                                    </tr>`).join('')}
                                     <tr>
                                         <td colspan="4" class="px-3 py-2 text-right font-bold">Total:</td>
                                         <td class="px-3 py-2 text-right font-bold text-blue-700">$${parseFloat(o.total).toFixed(2)}</td>
