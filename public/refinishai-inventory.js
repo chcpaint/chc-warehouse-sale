@@ -3145,7 +3145,7 @@
                 <td class="py-2 pr-3 text-right ${line.would_go_negative && !skipped ? 'text-red-600 font-semibold' : 'text-gray-600'}">
                     ${RAI.formatQty(line.on_hand)}
                 </td>
-                <td class="py-2 pr-3 text-right text-gray-700">${RAI.money(qty * line.unit_price)}</td>
+                <td class="inv-kit-cost py-2 pr-3 text-right text-gray-700">${RAI.money(qty * line.unit_price)}</td>
                 <td class="py-2 pr-3 text-center">
                     <input type="checkbox" data-line="${line.kit_item_id}" ${skipped ? '' : 'checked'}
                         onchange="RAI.toggleKitLine('${line.kit_item_id}')"
@@ -3184,6 +3184,12 @@
         const n = Number(value);
         if (!Number.isFinite(n) || n < 0) return;
         RAI.kits.overrides[kitItemId] = n;
+        // Keep the row's own cost in step with the quantity just typed, so the
+        // lines always add up to the total shown beneath them.
+        const line = (RAI.kits.preview?.lines || []).find(l => l.kit_item_id === kitItemId);
+        const box = document.querySelector(`#inv-kit-lines input[type="checkbox"][data-line="${kitItemId}"]`);
+        const cost = box && box.closest('tr') ? box.closest('tr').querySelector('.inv-kit-cost') : null;
+        if (cost && line) cost.textContent = RAI.money(n * line.unit_price);
         RAI.updateKitTotal();
         RAI.updateKitButton();
     };
