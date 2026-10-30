@@ -85,6 +85,13 @@ const KNOWN_COLUMNS = {
         // at consume time, for the billing-backup document.
         'lines_snapshot'
     ]),
+    // Migration 051: Insurance Kit Submissions.
+    kit_submissions: new Set([
+        'id', 'company_id', 'location_id', 'submission_no', 'kit_id', 'kit_name', 'multiplier',
+        'ro_number', 'claim_no', 'insurer', 'vehicle', 'vin', 'notes', 'line_count',
+        'total_amount', 'lines_snapshot', 'status', 'paid_at', 'voided_at', 'void_reason',
+        'created_by_name', 'created_by_user_id', 'created_at', 'updated_at'
+    ]),
     order_receipts: new Set([
         'id', 'company_id', 'order_id', 'location_id', 'product_id', 'sku', 'name',
         'quantity_received', 'quantity_ordered', 'unexpected_item', 'scanned_barcode',
@@ -454,7 +461,7 @@ function createFakeSupabase(seed = {}) {
         inventory_drivers: [],
         inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
         repair_kits: [], kit_items: [], company_kit_access: [],
-        kit_product_map: [], kit_consumptions: [], order_receipts: [],
+        kit_product_map: [], kit_consumptions: [], kit_submissions: [], kit_submission_counters: [], order_receipts: [],
         kit_item_alternatives: [], product_crossover_reference: [],
         scheduler_runs: [], inventory_status: [], company_po_sequences: [],
         // Added by migration 041: multi-branch / multi-company staff assignment.
@@ -502,6 +509,12 @@ function createFakeSupabase(seed = {}) {
             }
             level.on_hand = Math.round((Number(level.on_hand) + Number(row.qty_change)) * 10000) / 10000;
             row.on_hand_after = level.on_hand;
+        }
+
+        // Reproduce kit_submissions_no_key (submission_no is unique platform-wide).
+        if (table === 'kit_submissions') {
+            const clash = (db.kit_submissions || []).find(r => r.submission_no === row.submission_no);
+            if (clash) { const e = new Error('duplicate key value violates unique constraint'); e.code = '23505'; throw e; }
         }
 
         // Reproduce uq_replenishment_open_per_location.
@@ -630,6 +643,25 @@ function createFakeSupabase(seed = {}) {
                     }],
                     error: null
                 };
+            }
+            if (name === 'next_kit_submission_no') {
+                // Mirrors next_kit_submission_no(): a per-company counter whose
+                // prefix is chosen once and made unique across companies. The
+                // row lock that makes the real one safe under concurrency is
+                // not reproducible here; this covers the arithmetic and format.
+                db.kit_submission_counters = db.kit_submission_counters || [];
+                let c = db.kit_submission_counters.find(x => x.company_id === args.p_company);
+                if (!c) {
+                    let base = String(args.p_prefix || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                    if (base.length < 2) base = 'SHOP';
+                    base = base.slice(0, 6);
+                    let prefix = base, n = 0;
+                    while (db.kit_submission_counters.some(x => x.prefix === prefix)) { n += 1; prefix = base + n; }
+                    c = { company_id: args.p_company, prefix, last_no: 0 };
+                    db.kit_submission_counters.push(c);
+                }
+                c.last_no += 1;
+                return { data: `${c.prefix}-${String(c.last_no).padStart(5, '0')}`, error: null };
             }
             if (name === 'search_item_library') {
                 // Mirrors search_item_library(): match on SKU, barcode or every

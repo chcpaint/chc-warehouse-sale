@@ -298,6 +298,10 @@
                         <i class="fas fa-boxes-stacked mr-1"></i> Inventory
                         <span id="inv-low-badge" class="hidden absolute -top-1 -right-1 bg-amber-500 text-white text-xs rounded-full w-5 h-5 items-center justify-center">0</span>
                     </button>
+                    <button onclick="showTab('kitsub')" data-tab="kitsub" id="nav-kitsub"
+                        class="hidden px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-file-invoice-dollar mr-1"></i> Insurance Kits
+                    </button>
                     <button onclick="openShopSafe()" id="nav-shopsafe" title="Opens RefinishAI ShopSafe in a new tab"
                         class="hidden px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
                         <i class="fas fa-shield-halved mr-1"></i> ShopSafe
@@ -651,6 +655,8 @@
 
             <!-- ============ CONTACT TAB ============ -->
             <!-- Plans & billing -->
+            <section id="tab-kitsub" class="hidden fade-in"></section>
+
             <section id="tab-billing" class="hidden fade-in">
                 <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
                     <i class="fas fa-arrow-left mr-1"></i>Back to Products
@@ -1410,6 +1416,9 @@
         { group: 'Inventory', requires: 'inventory', items: [
             { tab: 'inventory',  label: 'Stock on Hand', icon: 'fa-boxes-stacked', badge: 'lowstock' }
         ]},
+        { group: 'Insurance', requires: 'kit_submissions', items: [
+            { tab: 'kitsub',     label: 'Insurance Kits', icon: 'fa-file-invoice-dollar' }
+        ]},
         { group: 'Compliance', requires: 'shopsafe', items: [
             { tab: 'shopsafe',   label: 'ShopSafe',      icon: 'fa-shield-halved' }
         ]},
@@ -1461,6 +1470,10 @@
         }
         if (name === 'shopsafe') {
             const btn = document.getElementById('nav-shopsafe');
+            return !!btn && !btn.classList.contains('hidden');
+        }
+        if (name === 'kit_submissions') {
+            const btn = document.getElementById('nav-kitsub');
             return !!btn && !btn.classList.contains('hidden');
         }
         return true;
@@ -1635,6 +1648,7 @@
         if (tab === 'orders') loadOrders();
         if (tab === 'reports') loadReports();
         if (tab === 'billing') bpLoad();
+        if (tab === 'kitsub' && window.KITSUB) window.KITSUB.show();
         if (tab === 'contact') loadContactNotes();
 
         // Landing back on Products -- from the drawer, "Continue shopping" in
@@ -3717,6 +3731,11 @@
             if (company && company.settings && company.settings.shopsafe && company.settings.shopsafe.enabled) {
                 document.getElementById('nav-shopsafe')?.classList.remove('hidden');
             }
+            // Insurance Kit Submissions stands on its own (no inventory needed),
+            // so it is started before the inventory check can return early.
+            if (company && company.settings && company.settings.kit_submissions && company.settings.kit_submissions.enabled) {
+                initKitSubmissions();
+            }
             const settings = (company && company.settings && company.settings.inventory) || {};
             if (!settings.enabled) return;          // ordering portal only — nothing more loads
 
@@ -3768,6 +3787,31 @@
         } catch (err) {
             if (win) win.close();
             alert(err.message);
+        }
+    }
+
+    async function initKitSubmissions() {
+        try {
+            if (!window.KITSUB) {
+                await new Promise((resolve, reject) => {
+                    const el = document.createElement('script');
+                    el.src = '/kit-submissions.js';
+                    el.onload = resolve;
+                    el.onerror = () => reject(new Error('module failed to load'));
+                    document.head.appendChild(el);
+                });
+            }
+            const ok = window.KITSUB && window.KITSUB.init({
+                apiBase: API_BASE,
+                slug: state.slug,
+                getToken: () => state.token,
+                getUser: () => state.companyUser,
+                getLocation: () => state.location,
+                mount: document.getElementById('tab-kitsub')
+            });
+            if (ok) document.getElementById('nav-kitsub')?.classList.remove('hidden');
+        } catch (err) {
+            console.error('[Insurance kit submissions] unavailable:', err);   // ordering must keep working
         }
     }
 
