@@ -1429,6 +1429,9 @@ router.get('/:slug/reports/rebate', requireCompanyAuth, async (req, res) => {
 
 router.use('/:slug/inventory', require('./inventory-store'));
 
+// Insurance Kit Submissions (the `kit_submissions` module): standalone, no inventory needed.
+router.use('/:slug/kit-submissions', require('./kit-submissions-store'));
+
 // Company-owner management of their own customer users (Customer-users module).
 router.use('/:slug/users', require('./company-users-store'));
 router.use('/:slug/billing', require('./billing-store'));

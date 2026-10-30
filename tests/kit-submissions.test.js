@@ -42,7 +42,13 @@ const stubs = {
         },
         requireAdminAuth: (req, res, next) => { req.admin = authAdmin; next(); },
         requireSuperAdmin: (req, res, next) => next(),
-        requireCompanyAccess: (req, res, next) => { req.admin = authAdmin; next(); }
+        requireCompanyAccess: (req, res, next) => { req.admin = authAdmin; next(); },
+        // Present so the real storefront router can load for the wiring test.
+        requireCompanyUser: (req, res, next) => next(),
+        requireCompanyOwner: (req, res, next) => next(),
+        requireFullAdmin: (req, res, next) => next(),
+        restrictOrderDesk: (req, res, next) => next(),
+        requireOrderAccess: (req, res, next) => next()
     },
     [path.join(ROOT, 'utils/sanitize.js')]: {
         stripHtml: (s) => String(s === undefined || s === null ? '' : s).replace(/<[^>]*>/g, ''),
@@ -453,4 +459,28 @@ test('prefixFor builds recognisable prefixes', () => {
     assert.equal(prefixFor('Prime Time Auto Body'), 'PTAB');
     assert.equal(prefixFor('Acme'), 'ACME');
     assert.equal(prefixFor('!'), 'SHOP');
+});
+
+// ==================================================================
+// WIRING: the real storefront router must actually expose the feature.
+// (Every test above mounts the sub-router directly, which would pass even if
+// routes/storefront.js never mounted it -- exactly the gap this closes.)
+// ==================================================================
+test('the real storefront router serves /:slug/kit-submissions', async () => {
+    reset(); mapKit();
+    const storefront = require('../routes/storefront');
+    const a = express();
+    a.use(express.json());
+    a.use('/api/store', storefront);
+
+    let r = await request(a).get('/api/store/assured/kit-submissions/kits');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.kits.length, 1);
+
+    r = await request(a).post('/api/store/assured/kit-submissions').send(body());
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.match(r.body.submission.submission_no, /^AC-\d{5}$/);
+
+    r = await request(a).get('/api/store/assured/kit-submissions');
+    assert.equal(r.body.total, 1);
 });
