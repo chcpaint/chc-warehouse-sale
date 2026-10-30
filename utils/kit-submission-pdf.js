@@ -10,30 +10,138 @@
  * caller passes in the frozen submission row, which is why a re-download years
  * later is identical to the first.
  *
- * The header logo belongs to the SUPPLIER the shop buys from -- CHC's logo for a
- * CHC customer, another distributor's own logo for a customer on that
+ * The header logo belongs to the SUPPLIER the shop buys from -- the CHC logo
+ * uploaded in the admin console (Branding) for every CHC customer, another distributor's own logo for a customer on that
  * distributor. The shop's name is printed as the submitter.
  */
 
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const PDFDocument = require('pdfkit');
 
 const CHC_LOGO_PATH = path.join(__dirname, '..', 'public', 'assets', 'chc-logo.png');
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const LOGO_TIMEOUT_MS = 4000;
 
+// The CHC logo uploaded under Branding in the admin console (routes/admin.js,
+// POST /branding/logo) -- the same file the sign-in page and the portal show.
+const MASTER_LOGO_BUCKET = 'company-logos';
+const MASTER_LOGO_PATH = 'platform/master-logo.png';
+const MASTER_LOGO_TTL_MS = 60 * 1000;       // short, so a re-upload shows up within a minute
+let masterLogoCache = { at: 0, buf: null };
+
 const INK = '#1f2937';
 const MUTED = '#6b7280';
 const RULE = '#d1d5db';
 const ACCENT = '#1d4ed8';
 
-/** pdfkit embeds PNG and JPEG only; anything else is refused up front. */
+/**
+ * Can pdfkit safely embed these bytes?
+ *
+ * pdfkit takes PNG and JPEG only, and -- the reason this is strict rather than a
+ * look at the first few bytes -- it decodes a PNG's pixel data asynchronously,
+ * so a PNG that has a valid header but a corrupt image stream does not make
+ * doc.image() throw: it throws later, from inside a callback nobody can catch,
+ * and takes the whole server process down. An uploaded logo is outside input, so
+ * every image is proved decodable here before pdfkit ever sees it.
+ */
 function isPngOrJpeg(buf) {
-    if (!buf || buf.length < 4) return false;
-    const png = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    const jpg = buf[0] === 0xff && buf[1] === 0xd8;
-    return png || jpg;
+    if (!buf || buf.length < 12) return false;
+    if (buf[0] === 0xff && buf[1] === 0xd8) return isSaneJpeg(buf);
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return isSanePng(buf);
+    return false;
+}
+
+function isSaneJpeg(buf) {
+    // Walk the markers up to a start-of-frame; anything malformed before it fails.
+    let i = 2;
+    while (i + 4 < buf.length) {
+        if (buf[i] !== 0xff) return false;
+        const marker = buf[i + 1];
+        if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) { i += 2; continue; }
+        if (marker === 0xff) { i += 1; continue; }
+        const len = buf.readUInt16BE(i + 2);
+        if (len < 2) return false;
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+            return i + 9 < buf.length && buf.readUInt16BE(i + 5) > 0 && buf.readUInt16BE(i + 7) > 0;
+        }
+        i += 2 + len;
+    }
+    return false;
+}
+
+function isSanePng(buf) {
+    try {
+        let pos = 8, ihdr = null, sawIend = false;
+        const idat = [];
+        while (pos + 12 <= buf.length) {
+            const len = buf.readUInt32BE(pos);
+            const type = buf.toString('latin1', pos + 4, pos + 8);
+            if (len > buf.length || pos + 12 + len > buf.length) return false;
+            const data = buf.subarray(pos + 8, pos + 8 + len);
+            if (type === 'IHDR') {
+                if (len !== 13) return false;
+                ihdr = { w: data.readUInt32BE(0), h: data.readUInt32BE(4), depth: data[8], color: data[9], interlace: data[12] };
+            } else if (type === 'IDAT') idat.push(data);
+            else if (type === 'IEND') { sawIend = true; break; }
+            pos += 12 + len;
+        }
+        if (!ihdr || !sawIend || idat.length === 0) return false;
+        if (!(ihdr.w > 0 && ihdr.h > 0 && ihdr.w <= 8000 && ihdr.h <= 8000)) return false;
+        const raw = zlib.inflateSync(Buffer.concat(idat));       // throws on a corrupt stream
+        if (ihdr.interlace === 0) {
+            const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ihdr.color];
+            if (!channels) return false;
+            const expected = ihdr.h * (1 + Math.ceil(ihdr.w * channels * ihdr.depth / 8));
+            if (raw.length !== expected) return false;
+        }
+        return raw.length > 0;
+    } catch (_) {
+        return false;
+    }
+}
+
+/**
+ * The CHC logo uploaded in the admin console (Branding), as a Buffer, or null
+ * when none has been uploaded, it is not a PNG/JPEG (pdfkit cannot embed GIF or
+ * WebP), or storage cannot be reached. Cached briefly. Never throws.
+ */
+async function loadMasterLogo({ storage } = {}) {
+    const now = Date.now();
+    if (!storage && now - masterLogoCache.at < MASTER_LOGO_TTL_MS) return masterLogoCache.buf;
+    let buf = null;
+    try {
+        const store = storage || require('./supabase').supabaseAdmin.storage;
+        const { data, error } = await store.from(MASTER_LOGO_BUCKET).download(MASTER_LOGO_PATH);
+        if (!error && data) {
+            const arr = typeof data.arrayBuffer === 'function' ? Buffer.from(await data.arrayBuffer()) : Buffer.from(data);
+            if (arr.length > 0 && arr.length <= LOGO_MAX_BYTES && isPngOrJpeg(arr)) buf = arr;
+        }
+    } catch (_) { /* fall back to the next option */ }
+    if (!storage) masterLogoCache = { at: now, buf };
+    return buf;
+}
+
+/** Test hook: forget the cached master logo. */
+function clearLogoCache() { masterLogoCache = { at: 0, buf: null }; }
+
+async function fetchHttpsLogo(url, fetchImpl) {
+    try {
+        if (!url || !/^https:\/\//i.test(url) || typeof fetchImpl !== 'function') return null;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), LOGO_TIMEOUT_MS);
+        try {
+            const resp = await fetchImpl(url, { signal: ctrl.signal, redirect: 'error' });
+            if (!resp.ok) return null;
+            const declared = Number(resp.headers.get('content-length') || 0);
+            if (declared && declared > LOGO_MAX_BYTES) return null;
+            const buf = Buffer.from(await resp.arrayBuffer());
+            return buf.length <= LOGO_MAX_BYTES && isPngOrJpeg(buf) ? buf : null;
+        } finally {
+            clearTimeout(timer);
+        }
+    } catch (_) { return null; }
 }
 
 /**
@@ -41,31 +149,24 @@ function isPngOrJpeg(buf) {
  * supplier's name instead). Never throws: a missing or slow logo must not stop
  * a document being produced.
  *
- * Order: the distributor's own logo_url (https only), then, for the platform's
- * default distributor (CHC), the logo shipped with the app.
+ * For CHC (the platform's default distributor), in order:
+ *   1. the logo uploaded under Branding in the admin console;
+ *   2. the distributor's own logo_url (https only);
+ *   3. the plain logo shipped with the app.
+ * For any other distributor: its own logo_url, else its name is printed. CHC's
+ * logo is never borrowed for another distributor's customers.
  */
-async function loadSupplierLogo(distributor, { fetchImpl = globalThis.fetch } = {}) {
-    try {
-        const url = distributor && distributor.logo_url;
-        if (url && /^https:\/\//i.test(url) && typeof fetchImpl === 'function') {
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), LOGO_TIMEOUT_MS);
-            try {
-                const resp = await fetchImpl(url, { signal: ctrl.signal, redirect: 'error' });
-                if (resp.ok) {
-                    const declared = Number(resp.headers.get('content-length') || 0);
-                    if (!declared || declared <= LOGO_MAX_BYTES) {
-                        const buf = Buffer.from(await resp.arrayBuffer());
-                        if (buf.length <= LOGO_MAX_BYTES && isPngOrJpeg(buf)) return buf;
-                    }
-                }
-            } finally {
-                clearTimeout(timer);
-            }
-        }
-    } catch (_) { /* fall through to the shipped logo */ }
+async function loadSupplierLogo(distributor, { fetchImpl = globalThis.fetch, storage } = {}) {
+    const isChc = !!distributor && (distributor.is_default === true || distributor.slug === 'chc');
 
-    const isChc = distributor && (distributor.is_default === true || distributor.slug === 'chc');
+    if (isChc) {
+        const uploaded = await loadMasterLogo({ storage });
+        if (uploaded) return uploaded;
+    }
+
+    const own = await fetchHttpsLogo(distributor && distributor.logo_url, fetchImpl);
+    if (own) return own;
+
     if (isChc) {
         try {
             const buf = fs.readFileSync(CHC_LOGO_PATH);
@@ -287,4 +388,4 @@ function buildKitSubmissionPdf({ submission, company, location, distributor, log
     });
 }
 
-module.exports = { buildKitSubmissionPdf, loadSupplierLogo, suggestedNote, isPngOrJpeg, roLabel };
+module.exports = { buildKitSubmissionPdf, loadSupplierLogo, loadMasterLogo, clearLogoCache, suggestedNote, isPngOrJpeg, roLabel };

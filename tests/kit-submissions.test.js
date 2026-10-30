@@ -88,7 +88,7 @@ Module._load = function (request, parent, isMain) {
 const express = require('express');
 const request = require('supertest');
 const router = require('../routes/kit-submissions-store');
-const { loadSupplierLogo, buildKitSubmissionPdf, isPngOrJpeg } = require('../utils/kit-submission-pdf');
+const { loadSupplierLogo, loadMasterLogo, clearLogoCache, buildKitSubmissionPdf, isPngOrJpeg } = require('../utils/kit-submission-pdf');
 
 const CO       = '11111111-1111-4111-8111-111111111111';
 const OTHER_CO = '22222222-2222-4222-8222-222222222222';
@@ -420,7 +420,7 @@ test('a CHC customer gets the CHC logo; another distributor\'s customer gets its
     assert.equal(none, null);
 
     // Another distributor with its own https logo: that logo is used.
-    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000002000000020802000000fdd49a730000001049444154789c6338212707440c100a001f260411a28f22af0000000049454e44ae426082', 'hex');
     const own = await loadSupplierLogo(
         { name: 'Maritime', slug: 'maritime', is_default: false, logo_url: 'https://cdn.example.com/m.png' },
         { fetchImpl: async () => ({ ok: true, headers: { get: () => String(png.length) }, arrayBuffer: async () => png }) });
@@ -483,4 +483,90 @@ test('the real storefront router serves /:slug/kit-submissions', async () => {
 
     r = await request(a).get('/api/store/assured/kit-submissions');
     assert.equal(r.body.total, 1);
+});
+
+// ==================================================================
+// THE UPLOADED CHC LOGO (admin console -> Branding -> platform/master-logo.png)
+// ==================================================================
+const PNG_A = Buffer.from('89504e470d0a1a0a0000000d4948445200000002000000020802000000fdd49a730000001049444154789c6338212707440c100a001f260411a28f22af0000000049454e44ae426082', 'hex');
+const PNG_B = Buffer.from('89504e470d0a1a0a0000000d49484452000000030000000208020000001216f14d0000001049444154789c63e0b23901410c7016003ae8065541dce4c50000000049454e44ae426082', 'hex');   // a different valid "upload"
+const PNG_CORRUPT = Buffer.from('89504e470d0a1a0a0000000d4948445200000002000000020802000000fdd49a730000001049444154789c63382127f8bb0c100a001f260411a28f22af0000000049454e44ae426082', 'hex');   // valid header and chunks, broken pixel data
+const storageWith = (body) => ({
+    from: () => ({
+        download: async () => (body ? { data: new Blob([body]), error: null } : { data: null, error: { message: 'not found' } })
+    })
+});
+const CHC = { name: 'CHC', slug: 'chc', is_default: true, logo_url: null };
+
+test('CHC customers get the logo uploaded under Branding, not the shipped placeholder', async () => {
+    clearLogoCache();
+    const logo = await loadSupplierLogo(CHC, { storage: storageWith(PNG_B) });
+    assert.ok(logo.equals(PNG_B), 'the uploaded master logo is used');
+});
+
+test('with no upload, CHC falls back to its own logo_url, then the shipped logo', async () => {
+    const viaUrl = await loadSupplierLogo({ ...CHC, logo_url: 'https://cdn.example.com/chc.png' }, {
+        storage: storageWith(null),
+        fetchImpl: async () => ({ ok: true, headers: { get: () => String(PNG_A.length) }, arrayBuffer: async () => PNG_A })
+    });
+    assert.ok(viaUrl.equals(PNG_A));
+    const shipped = await loadSupplierLogo(CHC, { storage: storageWith(null) });
+    assert.ok(shipped && isPngOrJpeg(shipped) && !shipped.equals(PNG_B));
+});
+
+test('an upload the PDF cannot embed (WebP/GIF/garbage) is ignored, not fatal', async () => {
+    const webp = Buffer.from('RIFF....WEBPVP8 ', 'latin1');
+    assert.equal(await loadMasterLogo({ storage: storageWith(webp) }), null);
+    const logo = await loadSupplierLogo(CHC, { storage: storageWith(webp) });
+    assert.ok(logo && isPngOrJpeg(logo), 'still gets the shipped logo');
+});
+
+test('storage failures never stop a logo being produced', async () => {
+    const boom = { from: () => ({ download: async () => { throw new Error('storage down'); } }) };
+    assert.equal(await loadMasterLogo({ storage: boom }), null);
+    assert.ok(await loadSupplierLogo(CHC, { storage: boom }));
+});
+
+test('the CHC upload is never used for another distributor\'s customers', async () => {
+    const other = await loadSupplierLogo({ name: 'Maritime', slug: 'maritime', is_default: false, logo_url: null },
+        { storage: storageWith(PNG_B) });
+    assert.equal(other, null);
+});
+
+test('the PDF route reads the uploaded logo for a CHC shop, and not for another distributor\'s shop', async () => {
+    reset(); mapKit(); clearLogoCache();
+    fake.__storage['company-logos'] = { 'platform/master-logo.png': { body: PNG_B, contentType: 'image/png' } };
+    const parse = (res, cb) => { const c = []; res.on('data', d => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); };
+
+    const id = (await request(app()).post(S).send(body())).body.submission.id;
+    fake.__storageDownloads = 0;
+    let r = await request(app()).get(`${S}/${id}/pdf`).buffer(true).parse(parse);
+    assert.equal(r.status, 200);
+    assert.equal(fake.__storageDownloads, 1, 'CHC shop: master logo fetched from storage');
+
+    // A shop under another distributor never touches the CHC upload.
+    clearLogoCache();
+    fake.db.companies[0].distributor_id = D_OTHER;
+    fake.__storageDownloads = 0;
+    r = await request(app()).get(`${S}/${id}/pdf`).buffer(true).parse(parse);
+    assert.equal(r.status, 200);
+    assert.equal(fake.__storageDownloads, 0, 'other distributor: CHC logo not read');
+});
+
+test('a corrupt image can never reach pdfkit (it would crash the server asynchronously)', async () => {
+    assert.equal(isPngOrJpeg(PNG_A), true);
+    assert.equal(isPngOrJpeg(PNG_CORRUPT), false);
+    assert.equal(isPngOrJpeg(PNG_A.subarray(0, PNG_A.length - 20)), false, 'truncated');
+    assert.equal(isPngOrJpeg(Buffer.from('ffd8ffe000104a46494600', 'hex')), false, 'jpeg with no frame');
+    assert.equal(await loadMasterLogo({ storage: storageWith(PNG_CORRUPT) }), null);
+});
+
+test('a corrupt uploaded logo still yields a PDF (falls back to the shipped logo)', async () => {
+    reset(); mapKit(); clearLogoCache();
+    fake.__storage['company-logos'] = { 'platform/master-logo.png': { body: PNG_CORRUPT, contentType: 'image/png' } };
+    const id = (await request(app()).post(S).send(body())).body.submission.id;
+    const r = await request(app()).get(`${S}/${id}/pdf`).buffer(true).parse((res, cb) => { const c = []; res.on('data', d => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.slice(0, 5).toString(), '%PDF-');
+    clearLogoCache();
 });

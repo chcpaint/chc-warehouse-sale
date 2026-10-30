@@ -39,9 +39,15 @@ skipped if a later step fails; it is never reused.
 
 ## The document
 
-* The header logo is the **supplier's**: CHC's logo for a CHC customer, the
-  distributor's own logo (`distributors.logo_url`, https PNG/JPEG) for a customer of
-  another distributor. If a distributor has no usable logo its name is printed instead.
+* The header logo is the **supplier's**. For every CHC customer it is the CHC logo
+  uploaded in the admin console under **Branding** (the same file the sign-in page and
+  portal show; it is re-read at most every minute, so a new upload appears quickly).
+  If none has been uploaded it falls back to the CHC distributor's `logo_url`, then to
+  the plain logo shipped with the app. A customer of another distributor gets that
+  distributor's own `logo_url`, or its name if it has none; CHC's logo is never lent to
+  another distributor. The uploaded logo must be a PNG or JPEG (GIF and WebP cannot be
+  embedded in a PDF and are skipped), and it is checked for corruption before use,
+  because a corrupt PNG would otherwise crash the server.
   The shop's name appears as the submitter.
 * Brand, part number, description, quantity, unit price, extended price, total, a
   one-line note to paste into the estimate's attachment note, and the shop's notes.

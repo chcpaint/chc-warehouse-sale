@@ -737,6 +737,12 @@ function createFakeSupabase(seed = {}) {
                 async createSignedUrl(path) {
                     return { data: { signedUrl: `https://storage.example.invalid/signed/${bucket}/${path}` }, error: null };
                 },
+                async download(path) {
+                    client.__storageDownloads = (client.__storageDownloads || 0) + 1;
+                    const f = files()[path];
+                    if (!f) return { data: null, error: { message: 'Object not found' } };
+                    return { data: new Blob([f.body]), error: null };
+                },
                 async list() { return { data: Object.keys(files()).map(name => ({ name })), error: null }; }
             };
         }
