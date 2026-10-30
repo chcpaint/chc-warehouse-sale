@@ -111,6 +111,19 @@ const MODULES = {
         }
     },
 
+    kit_submissions: {
+        name: 'kit_submissions',
+        label: 'Insurance kit submissions',
+        blurb: 'Pick a repair kit, enter the repair order and claim, and get a numbered PDF itemizing its materials to load into Mitchell, CCC ONE or Audatex. Every PDF is saved in the shop\u2019s console. Works on its own \u2014 no inventory needed.',
+        requires: [],
+        released: true,
+        defaults: {
+            enabled: false,
+            // Whether a shop may change a quantity or drop a line as it generates.
+            allow_line_overrides: true
+        }
+    },
+
     hide_pricing: {
         name: 'hide_pricing',
         label: 'Hide pricing (packing slip mode)',
