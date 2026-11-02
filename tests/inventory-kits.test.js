@@ -1039,3 +1039,22 @@ test('the fake knows every column migration 025 added to orders', () => {
         assert.ok(KNOWN_COLUMNS.orders.has(col), `orders.${col} missing from KNOWN_COLUMNS`);
     }
 });
+
+// A shop with no Inventory module needs no kit mapping; one with it does.
+test('admin kit list: mapping is required only when kits are tied to inventory', async () => {
+    reset();
+    let res = await request(adminApp()).get(`${A}`);
+    assert.equal(res.status, 200);
+    const kit = () => res.body.kits.find(k => k.id === KIT);
+    assert.equal(kit().mapping_required, true);
+    assert.equal(kit().ready, false, 'unmapped kit on an inventory shop is not ready');
+
+    fake.db.companies[0].settings = { kit_submissions: { enabled: true } };
+    res = await request(adminApp()).get(`${A}`);
+    assert.equal(kit().mapping_required, false);
+    assert.equal(kit().ready, true, 'no mapping needed: ready with nothing mapped');
+
+    fake.db.companies[0].settings = { kit_submissions: { enabled: true, require_mapping: true } };
+    res = await request(adminApp()).get(`${A}`);
+    assert.equal(kit().mapping_required, true);
+});

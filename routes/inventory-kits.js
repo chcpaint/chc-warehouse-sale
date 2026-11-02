@@ -79,6 +79,60 @@ async function kitForCompany(companyId, kitId) {
     return kits.find(k => k.id === kitId) || null;
 }
 
+
+/**
+ * For kit lines with no mapping: what the line's own part number is called and
+ * costs. Company catalogue first (its own price), then the CHC item library
+ * (list price). A part in neither has no entry -- nothing is invented.
+ * Returns Map(kit_item_id -> { product_id, sku, name, brand, category, price }).
+ */
+async function loadAutoSources(companyId, kitItems, mapByItem, products) {
+    const need = kitItems.filter(i => {
+        const m = mapByItem.get(i.id);
+        if (m && m.is_excluded) return false;
+        const pid = m ? m.product_id : i.product_id;
+        return !(pid && products.get(pid)) && i.sku;
+    });
+    const out = new Map();
+    if (!need.length) return out;
+    const keyOf = v => String(v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+
+    const skus = [...new Set(need.map(i => String(i.sku).trim()))];
+    const keys = [...new Set(need.map(i => keyOf(i.sku)).filter(Boolean))];
+
+    const [own, lib] = await Promise.all([
+        supabaseAdmin.from('products')
+            .select('id, sku, name, brand, category, price, price_on_request, is_active')
+            .eq('company_id', companyId).in('sku', skus),
+        supabaseAdmin.from('item_library')
+            .select('sku_key, name, brand, category, list_price').in('sku_key', keys)
+    ]);
+    const ownByKey = new Map();
+    for (const p of own.data || []) {
+        const k = keyOf(p.sku);
+        if (p.is_active === false || ownByKey.has(k)) continue;
+        ownByKey.set(k, p);
+    }
+    const libByKey = new Map((lib.data || []).map(l => [l.sku_key, l]));
+
+    for (const item of need) {
+        const k = keyOf(item.sku);
+        const p = ownByKey.get(k);
+        const l = libByKey.get(k);
+        if (!p && !l) continue;
+        const ownPrice = p && !p.price_on_request && Number(p.price) > 0 ? Number(p.price) : null;
+        out.set(item.id, {
+            product_id: p ? p.id : null,
+            sku: (p && p.sku) || item.sku,
+            name: (p && p.name) || (l && l.name) || item.sku,
+            brand: (p && p.brand) || (l && l.brand) || null,
+            category: (p && p.category) || (l && l.category) || null,
+            price: ownPrice !== null ? ownPrice : (l && Number(l.list_price) > 0 ? Number(l.list_price) : 0)
+        });
+    }
+    return out;
+}
+
 /**
  * Resolve a kit's lines for one company: apply the company's mapping, pull the
  * product and its price, and say plainly which lines are not yet usable.
@@ -86,7 +140,7 @@ async function kitForCompany(companyId, kitId) {
  * Returns { lines, unresolved, excluded } where every line carries enough for
  * the caller to price it, post it, or explain why it cannot.
  */
-async function resolveKitLines(companyId, kitId) {
+async function resolveKitLines(companyId, kitId, opts = {}) {
     const { data: items, error } = await supabaseAdmin
         .from('kit_items')
         .select('id, sku, product_id, quantity, unit, sort_order, needs_review, ref_unit_price, ref_line_total, ref_source')
@@ -124,6 +178,12 @@ async function resolveKitLines(companyId, kitId) {
         for (const p of rows || []) products.set(p.id, p);
     }
 
+    // A company that does not tie its kits to inventory (opts.auto) has no per-company
+    // mapping to maintain. A line it has not mapped is read straight from the master kit:
+    // the line's own part number, named and priced from the company's own catalogue when
+    // it carries that part, else from the CHC item library. A mapping, if one exists, still wins.
+    const auto = opts.auto === true ? await loadAutoSources(companyId, kitItems, mapByItem, products) : null;
+
     const lines = [];
     const unresolved = [];
     const excluded = [];
@@ -139,6 +199,37 @@ async function resolveKitLines(companyId, kitId) {
         const quantity = Number(map?.quantity ?? item.quantity);
         const productId = map ? map.product_id : item.product_id;
         const product = productId ? products.get(productId) : null;
+
+        if (!product && auto) {
+            const a = auto.get(item.id);
+            if (!a) {
+                unresolved.push({ kit_item_id: item.id, sku: item.sku, quantity, reason: 'This part is not in the CHC item library, so it has no name or price yet.' });
+                continue;
+            }
+            if (!Number.isFinite(quantity) || quantity <= 0) {
+                unresolved.push({ kit_item_id: item.id, sku: item.sku, quantity, reason: 'The kit line has no usable quantity.' });
+                continue;
+            }
+            const override = map && map.unit_price_override !== null && map.unit_price_override !== undefined ? Number(map.unit_price_override) : null;
+            lines.push({
+                kit_item_id: item.id,
+                kit_sku: item.sku,
+                product_id: a.product_id || null,
+                sku: a.sku,
+                name: a.name,
+                brand: a.brand || null,
+                category: a.category || null,
+                unit: item.unit || 'each',
+                quantity,
+                unit_price: override !== null ? override : a.price,
+                catalogue_unit_price: a.price,
+                price_overridden: override !== null,
+                ref_unit_price: item.ref_unit_price === null || item.ref_unit_price === undefined ? null : Number(item.ref_unit_price),
+                ref_line_total: item.ref_line_total === null || item.ref_line_total === undefined ? null : Number(item.ref_line_total),
+                source: 'auto'
+            });
+            continue;
+        }
 
         if (!product) {
             unresolved.push({

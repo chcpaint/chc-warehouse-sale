@@ -102,9 +102,13 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate limiting
+const { keyGenerator: rlKey, maxFor: rlMax } = require('./utils/rate-limit');
 const apiLimiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-    max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
+    // Per signed-in person with a realistic ceiling; per IP and strict for anonymous traffic.
+    // See utils/rate-limit.js.
+    limit: rlMax,
+    keyGenerator: rlKey,
     message: { error: 'Too many requests. Please try again later.' },
     standardHeaders: true,
     legacyHeaders: false

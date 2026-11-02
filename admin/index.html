@@ -4585,16 +4585,16 @@
                         </p>
                         <p class="text-xs text-gray-500">
                             ${k.line_count} line${k.line_count === 1 ? '' : 's'} &middot;
-                            ${k.mapped} matched${k.excluded ? ` &middot; ${k.excluded} excluded` : ''}
-                            ${k.unmapped ? ` &middot; <span class="text-amber-700 font-semibold">${k.unmapped} to match</span>` : ''}
+                            ${k.mapping_required === false ? 'No mapping needed &mdash; priced from the item library' : `${k.mapped} matched${k.excluded ? ` &middot; ${k.excluded} excluded` : ''}
+                            ${k.unmapped ? ` &middot; <span class="text-amber-700 font-semibold">${k.unmapped} to match</span>` : ''}`}
                         </p>
                     </div>
                     <span class="px-2 py-1 rounded-full text-xs font-semibold ${k.ready ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}">
-                        ${k.ready ? 'Ready' : 'Needs mapping'}
+                        ${k.ready ? 'Ready' : (k.mapping_required === false ? 'No lines' : 'Needs mapping')}
                     </span>
                     <button onclick="openKitMapping('${k.id}', '${esc(k.name).replace(/'/g, "\\'")}')"
-                        class="text-blue-600 hover:text-blue-800 text-sm font-semibold">
-                        <i class="fas fa-link mr-1"></i> Map
+                        class="${k.mapping_required === false ? 'text-gray-400 hover:text-gray-600' : 'text-blue-600 hover:text-blue-800'} text-sm font-semibold" title="${k.mapping_required === false ? 'Optional: only to use a different product or price for this shop' : ''}">
+                        <i class="fas fa-link mr-1"></i> ${k.mapping_required === false ? 'Map (optional)' : 'Map'}
                     </button>
                     ${k.is_master ? `
                     <button onclick="toggleKitAccess('${k.id}', ${k.enabled ? 'false' : 'true'})"

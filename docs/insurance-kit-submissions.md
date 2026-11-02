@@ -70,3 +70,28 @@ skipped if a later step fails; it is never reused.
 | `utils/kit-submission-pdf.js` | PDF builder (pdfkit) and supplier-logo loader |
 | `public/kit-submissions.js` | the shop's screen, loaded only when the module is on |
 | `tests/kit-submissions.test.js` | module gate, numbering, freezing, tenancy, PDF, logos |
+
+## Kit mapping: off by default for shops without inventory
+
+A shop that does **not** have the Inventory module turned on does not need to
+map its kits to products. Its kit lines are resolved automatically:
+
+1. the shop's own catalogue product with the same part number (its own price
+   unless the item is price-on-request), otherwise
+2. the CHC item library entry for that part number (list price).
+
+A part found in neither is reported as "not in the CHC item library yet" and
+blocks that submission until CHC adds it. An explicit mapping, when one exists,
+always wins. The admin kit list shows "No mapping needed" and an optional
+**Map** button for these shops.
+
+To require mapping for a specific shop anyway, set
+`settings.kit_submissions.require_mapping = true` on the company.
+
+## API rate limits
+
+The site-wide limiter is now per signed-in person instead of per IP: a verified
+admin/user/company token gets its own bucket (`RATE_LIMIT_AUTH_MAX`, default
+3000 per 15 minutes); anonymous traffic stays at `RATE_LIMIT_MAX` (default 100)
+per IP. Tokens are verified, so a forged one only falls back to the IP bucket.
+See `utils/rate-limit.js`.

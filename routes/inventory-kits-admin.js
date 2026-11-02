@@ -31,6 +31,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAccess } = require('../middleware/auth');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
+const { moduleEnabled, moduleSettings } = require('../utils/modules');
 
 const router = express.Router({ mergeParams: true });
 
@@ -139,6 +140,18 @@ function commonPrefixLength(a, b) {
 // ============================================================
 
 /**
+ * Does this company have to map kit lines to its own catalogue? Only when kits are
+ * tied to its inventory. A shop that just uses Insurance Kit Submissions needs no
+ * mapping: its kits read straight from the master kit (see resolveKitLines, opts.auto).
+ * settings.kit_submissions.require_mapping = true opts a shop back in.
+ */
+async function companyNeedsKitMapping(companyId) {
+    const { data } = await supabaseAdmin.from('companies').select('settings').eq('id', companyId).maybeSingle();
+    const settings = (data && data.settings) || {};
+    return moduleEnabled(settings, 'inventory') || moduleSettings(settings, 'kit_submissions').require_mapping === true;
+}
+
+/**
  * GET /kits
  * Every kit CHC could offer this company, with whether it is switched on and how
  * far through mapping it is. `ready` is the only number that matters
@@ -148,6 +161,7 @@ router.get('/', async (req, res) => {
     try {
         const companyId = req.params.companyId;
 
+        const mappingRequired = await companyNeedsKitMapping(companyId);
         const [{ data: master }, { data: own }, { data: access }] = await Promise.all([
             supabaseAdmin.from('repair_kits')
                 .select('id, name, description, source, sort_order, is_active, company_id')
@@ -204,7 +218,9 @@ router.get('/', async (req, res) => {
                 line_count: lines.length,
                 mapped, excluded, unmapped,
                 needs_review: lines.filter(l => l.needs_review).length,
-                ready: unmapped === 0 && mapped > 0
+                mapping_required: mappingRequired,
+                // A shop that does not run inventory needs no mapping: its kits read from the master kit.
+                ready: mappingRequired ? (unmapped === 0 && mapped > 0) : lines.length > 0
             };
         }).sort((a, b) => (a.is_master === b.is_master ? 0 : a.is_master ? 1 : -1) || String(a.name).localeCompare(String(b.name)));
 
@@ -367,6 +383,7 @@ router.get('/:kitId/mapping', async (req, res) => {
             unmapped,
             unpriced_count: unpricedCount,
             total,
+            mapping_required: await companyNeedsKitMapping(companyId),
             ready: unmapped === 0 && lines.some(l => l.mapped_product)
         });
     } catch (err) {

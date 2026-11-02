@@ -157,6 +157,8 @@ function mapKit() {
     );
 }
 
+function requireMapping() { fake.db.companies[0].settings.kit_submissions.require_mapping = true; }
+
 function reset(opts) {
     fake = seed(opts);
     authCompany = { id: CO, name: 'Assured Collision', slug: 'assured' };
@@ -196,7 +198,7 @@ test('rejects a request with no company session', async () => {
 // KITS + PREVIEW
 // ==================================================================
 test('a kit is not ready until its lines are matched, then is', async () => {
-    reset();
+    reset(); requireMapping();
     let res = await request(app()).get(S + '/kits');
     assert.equal(res.body.kits[0].ready, false);
     assert.equal(res.body.kits[0].unresolved_count, 3);
@@ -216,7 +218,7 @@ test('preview prices the kit and scales with the multiplier', async () => {
 });
 
 test('preview names unmatched lines and blocks', async () => {
-    reset();
+    reset(); requireMapping();
     const res = await request(app()).get(`${S}/kits/${KIT}/preview`);
     assert.equal(res.body.blocked, true);
     assert.match(res.body.blocked_reason, /not matched/);
@@ -317,7 +319,7 @@ test('rejects a bad VIN, a bad multiplier and a foreign location', async () => {
 });
 
 test('blocks an unmapped kit and says so', async () => {
-    reset();
+    reset(); requireMapping();
     const r = await request(app()).post(S).send(body());
     assert.equal(r.status, 409);
     assert.match(r.body.error, /not matched/);
@@ -569,4 +571,73 @@ test('a corrupt uploaded logo still yields a PDF (falls back to the shipped logo
     assert.equal(r.status, 200);
     assert.equal(r.body.slice(0, 5).toString(), '%PDF-');
     clearLogoCache();
+});
+
+// ==================================================================
+// NO MAPPING NEEDED when the shop does not run inventory
+// ==================================================================
+test('without inventory, kits need no mapping: lines come from the master kit, priced from the shop catalogue or the item library', async () => {
+    reset();
+    fake.db.item_library = [
+        { id: 'l1', sku_key: 'PRF611N', name: 'ProForm Clear (library)', brand: 'PPG', category: 'Paint', list_price: 250 },
+        { id: 'l2', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', category: 'Masking', list_price: 12 },
+        { id: 'l3', sku_key: 'FUS123EZ', name: 'Fusor 123 Adhesive', brand: 'Fusor', category: 'Adhesives', list_price: 40 }
+    ];
+    let res = await request(app()).get(S + '/kits');
+    assert.equal(res.body.kits[0].ready, true, 'ready with nothing mapped');
+    res = await request(app()).get(S + '/kits/' + KIT + '/preview');
+    assert.equal(res.status, 200);
+    const by = sku => res.body.lines.find(l => l.sku === sku);
+    assert.equal(by('PRF611N').unit_price, 200, "the shop's own catalogue price wins");
+    assert.equal(by('PRF611N').name, 'ProForm Clear');
+    assert.equal(by('MMM08852').unit_price, 12, 'library list price when the shop does not carry it');
+    assert.equal(by('MMM08852').name, '3M Masking Tape 36mm');
+    assert.equal(by('FUS123EZ').unit_price, 40);
+    assert.equal(res.body.total, 0.5 * 200 + 2 * 12 + 40);
+
+    const created = await request(app()).post(S).send(body());
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.submission.total_amount, 164);
+});
+
+test('without inventory, a part that is in neither the shop catalogue nor the library is still blocked, not invented', async () => {
+    reset();
+    fake.db.item_library = [{ id: 'l2', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', list_price: 12 }];
+    const res = await request(app()).post(S).send(body());
+    assert.equal(res.status, 409);
+    assert.match(res.body.error, /FUS123EZ.*item library/);
+});
+
+test('a library part with no price blocks the kit instead of billing $0', async () => {
+    reset();
+    fake.db.item_library = [
+        { id: 'l2', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', list_price: 0 },
+        { id: 'l3', sku_key: 'FUS123EZ', name: 'Fusor 123', list_price: 40 }
+    ];
+    const res = await request(app()).post(S).send(body());
+    assert.equal(res.status, 409);
+    assert.match(res.body.error, /no price/);
+});
+
+test('a mapping the shop already has still wins over the master kit', async () => {
+    reset();
+    fake.db.item_library = [
+        { id: 'l2', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', list_price: 12 },
+        { id: 'l3', sku_key: 'FUS123EZ', name: 'Fusor 123', list_price: 40 }
+    ];
+    fake.db.kit_product_map.push({ id: 'm2', company_id: CO, kit_item_id: L_TAPE, product_id: TAPE, quantity: null, is_excluded: false });
+    const res = await request(app()).get(S + '/kits/' + KIT + '/preview');
+    const tape = res.body.lines.find(l => l.kit_item_id === L_TAPE);
+    assert.equal(tape.unit_price, 10, "mapped to the shop's own 3M tape");
+});
+
+test('a shop with Inventory on still has to map (kits are tied to its stock)', async () => {
+    reset();
+    fake.db.companies[0].settings.inventory = { enabled: true };
+    fake.db.item_library = [
+        { id: 'l1', sku_key: 'PRF611N', name: 'x', list_price: 250 }, { id: 'l2', sku_key: 'MMM08852', name: 'y', list_price: 12 }, { id: 'l3', sku_key: 'FUS123EZ', name: 'z', list_price: 40 }
+    ];
+    const res = await request(app()).post(S).send(body());
+    assert.equal(res.status, 409);
+    assert.match(res.body.error, /not matched to your catalogue/);
 });

@@ -31,7 +31,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
-const { moduleSettings } = require('../utils/modules');
+const { moduleSettings, moduleEnabled } = require('../utils/modules');
 const { round4 } = require('../utils/inventory');
 const { buildKitSubmissionPdf, loadSupplierLogo } = require('../utils/kit-submission-pdf');
 const { resolveKitLines, kitsForCompany } = require('./inventory-kits');
@@ -61,6 +61,9 @@ router.use(async (req, res, next) => {
         }
         req.companyRow = company;
         req.moduleSettings = settings;
+        // A shop that does not run inventory has no kit mapping to maintain: its kits read straight
+        // from the master kit. (settings.kit_submissions.require_mapping = true opts back in.)
+        req.autoMapping = !moduleEnabled(company.settings, 'inventory') && settings.require_mapping !== true;
         next();
     } catch (err) {
         console.error('Kit submissions guard error:', err);
@@ -92,8 +95,8 @@ function prefixFor(name) {
 }
 
 /** Price one kit for this company: resolved lines, with quantities for a multiplier. */
-async function priceKit(companyId, kitId, multiplier, overrides) {
-    const { lines, unresolved } = await resolveKitLines(companyId, kitId);
+async function priceKit(companyId, kitId, multiplier, overrides, auto) {
+    const { lines, unresolved } = await resolveKitLines(companyId, kitId, { auto: auto === true });
     const priced = [];
     for (const line of lines) {
         const o = overrides && overrides.get(line.kit_item_id);
@@ -105,7 +108,11 @@ async function priceKit(companyId, kitId, multiplier, overrides) {
     return { priced, unresolved };
 }
 
-function blockedReason(priced, unresolved) {
+function blockedReason(priced, unresolved, auto) {
+    if (unresolved.length && auto) {
+        const first = unresolved[0];
+        return `${first.sku || 'A part'} is not in the CHC item library yet, so it has no name or price${unresolved.length > 1 ? ` (and ${unresolved.length - 1} more)` : ''}. CHC can add it.`;
+    }
     if (unresolved.length) {
         return `${unresolved.length} item${unresolved.length === 1 ? '' : 's'} in this kit ${unresolved.length === 1 ? 'is' : 'are'} not matched to your catalogue yet. CHC can map ${unresolved.length === 1 ? 'it' : 'them'} for you.`;
     }
@@ -142,14 +149,14 @@ router.get('/kits', async (req, res) => {
         const kits = await kitsForCompany(req.company.id);
         const out = [];
         for (const kit of kits) {
-            const { priced, unresolved } = await priceKit(req.company.id, kit.id, 1, null);
+            const { priced, unresolved } = await priceKit(req.company.id, kit.id, 1, null, req.autoMapping);
             out.push({
                 id: kit.id,
                 name: kit.name,
                 description: kit.description || null,
                 line_count: priced.length,
                 unresolved_count: unresolved.length,
-                ready: !blockedReason(priced, unresolved),
+                ready: !blockedReason(priced, unresolved, req.autoMapping),
                 estimated_total: round4(priced.reduce((s, l) => s + l.quantity * l.unit_price, 0))
             });
         }
@@ -171,13 +178,13 @@ router.get('/kits/:kitId/preview', async (req, res) => {
         const multiplier = normalizeMultiplier(req.query.multiplier);
         if (!multiplier.ok) return res.status(400).json({ error: multiplier.error });
 
-        const { priced, unresolved } = await priceKit(req.company.id, kit.id, multiplier.value, null);
+        const { priced, unresolved } = await priceKit(req.company.id, kit.id, multiplier.value, null, req.autoMapping);
         const lines = priced.map(l => ({
             kit_item_id: l.kit_item_id, sku: l.sku, brand: l.brand, name: l.name, unit: l.unit,
             quantity: l.quantity, unit_price: l.unit_price, line_cost: round4(l.quantity * l.unit_price),
             unpriced: !(Number(l.unit_price) > 0)
         }));
-        const reason = blockedReason(priced, unresolved);
+        const reason = blockedReason(priced, unresolved, req.autoMapping);
         res.json({
             kit: { id: kit.id, name: kit.name, description: kit.description || null },
             multiplier: multiplier.value,
@@ -230,9 +237,9 @@ router.post('/', async (req, res) => {
         }
 
         const overrides = parseOverrides(body, req.moduleSettings.allow_line_overrides !== false);
-        const { priced, unresolved } = await priceKit(companyId, kit.id, multiplier.value, overrides);
+        const { priced, unresolved } = await priceKit(companyId, kit.id, multiplier.value, overrides, req.autoMapping);
 
-        const reason = blockedReason(priced, unresolved);
+        const reason = blockedReason(priced, unresolved, req.autoMapping);
         if (reason) return res.status(409).json({ error: reason, unresolved });
 
         for (const l of priced) {
