@@ -189,7 +189,7 @@ test('rows pushed right by stray commas are realigned and imported', async () =>
 
 test('when the price column cannot be found it asks (422) and returns the columns to choose from', async () => {
     reset();
-    global.__TEST_FILE__ = csvFile('x.csv', 'SKU,Name,Amount owed\nA1,Thing one,call\nA2,Thing two,ask\n');
+    global.__TEST_FILE__ = csvFile('x.csv', 'SKU,Name,List Price\nA1,Thing one,call\nA2,Thing two,ask\n');
     const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1' });
     assert.equal(res.status, 422);
     assert.equal(res.body.needs_mapping, true);
@@ -226,4 +226,48 @@ test('the heading line can be set by hand', async () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.mapping_info.header_row, 0);
     assert.equal(res.body.inserted, 2);
+});
+
+// ---- AccountEdge "new items" import: no headings, every price $0.00 ------------------------
+
+function newItemsCsv() {
+    const row = (sku, name, cat) => `${sku},${name},B,S,I,11800,41000,51000,,${name},X,${cat},,,,,,3M,,HST,,1,0,0,$0.00,,HST,,1,0,0,0,0,0,N,$0.00,,,3M,0,Kilogram,,N,0,N,,N,N,0,days`;
+    return [row('MMM02604', '3M Softback Sanding Sponge Fine', 'Abrasives/Masking'), row('MMM00344', '3M Yellow Spreader 3x4', 'Misc'),
+            row('MMM04903', '3M Plastic Contour Sheet', 'Glues/Metal/Bumper'), row('MMM08693', '3M Auto Glass Urethane Adhesive 310mL', 'Glues/Metal/Bumper')].join('\n') + '\n';
+}
+
+test('a new-items file with no prices: parts are read, new ones priced from the master list, known ones untouched, the rest listed', async () => {
+    reset();
+    fake.db.item_library = [
+        { id: 'l1', sku_key: 'MMM02604', brand: '3M', list_price: 6.5 },
+        { id: 'l2', sku_key: 'MMM00344', brand: '3M', list_price: 9.99 },     // company already has this part
+        { id: 'l3', sku_key: 'MMM04903', brand: '3M', list_price: 21.0 }
+    ];
+    global.__TEST_FILE__ = csvFile('3M_New_Items_Import.csv', newItemsCsv());
+    const prev = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1', vendor: '3M' });
+    assert.equal(prev.status, 200);
+    assert.equal(prev.body.rows_read, 4);
+    assert.equal(prev.body.mapping_info.no_price, true);
+    assert.equal(prev.body.priced_from_master, 2);
+    assert.equal(prev.body.unpriced, 1);
+    assert.equal(prev.body.unpriced_samples[0].sku, 'MMM08693');
+    assert.equal(prev.body.errors, 0);
+    assert.equal(fake.db.products.length, 1, 'preview writes nothing');
+
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ vendor: '3M' });
+    assert.equal(res.status, 200);
+    const by = sku => fake.db.products.find(p => p.sku === sku);
+    assert.equal(by('MMM02604').price, 6.5);
+    assert.equal(by('MMM02604').brand, '3M');
+    assert.equal(by('MMM02604').name, '3M Softback Sanding Sponge Fine');
+    assert.equal(by('MMM04903').price, 21);
+    assert.equal(by('MMM00344').price, 2.99, 'a part the shop already has keeps its own price');
+    assert.equal(by('MMM08693'), undefined, 'no price anywhere: not imported');
+});
+
+test('a price heading over words still stops and asks, it is not treated as "no prices"', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', 'SKU,Name,Price\nA1,Thing one is here,call\nA2,Thing two is here,ask\n');
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1' });
+    assert.equal(res.status, 422);
 });

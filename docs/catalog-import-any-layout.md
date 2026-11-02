@@ -30,3 +30,14 @@ choices; Apply is disabled until the changed layout has been previewed.
 API: `column_map` (JSON `{"sku":0,"name":1,"price":3,"previous_price":null}`, 0-based; `null` = not in this file) and
 `header_row` (1-based line, `0` = no headings). The response carries `mapping_info` (mapping, where each choice came from:
 `header` / `content` / `manual`, columns, preview lines, warnings, lines realigned). The mapping used is written to the audit log.
+
+## Files with no prices (accounting "new items" imports)
+
+AccountEdge's new-items export has no headings and every price is `$0.00`. A column of zeros is never taken for the price.
+When a file has no price heading and no price-like column, the parts are read by part number and name and the preview says so:
+
+- A **new** part is priced from the master list (`item_library.list_price`) when the master has it.
+- A part the company **already has** keeps its current price untouched.
+- A new part with no price in the file and none in the master is not imported; the preview lists it (`unpriced`, `unpriced_samples`).
+
+A price heading over unusable values (e.g. "call") is not treated as "no prices": the screen asks the person to choose.

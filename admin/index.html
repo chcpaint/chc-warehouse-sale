@@ -7449,7 +7449,7 @@
         const have = new Set(Object.values(m.roles));
         const missing = [];
         if (!have.has('name')) missing.push('Product name');
-        if (!have.has('price')) missing.push('Price');
+        if (!have.has('price') && !(info.no_price && !m.mapEdited)) missing.push('Price');
         const warns = (info.warnings || []).map(w => `<div class="text-xs text-amber-800"><i class="fas fa-triangle-exclamation mr-1"></i>${esc(w)}</div>`).join('');
         const dirty = m.mapEdited || m.headerEdited;
         host.innerHTML = `<div class="border rounded-lg bg-white">
@@ -7592,12 +7592,18 @@
             ? `<p class="text-sm text-blue-700 mt-1"><i class="fas fa-arrows-turn-to-dots mr-1"></i>PPG list-price change propagated to <b>${d.ppg_propagated}</b> item(s) on other companies.</p>` : '';
         const errList = (d.error_details && d.error_details.length)
             ? `<div class="mt-2 text-xs text-red-700 border-t pt-2 max-h-32 overflow-y-auto"><b>Not imported:</b>` + d.error_details.map(e => `<div>Row ${esc(String(e.row))}${e.sku ? ' (' + esc(e.sku) + ')' : ''}: ${esc(e.error)}</div>`).join('') + (d.errors > d.error_details.length ? `<div>&hellip;and ${d.errors - d.error_details.length} more</div>` : '') + '</div>' : '';
+        const masterNote = (d.priced_from_master)
+            ? `<p class="text-sm text-blue-700 mt-1"><i class="fas fa-tag mr-1"></i>The file has no prices for <b>${d.priced_from_master}</b> new item(s); they ${isPreview ? 'will be' : 'were'} priced from the master list.</p>` : '';
+        const unpricedNote = (d.unpriced)
+            ? `<div class="mt-2 text-xs text-amber-800 border-t pt-2"><b>${d.unpriced} new item(s) ${isPreview ? 'will not be' : 'were not'} imported</b> &mdash; no price in the file and none in the master list:` +
+              (d.unpriced_samples || []).map(u => `<div>${esc(u.sku || '')} ${esc(u.name || '')}</div>`).join('') +
+              (d.unpriced > (d.unpriced_samples || []).length ? `<div>&hellip;and ${d.unpriced - d.unpriced_samples.length} more</div>` : '') + '</div>' : '';
         const readNote = d.rows_read ? `<p class="text-xs text-gray-500 mt-1">${d.rows_read} line(s) read from the file${d.vendor ? ' \u00b7 vendor: ' + esc(d.vendor) : ''}.</p>` : '';
         return `<div class="${bg} p-4 rounded-lg">
             <p class="font-semibold text-gray-800">${title}</p>${readNote}
-            ${replaceNote}${ppgNote}
+            ${replaceNote}${ppgNote}${masterNote}
             <p class="text-sm text-gray-700 mt-1">New: <b>${d.inserted}</b> &middot; Updated: <b>${d.updated}</b> &middot; Price changes: <b>${d.price_changes}</b> &middot; Skipped ($0): <b>${d.skipped}</b> &middot; Errors: <b>${d.errors}</b></p>
-            ${sample}${errList}
+            ${sample}${unpricedNote}${errList}
             ${isPreview && d.mapping_info && uploadSource === 'file' ? catMapHtmlShell() : ''}
             ${isPreview ? '' : `<button type="button" onclick="hideModal('upload-modal')" class="mt-3 w-full bg-gray-800 hover:bg-gray-900 text-white font-semibold py-2 rounded-lg">Done &mdash; close</button>`}
         </div>`;

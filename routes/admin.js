@@ -1245,6 +1245,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             warnings: sheetMeta.warnings || [],
             repaired: sheetMeta.repaired || 0,
             skipped_no_name: sheetMeta.skipped_no_name || 0,
+            no_price: !!sheetMeta.no_price,
             sheet: sheetMeta.sheet || null,
             delimiter: sheetMeta.delimiter || null
         };
@@ -1267,7 +1268,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         const vendor = String(req.body.vendor || '').replace(/[<>]/g, '').trim().slice(0, 80);
         const normalizedRows = rows.map((row, idx) => {
             try {
-                return normalizeProductRow(row, { vendor });
+                return normalizeProductRow(row, { vendor, allowNoPrice: !!sheetMeta.no_price });
             } catch (e) {
                 errors.push({ row: row.__row || idx + 2, sku: String((row.__v && row.__v.sku) || row['Item #'] || row['SKU'] || row['sku'] || '').slice(0, 40), error: e.message });
                 return null;
@@ -1287,6 +1288,18 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             if (!dryRun) await supabaseAdmin.from('products').delete().eq('company_id', companyId);
         }
 
+        // Prices for new parts the file carries none for: the master list.
+        const masterAny = {};
+        let pricedFromMaster = 0, unpricedCount = 0;
+        const unpricedSamples = [];
+        {
+            const needKeys = [...new Set(normalizedRows.filter(r => !(Number(r.price) > 0)).map(r => skuKeyOf(r.sku)).filter(Boolean))];
+            for (let i = 0; i < needKeys.length; i += 200) {
+                const { data: mp } = await supabaseAdmin.from('item_library').select('sku_key, list_price').in('sku_key', needKeys.slice(i, i + 200));
+                (mp || []).forEach(r => { if (r.sku_key && Number(r.list_price) > 0 && masterAny[r.sku_key] === undefined) masterAny[r.sku_key] = Number(r.list_price); });
+            }
+        }
+
         for (const row of normalizedRows) {
             row.company_id = companyId;
 
@@ -1299,9 +1312,6 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
                 if (!row.brand || row.brand === 'Uncategorized') row.brand = 'PPG';
             }
 
-            // Skip rows with no positive price (e.g. blank/0 in source) — keep existing price untouched
-            if (!(Number(row.price) > 0)) { skipped++; continue; }
-
             let existing = null;
             if (row.sku) {
                 const { data } = await supabaseAdmin
@@ -1311,6 +1321,23 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
                     .eq('sku', row.sku)
                     .maybeSingle();
                 existing = data || null;
+            }
+
+            // No positive price in the file (blank / $0.00, or a "new items" import that carries
+            // no prices at all). A part the company already has keeps its price untouched. A NEW
+            // part is priced from the master list when the master has it; otherwise it is not
+            // imported and is listed so nothing is guessed and nothing vanishes silently.
+            if (!(Number(row.price) > 0)) {
+                const mp = !existing && skuK ? masterAny[skuK] : undefined;
+                if (mp) { row.price = mp; pricedFromMaster++; }
+                else {
+                    skipped++;
+                    if (!existing) {
+                        unpricedCount++;
+                        if (unpricedSamples.length < 15) unpricedSamples.push({ sku: row.sku || '', name: row.name });
+                    }
+                    continue;
+                }
             }
 
             if (existing) {
@@ -1358,7 +1385,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             await logAction(req.admin.id, 'catalog_uploaded', 'company', companyId, {
                 filename: req.file.originalname, mode, deleted, inserted, updated, price_changes: priceChanges, skipped, errors: errors.length,
                 columns_used: Object.fromEntries(Object.entries(mappingInfo.mapping).map(([role, i]) => [role, { column: i, heading: (mappingInfo.columns[i] || {}).header || '', source: mappingInfo.sources[role] }])),
-                lines_realigned: mappingInfo.repaired
+                lines_realigned: mappingInfo.repaired, priced_from_master: pricedFromMaster, unpriced: unpricedCount
             }, req.ip);
         }
 
@@ -1377,6 +1404,9 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             ppg_propagated: (typeof ppgPropagated !== 'undefined' ? ppgPropagated : 0),
             ppg_unlocked: unlockPPG,
             vendor: vendor || null,
+            priced_from_master: pricedFromMaster,
+            unpriced: unpricedCount,
+            unpriced_samples: unpricedSamples,
             rows_read: rows.length,
             mapping_info: mappingInfo
         });

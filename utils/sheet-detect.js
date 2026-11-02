@@ -247,14 +247,15 @@ function columnStats(dataRows, c, decimalCommaOk = true) {
     }
     const n = vals.length;
     const total = Math.max(1, Math.min(dataRows.length, 400));
-    const st = { n, fill: n / total, numFrac: 0, decFrac: 0, spaceFrac: 0, alphaFrac: 0, skuFrac: 0, uniq: 0, avgLen: 0, idLike: false, commaDecimal: false };
+    const st = { n, fill: n / total, posFrac: 0, numFrac: 0, decFrac: 0, spaceFrac: 0, alphaFrac: 0, skuFrac: 0, uniq: 0, avgLen: 0, idLike: false, commaDecimal: false };
     if (!n) return st;
-    let num = 0, dec = 0, space = 0, alpha = 0, sku = 0, len = 0, lead0 = 0, commaDec = 0;
+    let pos = 0, num = 0, dec = 0, space = 0, alpha = 0, sku = 0, len = 0, lead0 = 0, commaDec = 0;
     for (const v of vals) {
         const cd = decimalCommaOk && DECIMAL_COMMA.test(v);
         const p = parsePrice(cd ? fixDecimalComma(v) : v);
         if (Number.isFinite(p)) {
             num++;
+            if (p > 0) pos++;
             if (/[.,]\d{1,2}\s*$/.test(v)) dec++;
             if (/^0\d+$/.test(v)) lead0++;
             if (cd) commaDec++;
@@ -264,6 +265,7 @@ function columnStats(dataRows, c, decimalCommaOk = true) {
         if (SKU_LIKE.test(v) && /\d/.test(v)) sku++;
         len += v.length;
     }
+    st.posFrac = pos / n;
     st.numFrac = num / n; st.decFrac = dec / n; st.spaceFrac = space / n; st.alphaFrac = alpha / n;
     st.skuFrac = sku / n; st.avgLen = len / n; st.uniq = new Set(vals).size / n;
     st.commaDecimal = commaDec / n >= 0.5;
@@ -297,7 +299,7 @@ function contentFit(role, st) {
 /** Could this column be this role judged on content alone (no usable heading)? */
 function contentOnly(role, st) {
     if (!st.n || st.fill < 0.5) return 0;
-    if (role === 'price') return (st.numFrac >= 0.8 && st.decFrac >= 0.3 && !st.idLike) ? 30 + 15 * st.decFrac : 0;
+    if (role === 'price') return (st.numFrac >= 0.8 && st.posFrac >= 0.5 && st.decFrac >= 0.3 && !st.idLike) ? 30 + 15 * st.decFrac : 0;
     if (role === 'sku') return (st.skuFrac >= 0.85 && st.uniq >= 0.8 && st.spaceFrac < 0.1 && !(st.numFrac > 0.8 && st.decFrac > 0.3)) ? 20 + 20 * st.uniq : 0;
     if (role === 'name') return (st.avgLen >= 6 && st.spaceFrac >= 0.5 && st.alphaFrac >= 0.9) ? 20 + Math.min(st.avgLen, 60) / 3 : 0;
     return 0;
@@ -379,7 +381,7 @@ function trimRight(cells) {
  * person sees) and a hidden __v holding the value for each role.
  */
 function readSheet(matrix, opts = {}) {
-    const result = { ok: false, rows: [], preview: [], headerRow: 0, mapping: {}, sources: {}, columns: [], repaired: 0, warnings: [], missing: [], skippedNoName: 0 };
+    const result = { ok: false, noPrice: false, rows: [], preview: [], headerRow: 0, mapping: {}, sources: {}, columns: [], repaired: 0, warnings: [], missing: [], skippedNoName: 0 };
     if (!matrix || !matrix.length) { result.missing = ['name', 'price']; return result; }
 
     // A person can say where the headings are (1-based line; 0 = there are none).
@@ -491,7 +493,13 @@ function readSheet(matrix, opts = {}) {
 
     // the first few lines as they sit in the file, so a person can see the layout
     result.preview = lines.slice(0, 12).map(l => ({ row: l.i + 1, cells: Array.from({ length: Math.min(totalCols, 60) }, (_, j) => cellStr(l.cells[j]).slice(0, 80)) }));
-    result.missing = ['name', 'price'].filter(r => mapping[r] === undefined);
+    // A file with no price heading and no price-like column at all (e.g. an accounting "new items"
+    // import, where every price is $0.00) can still be read: the products are identified by part
+    // number and priced from the master list afterwards. A price heading over unusable values is
+    // different -- that needs a person to look.
+    const hasPriceHeading = headers.some(t => headerCandidates(t).some(c => c.role === 'price'));
+    result.noPrice = mapping.price === undefined && mapping.name !== undefined && mapping.sku !== undefined && !hasPriceHeading;
+    result.missing = ['name', 'price'].filter(r => mapping[r] === undefined && !(r === 'price' && result.noPrice));
     if (result.missing.length) return result;
     result.preview = [];                                              // rebuilt below from the realigned lines
 
@@ -557,6 +565,7 @@ function readSheet(matrix, opts = {}) {
         result.warnings.push('Some lines had more cells than the heading; the extra cells were ignored.');
     }
     if (result.repaired) result.warnings.push(`${result.repaired} line${result.repaired === 1 ? '' : 's'} had a stray comma in the text and ${result.repaired === 1 ? 'was' : 'were'} realigned.`);
+    if (result.noPrice) result.warnings.push('This file has no prices. Items are matched by part number and priced from the master list where it has them; the rest are skipped.');
     if (sources.price === 'content') result.warnings.push('No price heading was found; the price column was picked from its numbers. Check it before applying.');
     if (h < 0) result.warnings.push('No heading row was found; columns were identified from their contents.');
     result.ok = result.rows.length > 0;

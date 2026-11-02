@@ -106,7 +106,7 @@ function withMeta(rows, meta) {
 
 const metaOf = (r, extra = {}) => ({
     ok: r.ok, header_row: r.headerRow, mapping: r.mapping, sources: r.sources, columns: r.columns,
-    preview: r.preview, repaired: r.repaired, warnings: r.warnings, missing: r.missing,
+    no_price: !!r.noPrice, preview: r.preview, repaired: r.repaired, warnings: r.warnings, missing: r.missing,
     skipped_no_name: r.skippedNoName, ...extra
 });
 
@@ -216,6 +216,7 @@ function normalizeProductRow(row, opts = {}) {
     if (!Number.isFinite(price)) {
         const prev = parsePrice(normalized.previous_price);
         if (Number.isFinite(prev)) price = prev;
+        else if (opts.allowNoPrice && normalized.price === undefined) price = 0;   // priced later from the master list
         else throw new Error(normalized.price === undefined ? 'No price on this line' : `Price "${String(normalized.price).slice(0, 20)}" is not a number`);
     }
 

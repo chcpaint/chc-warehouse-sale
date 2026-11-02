@@ -195,3 +195,18 @@ test('discount percentages and quantities are not taken for prices', async () =>
     const { n } = await read('Part No,Description,Qty,List,Discount %,Net\nA1,Thing one,1,10.00,20%,8.00\nA2,Thing two,1,20.00,10%,18.00\n');
     assert.deepEqual(n.map(x => [x.price, x.previous_price]), [[8, 10], [18, 20]]);
 });
+
+test('the real 3M "new items" export (no headings, every price $0.00) is read: 64 parts, no prices', async () => {
+    const buf = require('node:fs').readFileSync(require('node:path').join(__dirname, 'fixtures', '3M_New_Items_Import.csv'));
+    const rows = await ps.parseCSV(buf);
+    assert.equal(rows.length, 64);
+    assert.equal(rows.meta.no_price, true);
+    assert.equal(rows.meta.mapping.sku, 0);
+    assert.equal(rows.meta.mapping.name, 1);
+    assert.equal(rows.meta.mapping.price, undefined, 'a column of $0.00 is not a price column');
+    const n = rows.map(r => ps.normalizeProductRow(r, { vendor: '3M', allowNoPrice: true }));
+    assert.equal(n[0].sku, 'MMM02604');
+    assert.equal(n[0].name, '3M Softback Sanding Sponge Fine');
+    assert.equal(n[63].sku, 'MMMPBC005');
+    assert.ok(n.every(x => x.price === 0 && x.brand === '3M'));
+});
