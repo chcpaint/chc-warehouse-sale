@@ -157,3 +157,73 @@ test('without a vendor the parts are filed as Uncategorized rather than under "S
     const added = fake.db.products.find(p => p.sku === 'MMM02071');
     assert.equal(added.brand, 'Uncategorized');
 });
+
+// ---- Any layout: the preview says how the file was read, and a person can correct it ----
+
+const csvFile = (name, text) => ({ originalname: name, buffer: Buffer.from(text) });
+
+test('an unfamiliar supplier layout is read and the preview shows how', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('assured-3m.csv', 'Part Number,Description,List Price,Your Net\n05916,"3M Tape, 3/4 in",4.50,3.10\n02012,3M Filler Gallon,29.99,19.99\n');
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1', vendor: '3M' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.inserted, 2);
+    assert.equal(res.body.errors, 0);
+    const mi = res.body.mapping_info;
+    assert.deepEqual(mi.mapping, { sku: 0, name: 1, price: 3, previous_price: 2 });
+    assert.equal(mi.columns[3].header, 'Your Net');
+    assert.equal(mi.preview.length, 2);
+    assert.equal(fake.db.products.length, 1, 'preview writes nothing');
+});
+
+test('rows pushed right by stray commas are realigned and imported', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', 'SKU,Name,Price\nA1,Tape, masking, wide,3.69\nA2,Filler,4.99\n');
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ vendor: '3M' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.errors, 0);
+    assert.equal(res.body.mapping_info.repaired, 1);
+    assert.equal(fake.db.products.find(p => p.sku === 'A1').price, 3.69);
+    assert.equal(fake.db.products.find(p => p.sku === 'A1').name, 'Tape, masking, wide');
+});
+
+test('when the price column cannot be found it asks (422) and returns the columns to choose from', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', 'SKU,Name,Amount owed\nA1,Thing one,call\nA2,Thing two,ask\n');
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1' });
+    assert.equal(res.status, 422);
+    assert.equal(res.body.needs_mapping, true);
+    assert.match(res.body.error, /price/);
+    assert.equal(res.body.mapping_info.columns.length, 3);
+    assert.equal(res.body.mapping_info.preview.length, 2);
+    assert.equal(fake.db.products.length, 1);
+});
+
+test('the person\'s column choices (column_map) decide what is imported', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', 'Code,Label,Amt A,Amt B\nA1,Thing one,10.00,3.69\nA2,Thing two,20.00,4.99\n');
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`)
+        .send({ vendor: '3M', column_map: JSON.stringify({ sku: 0, name: 1, price: 3, previous_price: null }) });
+    assert.equal(res.status, 200);
+    assert.equal(fake.db.products.find(p => p.sku === 'A2').price, 4.99);
+    assert.equal(res.body.mapping_info.sources.price, 'manual');
+    const audit = fake.db.audit_log.find(a => a.action === 'catalog_uploaded');
+    assert.ok(audit, 'the upload is logged');
+});
+
+test('bad column_map or header_row input is refused, not guessed at', async () => {
+    reset();
+    for (const body of [{ column_map: '{not json' }, { column_map: JSON.stringify({ price: -1 }) }, { column_map: JSON.stringify({ price: 'abc' }) }, { header_row: 'x' }, { header_row: '-3' }]) {
+        const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1', ...body });
+        assert.equal(res.status, 400, JSON.stringify(body));
+    }
+});
+
+test('the heading line can be set by hand', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', 'Report for March\nA1,Thing one is here,3.69\nA2,Thing two is here,4.99\n');
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1', header_row: '0' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.mapping_info.header_row, 0);
+    assert.equal(res.body.inserted, 2);
+});

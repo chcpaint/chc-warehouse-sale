@@ -17,8 +17,7 @@
 // whitespace into underscores. Kept here so the header finder and the row
 // normaliser agree about what a "SKU column" is.
 const XLSX = require('xlsx');
-const csv = require('csv-parser');
-const { Readable } = require('stream');
+const detect = require('./sheet-detect');
 
 const HEADER_ALIASES = {
     sku:   ['sku', 'item_#', 'item_number', 'itemnumber', 'item_no', 'item_no.', 'part_number', 'partnumber', 'part_no', 'part_#', 'part', 'upc'],
@@ -96,22 +95,36 @@ const isGenericSheetName = name => /^(sheet|page|tab|worksheet|export|report)[\s
 
 
 
-function parseCSV(buffer) {
-    // Read as a plain grid first so a title block above the headings (company
-    // name, address, report title) is skipped instead of becoming the header.
-    return new Promise((resolve, reject) => {
-        const grid = [];
-        Readable.from(buffer.toString().replace(/^\uFEFF/, ''))
-            .pipe(csv({ headers: false }))
-            .on('data', row => grid.push(Object.keys(row).sort((x, y) => Number(x) - Number(y)).map(k => row[k])))
-            .on('end', () => resolve(matrixToRows(grid).rows))
-            .on('error', reject);
-    });
+/**
+ * Wrap rows with how the file was read. Kept as a hidden property so callers
+ * that only want the rows (and the older tests) still get a plain array.
+ */
+function withMeta(rows, meta) {
+    Object.defineProperty(rows, 'meta', { value: meta, enumerable: false });
+    return rows;
 }
 
-function parseExcel(buffer) {
+const metaOf = (r, extra = {}) => ({
+    ok: r.ok, header_row: r.headerRow, mapping: r.mapping, sources: r.sources, columns: r.columns,
+    preview: r.preview, repaired: r.repaired, warnings: r.warnings, missing: r.missing,
+    skipped_no_name: r.skippedNoName, ...extra
+});
+
+/**
+ * opts.columnMap  { role: columnIndex|null }  a person's override of the detected columns
+ * opts.headerRow  1-based line holding the headings, 0 for none
+ */
+async function parseCSV(buffer, opts = {}) {
+    // Any delimiter, any common encoding, title block or none: see utils/sheet-detect.js
+    const { grid, delimiter } = detect.csvToMatrix(detect.decodeText(buffer));
+    const r = detect.readSheet(grid, opts);
+    return withMeta(r.rows, metaOf(r, { delimiter, sheet: null }));
+}
+
+function parseExcel(buffer, opts = {}) {
     const workbook = XLSX.read(buffer, { type: 'buffer' });
     const allRows = [];
+    const sheets = [];
 
     // Sheets to skip (internal/reference data, not product catalogs)
     const skipSheets = ['itemswb11926', 'lastcost'];
@@ -121,30 +134,32 @@ function parseExcel(buffer) {
 
         const sheet = workbook.Sheets[sheetName];
         // A grid, not sheet_to_json's "first row is the header": vendor sheets
-        // usually carry a title block above the real column headings.
+        // usually carry a title block above the real column headings. The same
+        // grid as displayed text is read alongside so part numbers keep the
+        // leading zeros Excel shows.
         const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
-        const { rows } = matrixToRows(matrix);
+        if (!matrix.length) continue;
+        const fmtMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+        const r = detect.readSheet(matrix, { ...opts, fmtMatrix });
+        sheets.push({ name: sheetName.trim(), r });
 
         // Use the tab name as the brand if there is no brand column -- unless the
         // tab is just called "Sheet1", which says nothing about the vendor.
         const brandFromSheet = isGenericSheetName(sheetName) ? '' : sheetName.trim();
-
-        for (const row of rows) {
-            // Skip rows with no part number and no product name (totals, notes).
-            const lower = {};
-            for (const [k, v] of Object.entries(row)) lower[headerKey(k)] = v;
-            const has = kind => HEADER_ALIASES[kind].some(a => lower[a] !== undefined && String(lower[a]).trim() !== '');
-            if (!has('name')) continue;
-
-            // Inject sheet name as brand if not present
-            if (brandFromSheet && !row['Brand'] && !row['brand'] && !row['Manufacturer']) {
-                row['_sheet_brand'] = brandFromSheet;
-            }
+        for (const row of r.rows) {
+            if (brandFromSheet && row.__v.brand === undefined) row['_sheet_brand'] = brandFromSheet;
             allRows.push(row);
         }
     }
-    return allRows;
+    // Describe the sheet that produced the most rows; if none produced any, the
+    // first that had content, so the person can see why and fix the columns.
+    const usable = sheets.filter(x => x.r.ok).sort((a, b) => b.r.rows.length - a.r.rows.length);
+    const shown = usable[0] || sheets[0];
+    const meta = shown ? metaOf(shown.r, { sheet: shown.name, sheet_count: sheets.length, ok: usable.length > 0 })
+        : { ok: false, columns: [], preview: [], mapping: {}, sources: {}, warnings: [], missing: ['name', 'price'], repaired: 0, skipped_no_name: 0 };
+    return withMeta(allRows, meta);
 }
+
 function normalizeProductRow(row, opts = {}) {
     // Flexible column name mapping
     const mappings = {
@@ -166,12 +181,21 @@ function normalizeProductRow(row, opts = {}) {
         lowerRow[key.toLowerCase().trim().replace(/\s+/g, '_')] = val;
     }
 
-    for (const [field, aliases] of Object.entries(mappings)) {
-        for (const alias of aliases) {
-            const val = lowerRow[alias];
-            if (val !== undefined && val !== null && String(val).trim() !== '') {
-                normalized[field] = val;
-                break;
+    if (row.__v) {
+        // The sheet reader already decided which column is which (by heading and
+        // by content, or by a person's choice): use exactly that, never a guess
+        // from heading spelling.
+        for (const [field, val] of Object.entries(row.__v)) {
+            if (val !== undefined && val !== null && String(val).trim() !== '') normalized[field] = val;
+        }
+    } else {
+        for (const [field, aliases] of Object.entries(mappings)) {
+            for (const alias of aliases) {
+                const val = lowerRow[alias];
+                if (val !== undefined && val !== null && String(val).trim() !== '') {
+                    normalized[field] = val;
+                    break;
+                }
             }
         }
     }

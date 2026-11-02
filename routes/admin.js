@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const csv = require('csv-parser');
 const XLSX = require('xlsx');
 const { parseCSV, parseExcel, normalizeProductRow } = require('../utils/price-sheet');
+const { ROLES: SHEET_ROLES } = require('../utils/sheet-detect');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requirePasswordCurrent, requireOrderAccess } = require('../middleware/auth');
@@ -1200,16 +1201,63 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         const errors = [];
 
         // Parse file
+        // Which column is which is worked out from the headings and the data
+        // itself (utils/sheet-detect.js). A person can override it from the
+        // preview: column_map = {"sku":0,"name":1,"price":4,"previous_price":null}
+        // (0-based column positions) and header_row = the line the headings
+        // are on (0 = none).
+        const readOpts = {};
+        if (req.body.column_map) {
+            try {
+                const cm = typeof req.body.column_map === 'object' ? req.body.column_map : JSON.parse(String(req.body.column_map));
+                if (!cm || typeof cm !== 'object' || Array.isArray(cm)) throw new Error('shape');
+                readOpts.columnMap = {};
+                for (const [role, idx] of Object.entries(cm)) {
+                    if (!SHEET_ROLES.includes(role)) continue;
+                    if (idx === null) { readOpts.columnMap[role] = null; continue; }
+                    if (!Number.isInteger(idx) || idx < 0 || idx > 200) throw new Error('index');
+                    readOpts.columnMap[role] = idx;
+                }
+            } catch (_) {
+                return res.status(400).json({ error: 'The column choices could not be read. Re-preview and try again.' });
+            }
+        }
+        if (req.body.header_row !== undefined && req.body.header_row !== '') {
+            const hr = Number(req.body.header_row);
+            if (!Number.isInteger(hr) || hr < 0 || hr > 500) return res.status(400).json({ error: 'The heading line must be a whole number (0 if there are no headings).' });
+            readOpts.headerRow = hr;
+        }
         if (ext === 'csv') {
-            rows = await parseCSV(req.file.buffer);
+            rows = await parseCSV(req.file.buffer, readOpts);
         } else if (ext === 'xlsx' || ext === 'xls') {
-            rows = parseExcel(req.file.buffer);
+            rows = parseExcel(req.file.buffer, readOpts);
         } else {
             return res.status(400).json({ error: 'Unsupported file type for catalog import. Use CSV or XLSX.' });
         }
+        const sheetMeta = rows.meta || {};
+        // How the file was read, in a form the preview screen can show and edit.
+        const mappingInfo = {
+            header_row: sheetMeta.header_row || 0,
+            mapping: sheetMeta.mapping || {},
+            sources: sheetMeta.sources || {},
+            columns: sheetMeta.columns || [],
+            preview: sheetMeta.preview || [],
+            warnings: sheetMeta.warnings || [],
+            repaired: sheetMeta.repaired || 0,
+            skipped_no_name: sheetMeta.skipped_no_name || 0,
+            sheet: sheetMeta.sheet || null,
+            delimiter: sheetMeta.delimiter || null
+        };
 
         if (rows.length === 0) {
-            return res.status(400).json({ error: 'No data rows found in the file.' });
+            const need = (sheetMeta.missing || []).map(m => m === 'name' ? 'product name' : 'price');
+            return res.status(422).json({
+                error: need.length
+                    ? `Couldn't tell which column holds the ${need.join(' and the ')}. Choose the columns below and preview again.`
+                    : 'No data rows found in the file.',
+                needs_mapping: need.length > 0,
+                mapping_info: mappingInfo
+            });
         }
         if (rows.length > 10000) {
             return res.status(400).json({ error: 'Maximum 10,000 rows per upload.' });
@@ -1221,7 +1269,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             try {
                 return normalizeProductRow(row, { vendor });
             } catch (e) {
-                errors.push({ row: row.__row || idx + 2, sku: String(row['Item #'] || row['SKU'] || row['sku'] || '').slice(0, 40), error: e.message });
+                errors.push({ row: row.__row || idx + 2, sku: String((row.__v && row.__v.sku) || row['Item #'] || row['SKU'] || row['sku'] || '').slice(0, 40), error: e.message });
                 return null;
             }
         }).filter(Boolean);
@@ -1308,7 +1356,9 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
                 .single();
 
             await logAction(req.admin.id, 'catalog_uploaded', 'company', companyId, {
-                filename: req.file.originalname, mode, deleted, inserted, updated, price_changes: priceChanges, skipped, errors: errors.length
+                filename: req.file.originalname, mode, deleted, inserted, updated, price_changes: priceChanges, skipped, errors: errors.length,
+                columns_used: Object.fromEntries(Object.entries(mappingInfo.mapping).map(([role, i]) => [role, { column: i, heading: (mappingInfo.columns[i] || {}).header || '', source: mappingInfo.sources[role] }])),
+                lines_realigned: mappingInfo.repaired
             }, req.ip);
         }
 
@@ -1327,7 +1377,8 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             ppg_propagated: (typeof ppgPropagated !== 'undefined' ? ppgPropagated : 0),
             ppg_unlocked: unlockPPG,
             vendor: vendor || null,
-            rows_read: rows.length
+            rows_read: rows.length,
+            mapping_info: mappingInfo
         });
 
     } catch (err) {

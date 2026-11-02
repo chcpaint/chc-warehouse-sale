@@ -7147,6 +7147,7 @@
         const up = document.getElementById('upload-company');
         if (sel && up && sel.value) up.value = sel.value;
         const f = document.getElementById('upload-file'); if (f) f.value = '';
+        resetCatalogMap();
         resetManualRows();
         const ib = document.getElementById('upl-image-banner'); if (ib) ib.classList.add('hidden');
         const iff = document.getElementById('upl-image-file'); if (iff) iff.value = '';
@@ -7164,6 +7165,7 @@
     }
     function setUploadSource(src) {
         uploadSource = src;
+        if (src !== 'file') resetCatalogMap();
         const active = 'px-4 py-1.5 bg-blue-700 text-white font-semibold';
         const idle = 'px-4 py-1.5 bg-white text-gray-700 hover:bg-gray-50';
         const bf = document.getElementById('src-file'), bm = document.getElementById('src-manual'), bi = document.getElementById('src-image');
@@ -7282,6 +7284,7 @@
     // A picture chosen in the plain file box is a screenshot: hand it to the
     // screenshot reader instead of refusing it, so nobody has to know which box is which.
     function onCatalogFileChosen(input) {
+        resetCatalogMap();
         resetUploadState();
         const f = (input.files || [])[0];
         if (!f || !/^image\//.test(f.type || '') && !/\.(png|jpe?g|webp)$/i.test(f.name || '')) return;
@@ -7370,6 +7373,154 @@
         imageStatus('Pasted ' + (files[0].name || 'screenshot') + '. Press Read screenshot.');
     });
 
+    // ---- How the file was read: edit it before anything is saved ---------------------
+    // The server works out which column is the part number / name / price from the
+    // headings and the data. This panel shows the first lines of the file as it
+    // really is; the person can say what each column is, move columns beside each
+    // other, tell us which line holds the headings, and preview again.
+    const COL_ROLES = [['sku', 'Part #'], ['name', 'Product name'], ['price', 'Price'], ['previous_price', 'List / was price'],
+        ['brand', 'Brand'], ['category', 'Category'], ['description', 'Description'], ['unit', 'Unit'], ['case_qty', 'Case qty'], ['image_url', 'Image URL']];
+    let catalogMap = null;
+    let catMapDragPos = null;
+
+    function resetCatalogMap() { catalogMap = null; }
+
+    function initCatalogMap(info) {
+        if (!info || uploadSource !== 'file') { catalogMap = null; return; }
+        const prev = catalogMap;
+        const roles = {};
+        Object.entries(info.mapping || {}).forEach(([role, i]) => { roles[i] = role; });
+        const order = (info.columns || []).map(c => c.index);
+        catalogMap = {
+            info, roles, order,
+            headerRow: info.header_row || 0,
+            mapEdited: prev ? prev.mapEdited : false,
+            headerEdited: prev ? prev.headerEdited : false
+        };
+        // keep the left-to-right order the person arranged
+        if (prev && prev.order && prev.order.length === order.length && prev.order.every(i => order.includes(i))) catalogMap.order = prev.order;
+    }
+
+    function catalogOverrideFields(fd) {
+        if (!catalogMap || uploadSource !== 'file') return;
+        if (catalogMap.headerEdited) fd.append('header_row', String(catalogMap.headerRow));
+        if (catalogMap.mapEdited) {
+            const cm = {};
+            COL_ROLES.forEach(([k]) => { cm[k] = null; });
+            Object.entries(catalogMap.roles).forEach(([i, r]) => { cm[r] = Number(i); });
+            fd.append('column_map', JSON.stringify(cm));
+        }
+    }
+
+    function catMapHtmlShell() {
+        return '<div id="upl-map-panel" class="mt-3"></div>';
+    }
+
+    function renderCatalogMap() {
+        const host = document.getElementById('upl-map-panel');
+        const m = catalogMap;
+        if (!host || !m) return;
+        const info = m.info;
+        const byIdx = {};
+        (info.columns || []).forEach(c => { byIdx[c.index] = c; });
+        const roleLabel = Object.fromEntries(COL_ROLES);
+        const head = m.order.map((idx, pos) => {
+            const c = byIdx[idx] || { header: '' };
+            const role = m.roles[idx] || '';
+            const guessed = role && !m.mapEdited && info.sources && info.sources[role] === 'content';
+            const opts = '<option value="">&mdash; not used &mdash;</option>' +
+                COL_ROLES.map(([k, l]) => `<option value="${k}"${role === k ? ' selected' : ''}>${l}</option>`).join('');
+            return `<th draggable="true" ondragstart="catMapDrag(event,${pos})" ondragover="event.preventDefault()" ondrop="catMapDrop(event,${pos})"
+                class="px-2 py-2 align-top border-b border-r min-w-[140px] font-normal ${role ? 'bg-blue-50' : 'bg-gray-50'} cursor-move">
+                <div class="flex items-center justify-between mb-1 text-gray-400">
+                    <button type="button" onclick="catMapMove(${pos},-1)" ${pos === 0 ? 'disabled' : ''} class="px-1.5 py-0.5 hover:text-gray-900 disabled:opacity-25" title="Move this column left"><i class="fas fa-chevron-left"></i></button>
+                    <span class="text-[10px] uppercase tracking-wide">column ${idx + 1}</span>
+                    <button type="button" onclick="catMapMove(${pos},1)" ${pos === m.order.length - 1 ? 'disabled' : ''} class="px-1.5 py-0.5 hover:text-gray-900 disabled:opacity-25" title="Move this column right"><i class="fas fa-chevron-right"></i></button>
+                </div>
+                <select id="upl-map-role-${idx}" onchange="catMapRole(${idx}, this.value)" class="w-full text-xs border rounded px-1 py-1 bg-white ${role ? 'font-semibold text-blue-800' : 'text-gray-500'}">${opts}</select>
+                <div class="text-[11px] text-gray-500 mt-1 truncate" title="${escA(c.header || '')}">${c.header ? esc(c.header) : '<i>no heading</i>'}</div>
+                ${guessed ? '<div class="text-[10px] text-amber-700 mt-0.5">picked from the numbers</div>' : ''}
+            </th>`;
+        }).join('');
+        const body = (info.preview || []).map(r =>
+            `<tr class="border-b"><td class="px-2 py-1 text-[11px] text-gray-400 border-r bg-gray-50 whitespace-nowrap">line ${esc(String(r.row))}</td>` +
+            m.order.map(idx => `<td class="px-2 py-1 text-xs border-r whitespace-nowrap max-w-[220px] overflow-hidden text-ellipsis ${m.roles[idx] ? 'bg-blue-50/40' : 'text-gray-400'}" title="${escA(r.cells[idx] || '')}">${esc(r.cells[idx] || '')}</td>`).join('') + '</tr>'
+        ).join('');
+        const have = new Set(Object.values(m.roles));
+        const missing = [];
+        if (!have.has('name')) missing.push('Product name');
+        if (!have.has('price')) missing.push('Price');
+        const warns = (info.warnings || []).map(w => `<div class="text-xs text-amber-800"><i class="fas fa-triangle-exclamation mr-1"></i>${esc(w)}</div>`).join('');
+        const dirty = m.mapEdited || m.headerEdited;
+        host.innerHTML = `<div class="border rounded-lg bg-white">
+            <div class="px-3 py-2 border-b bg-gray-50 rounded-t-lg">
+                <p class="text-sm font-semibold text-gray-800"><i class="fas fa-table-columns mr-1 text-blue-700"></i>How your file was read</p>
+                <p class="text-xs text-gray-500">The first lines of your file are below. Choose what each column is, or move columns (arrows or drag the heading) to line them up, then press <b>Preview again</b>. Nothing is saved until you press Apply Import.</p>
+            </div>
+            <div class="px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-b text-xs text-gray-700">
+                <label class="flex items-center gap-1">Headings are on line
+                    <input id="upl-map-header" type="number" min="0" max="500" value="${m.headerRow}" onchange="catMapHeader(this.value)" class="w-16 border rounded px-1 py-0.5 text-xs">
+                    <span class="text-gray-400">(0 = no headings)</span></label>
+                ${info.delimiter ? `<span class="text-gray-400">separator: ${info.delimiter === '\t' ? 'tab' : esc(info.delimiter)}</span>` : ''}
+                ${info.sheet ? `<span class="text-gray-400">sheet: ${esc(info.sheet)}</span>` : ''}
+                ${info.repaired ? `<span class="text-green-700"><i class="fas fa-check mr-1"></i>${info.repaired} line(s) realigned</span>` : ''}
+            </div>
+            <div class="overflow-x-auto max-h-72 overflow-y-auto">
+                <table class="text-left border-collapse" style="min-width:100%"><thead><tr><th class="px-2 py-2 border-b border-r bg-gray-50"></th>${head}</tr></thead><tbody>${body}</tbody></table>
+            </div>
+            <div class="px-3 py-2 border-t space-y-1">
+                ${warns}
+                ${missing.length ? `<div class="text-xs text-red-700"><i class="fas fa-circle-exclamation mr-1"></i>Still needed: choose which column is the <b>${missing.join('</b> and the <b>')}</b>.</div>` : ''}
+                ${dirty ? '<div class="text-xs text-blue-800"><i class="fas fa-rotate mr-1"></i>You changed the columns. Press <b>Preview again</b> to see the result before applying.</div>' : ''}
+                <div class="flex gap-2 pt-1">
+                    <button type="button" onclick="catMapRepreview()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-3 py-1.5 rounded-lg" ${missing.length ? 'disabled style="opacity:.5"' : ''}><i class="fas fa-eye mr-1"></i>Preview again</button>
+                    ${dirty ? '<button type="button" onclick="catMapReset()" class="text-sm text-gray-600 hover:text-gray-900 px-2">Reset to automatic</button>' : ''}
+                </div>
+            </div>
+        </div>`;
+    }
+
+    function catMapDirty() {
+        const apply = document.getElementById('upload-apply-btn');
+        if (apply) apply.disabled = true;           // what is applied must be what was previewed
+        renderCatalogMap();
+    }
+    function catMapRole(idx, role) {
+        const m = catalogMap; if (!m) return;
+        if (role) Object.keys(m.roles).forEach(k => { if (m.roles[k] === role && Number(k) !== idx) delete m.roles[k]; });
+        if (role) m.roles[idx] = role; else delete m.roles[idx];
+        m.mapEdited = true;
+        catMapDirty();
+    }
+    function catMapMove(pos, d) {
+        const m = catalogMap; if (!m) return;
+        const to = pos + d;
+        if (to < 0 || to >= m.order.length) return;
+        const o = m.order; [o[pos], o[to]] = [o[to], o[pos]];
+        renderCatalogMap();
+    }
+    function catMapDrag(ev, pos) {
+        catMapDragPos = pos;
+        if (ev.dataTransfer) { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(pos)); }
+    }
+    function catMapDrop(ev, pos) {
+        ev.preventDefault();
+        const m = catalogMap; if (!m || catMapDragPos === null || catMapDragPos === pos) return;
+        const [moved] = m.order.splice(catMapDragPos, 1);
+        m.order.splice(pos, 0, moved);
+        catMapDragPos = null;
+        renderCatalogMap();
+    }
+    function catMapHeader(v) {
+        const m = catalogMap; if (!m) return;
+        m.headerRow = Math.max(0, Math.min(500, parseInt(v, 10) || 0));
+        m.headerEdited = true;
+        m.mapEdited = false;                         // new headings -> the columns are worked out again
+        catMapDirty();
+    }
+    async function catMapRepreview() { await catalogPreview(); }
+    function catMapReset() { catalogMap = null; catalogPreview(); }
+
     async function catalogSend(dryRun) {
         const companyId = document.getElementById('upload-company').value;
         if (!companyId) { alert('Select a company.'); return null; }
@@ -7400,6 +7551,7 @@
         fd.append('unlock_ppg', (document.getElementById('upl-unlock-ppg') || {}).checked ? '1' : '0');
         if (uploadSource === 'file') { const v = (document.getElementById('upl-vendor') || {}).value; if (v && v.trim()) fd.append('vendor', v.trim()); }
         if (dryRun) fd.append('dry_run', '1');
+        catalogOverrideFields(fd);
 
         try {
             const resp = await adminFetchRaw(`/companies/${companyId}/catalog-upload`, { method: 'POST', body: fd });
@@ -7407,9 +7559,13 @@
             document.getElementById('upload-progress').classList.add('hidden');
             document.getElementById('upload-preview-btn').disabled = false;
             if (!resp.ok) {
-                showUploadResult(`<div class="bg-red-50 p-4 rounded-lg"><p class="text-red-700">${esc(data.error || 'Upload failed.')}</p></div>`);
+                // The columns could not be worked out: show the file and let the person point at them.
+                const canFix = data.mapping_info && uploadSource === 'file';
+                showUploadResult(`<div class="bg-red-50 p-4 rounded-lg"><p class="text-red-700">${esc(data.error || 'Upload failed.')}</p></div>${canFix ? catMapHtmlShell() : ''}`);
+                if (canFix) { initCatalogMap(data.mapping_info); renderCatalogMap(); }
                 return null;
             }
+            if (data.mapping_info) initCatalogMap(data.mapping_info);
             return data;
         } catch (err) {
             document.getElementById('upload-progress').classList.add('hidden');
@@ -7442,6 +7598,7 @@
             ${replaceNote}${ppgNote}
             <p class="text-sm text-gray-700 mt-1">New: <b>${d.inserted}</b> &middot; Updated: <b>${d.updated}</b> &middot; Price changes: <b>${d.price_changes}</b> &middot; Skipped ($0): <b>${d.skipped}</b> &middot; Errors: <b>${d.errors}</b></p>
             ${sample}${errList}
+            ${isPreview && d.mapping_info && uploadSource === 'file' ? catMapHtmlShell() : ''}
             ${isPreview ? '' : `<button type="button" onclick="hideModal('upload-modal')" class="mt-3 w-full bg-gray-800 hover:bg-gray-900 text-white font-semibold py-2 rounded-lg">Done &mdash; close</button>`}
         </div>`;
     }
@@ -7451,6 +7608,7 @@
         const d = await catalogSend(true);
         if (!d) return;
         showUploadResult(uploadSummaryHtml(d, true));
+        renderCatalogMap();
         document.getElementById('upload-apply-btn').disabled = false;
         const res = document.getElementById('upload-result');
         if (res && res.scrollIntoView) res.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
