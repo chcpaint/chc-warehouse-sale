@@ -4,6 +4,7 @@ const csv = require('csv-parser');
 const XLSX = require('xlsx');
 const { parseCSV, parseExcel, normalizeProductRow } = require('../utils/price-sheet');
 const { ROLES: SHEET_ROLES } = require('../utils/sheet-detect');
+const { buildIndex: buildCatalogIndex, classify: classifyCatalogRow } = require('../utils/catalog-review');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requirePasswordCurrent, requireOrderAccess } = require('../middleware/auth');
@@ -1275,7 +1276,10 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             }
         }).filter(Boolean);
 
-        // Upsert products (by SKU if available, otherwise insert new)
+        // Upsert products. Identity is the part number (formatting ignored), never the name:
+        // a part the manufacturer has re-worded is the SAME part, and an item whose wording
+        // matches something already here under another part number is held for a decision
+        // instead of being added twice.
         let inserted = 0, updated = 0, priceChanges = 0, skipped = 0;
         const sampleChanges = [];
 
@@ -1288,11 +1292,44 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             if (!dryRun) await supabaseAdmin.from('products').delete().eq('company_id', companyId);
         }
 
-        // Prices for new parts the file carries none for: the master list.
+        // The person's calls on flagged items: { "<part number>": "add" | "update" | "replace_sku" | "skip" }
+        const DECISIONS = ['add', 'update', 'replace_sku', 'skip'];
+        const decisions = {};
+        if (req.body.decisions) {
+            try {
+                const dj = typeof req.body.decisions === 'object' ? req.body.decisions : JSON.parse(String(req.body.decisions));
+                if (!dj || typeof dj !== 'object' || Array.isArray(dj)) throw new Error('shape');
+                for (const [k, v] of Object.entries(dj)) {
+                    if (!DECISIONS.includes(v)) throw new Error('action');
+                    decisions[skuKeyOf(k)] = v;
+                }
+            } catch (_) {
+                return res.status(400).json({ error: 'The choices for flagged items could not be read. Preview again and retry.' });
+            }
+        }
+
+        // What the company already has (nothing, when the whole catalog is being replaced).
+        const existingProducts = [];
+        if (mode === 'merge') {
+            for (let from = 0; ; from += 1000) {
+                const { data: batch } = await supabaseAdmin.from('products')
+                    .select('id, sku, name, price, price_on_request')
+                    .eq('company_id', companyId)
+                    .range(from, from + 999);
+                (batch || []).forEach(b => existingProducts.push(b));
+                if (!batch || batch.length < 1000) break;
+            }
+        }
+        const catalogIndex = buildCatalogIndex(existingProducts);
+
+        // Optional: price NEW parts that the file carries no price for from the master list.
+        const priceFromMaster = ['1', 'true', 'yes'].includes(String(req.body.price_from_master || '').toLowerCase());
         const masterAny = {};
-        let pricedFromMaster = 0, unpricedCount = 0;
+        let pricedFromMaster = 0, addedUnpriced = 0, renamedCount = 0, held = 0, fileDuplicates = 0, replacedSku = 0;
         const unpricedSamples = [];
-        {
+        const review = [];
+        const renameLog = [];
+        if (priceFromMaster) {
             const needKeys = [...new Set(normalizedRows.filter(r => !(Number(r.price) > 0)).map(r => skuKeyOf(r.sku)).filter(Boolean))];
             for (let i = 0; i < needKeys.length; i += 200) {
                 const { data: mp } = await supabaseAdmin.from('item_library').select('sku_key, list_price').in('sku_key', needKeys.slice(i, i + 200));
@@ -1300,49 +1337,81 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             }
         }
 
+        const seenInFile = new Set();
         for (const row of normalizedRows) {
             row.company_id = companyId;
+
+            const skuK = skuKeyOf(row.sku);
+            // The same part number twice in one file: the first line counts.
+            if (skuK) {
+                if (seenInFile.has(skuK)) { fileDuplicates++; continue; }
+                seenInFile.add(skuK);
+            }
 
             // Every company gets the master's PPG list price — including the
             // one that used to be the source of it. One rule, one place, no
             // customer who is quietly special.
-            const skuK = skuKeyOf(row.sku);
             if (!unlockPPG && skuK && masterPPG[skuK] !== undefined) {
                 row.price = masterPPG[skuK];
                 if (!row.brand || row.brand === 'Uncategorized') row.brand = 'PPG';
             }
 
+            const choice = skuK ? decisions[skuK] : undefined;
+            const cls = classifyCatalogRow(row, catalogIndex);
             let existing = null;
-            if (row.sku) {
-                const { data } = await supabaseAdmin
-                    .from('products')
-                    .select('id, price')
-                    .eq('company_id', companyId)
-                    .eq('sku', row.sku)
-                    .maybeSingle();
-                existing = data || null;
+            let nameApproved = true;
+            let skuReplaced = false;
+
+            if (cls.type === 'match') {
+                existing = cls.existing;
+                row.sku = existing.sku;                                  // keep the part number as the company stores it
+                if (cls.renamed) {
+                    const action = choice === 'skip' ? 'skip' : 'update';  // same part number: rename is the default
+                    review.push({ type: 'renamed', sku: existing.sku, old_name: existing.name, new_name: row.name, action });
+                    if (action === 'update') { renamedCount++; if (renameLog.length < 100) renameLog.push({ sku: existing.sku, from: existing.name, to: row.name }); }
+                    else nameApproved = false;
+                }
+            } else if (cls.type === 'possible_duplicate') {
+                const action = choice || 'hold';
+                review.push({
+                    type: 'possible_duplicate', sku: row.sku || '', name: row.name, action,
+                    matches: cls.matches.map(m => ({ sku: m.sku, name: m.name }))
+                });
+                if (action === 'hold') { held++; continue; }
+                if (action === 'skip') continue;
+                if (action === 'replace_sku') { existing = cls.matches[0]; skuReplaced = true; replacedSku++; }
+                // 'add' falls through and is added as a new item
             }
 
-            // No positive price in the file (blank / $0.00, or a "new items" import that carries
-            // no prices at all). A part the company already has keeps its price untouched. A NEW
-            // part is priced from the master list when the master has it; otherwise it is not
-            // imported and is listed so nothing is guessed and nothing vanishes silently.
-            if (!(Number(row.price) > 0)) {
-                const mp = !existing && skuK ? masterAny[skuK] : undefined;
-                if (mp) { row.price = mp; pricedFromMaster++; }
-                else {
-                    skipped++;
-                    if (!existing) {
-                        unpricedCount++;
-                        if (unpricedSamples.length < 15) unpricedSamples.push({ sku: row.sku || '', name: row.name });
-                    }
+            const hasPrice = Number(row.price) > 0;
+
+            if (!hasPrice) {
+                // No price in the file. A part the company already has keeps its price. A NEW part
+                // is added "price on request" -- the catalog is complete and an employee prices it
+                // in Customer Pricing -- or priced from the master list if that was asked for.
+                const nameOnly = existing && ((cls.type === 'match' && cls.renamed && nameApproved) || skuReplaced);
+                if (existing) {
+                    if (nameOnly) {
+                        updated++;
+                        if (!dryRun) await supabaseAdmin.from('products').update({ name: row.name, ...(skuReplaced ? { sku: row.sku } : {}) }).eq('id', existing.id);
+                    } else skipped++;
                     continue;
                 }
+                const mp = priceFromMaster && skuK ? masterAny[skuK] : undefined;
+                if (mp) { row.price = mp; row.price_on_request = false; pricedFromMaster++; }
+                else {
+                    row.price = 0; row.price_on_request = true;
+                    addedUnpriced++;
+                    if (unpricedSamples.length < 15) unpricedSamples.push({ sku: row.sku || '', name: row.name });
+                }
+            } else {
+                row.price_on_request = false;
             }
 
             if (existing) {
-                const changed = Math.round(Number(existing.price) * 100) !== Math.round(Number(row.price) * 100);
-                if (changed) {
+                if (!nameApproved || (cls.type === 'match' && !cls.renamed)) row.name = existing.name;
+                const changed = Math.round(Number(existing.price) * 100) !== Math.round(Number(row.price) * 100) || existing.price_on_request === true && row.price_on_request === false;
+                if (changed && hasPrice) {
                     priceChanges++;
                     if (sampleChanges.length < 15) {
                         sampleChanges.push({ sku: row.sku, name: row.name, old_price: Number(existing.price), new_price: Number(row.price) });
@@ -1385,7 +1454,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             await logAction(req.admin.id, 'catalog_uploaded', 'company', companyId, {
                 filename: req.file.originalname, mode, deleted, inserted, updated, price_changes: priceChanges, skipped, errors: errors.length,
                 columns_used: Object.fromEntries(Object.entries(mappingInfo.mapping).map(([role, i]) => [role, { column: i, heading: (mappingInfo.columns[i] || {}).header || '', source: mappingInfo.sources[role] }])),
-                lines_realigned: mappingInfo.repaired, priced_from_master: pricedFromMaster, unpriced: unpricedCount
+                lines_realigned: mappingInfo.repaired, priced_from_master: pricedFromMaster, added_unpriced: addedUnpriced, renamed: renamedCount, renames: renameLog, held, sku_replaced: replacedSku
             }, req.ip);
         }
 
@@ -1405,8 +1474,14 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
             ppg_unlocked: unlockPPG,
             vendor: vendor || null,
             priced_from_master: pricedFromMaster,
-            unpriced: unpricedCount,
-            unpriced_samples: unpricedSamples,
+            added_unpriced: addedUnpriced,
+            added_unpriced_samples: unpricedSamples,
+            renamed: renamedCount,
+            held,
+            file_duplicates: fileDuplicates,
+            sku_replaced: replacedSku,
+            review: review.slice(0, 300),
+            review_total: review.length,
             rows_read: rows.length,
             mapping_info: mappingInfo
         });

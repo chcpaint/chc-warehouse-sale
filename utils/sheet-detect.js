@@ -497,7 +497,7 @@ function readSheet(matrix, opts = {}) {
     // import, where every price is $0.00) can still be read: the products are identified by part
     // number and priced from the master list afterwards. A price heading over unusable values is
     // different -- that needs a person to look.
-    const hasPriceHeading = headers.some(t => headerCandidates(t).some(c => c.role === 'price'));
+    const hasPriceHeading = headers.some((t, j) => headerCandidates(t).some(c => c.role === 'price') && stats[j] && stats[j].n > 0);   // a price column left entirely blank is just "not priced yet"
     result.noPrice = mapping.price === undefined && mapping.name !== undefined && mapping.sku !== undefined && !hasPriceHeading;
     result.missing = ['name', 'price'].filter(r => mapping[r] === undefined && !(r === 'price' && result.noPrice));
     if (result.missing.length) return result;

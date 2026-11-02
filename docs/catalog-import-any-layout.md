@@ -31,13 +31,30 @@ API: `column_map` (JSON `{"sku":0,"name":1,"price":3,"previous_price":null}`, 0-
 `header_row` (1-based line, `0` = no headings). The response carries `mapping_info` (mapping, where each choice came from:
 `header` / `content` / `manual`, columns, preview lines, warnings, lines realigned). The mapping used is written to the audit log.
 
-## Files with no prices (accounting "new items" imports)
+## Files with no prices (a new manufacturer catalog)
 
 AccountEdge's new-items export has no headings and every price is `$0.00`. A column of zeros is never taken for the price.
-When a file has no price heading and no price-like column, the parts are read by part number and name and the preview says so:
+When a file has no price heading and no price-like column (or a price column left blank), the parts are read by part number and name:
 
-- A **new** part is priced from the master list (`item_library.list_price`) when the master has it.
-- A part the company **already has** keeps its current price untouched.
-- A new part with no price in the file and none in the master is not imported; the preview lists it (`unpriced`, `unpriced_samples`).
+- A **new** part is added as **price on request** (`price = 0`, `price_on_request = true`): customers see "Contact for current
+  pricing" and an employee sets the price in Customer Pricing, which clears the flag. Nothing reads as free.
+- A part the company **already has** keeps its price untouched.
+- Optional checkbox *Price new items from the master list*: new parts with no file price take `item_library.list_price` when the master has one (off by default).
 
 A price heading over unusable values (e.g. "call") is not treated as "no prices": the screen asks the person to choose.
+
+## Renamed items and possible duplicates (`utils/catalog-review.js`)
+
+Identity is the **part number** (case and punctuation ignored: `MMM-06652` = `MMM06652`), never the name.
+
+| Incoming line | What happens |
+|---|---|
+| Same part number, same wording | Normal update (price rules above). The part number stays as the company stores it. |
+| Same part number, new wording | **Renamed.** Default: use the new name (price untouched). The person can choose *Keep the current name*. Old and new names go to the audit log. |
+| New part number, wording matches something already there | **Possible duplicate. Held**: nothing is written until the person chooses *Add as a new item*, *Same item - new part number* (updates the existing product's part number and name, price untouched) or *Skip it*. |
+| Size / grit / volume differs (P80 vs P120, 310mL vs 400mL) | Different items, never flagged. |
+| Same part number twice in one file | First line counts; the rest are counted and ignored. |
+
+API: `decisions` = JSON `{"<part number>": "add" | "update" | "replace_sku" | "skip"}`; the response carries `review`, `renamed`,
+`held`, `file_duplicates`, `sku_replaced`, `added_unpriced`. In the admin Preview each flagged item has a dropdown; Apply is
+disabled after a change until Preview is run again.

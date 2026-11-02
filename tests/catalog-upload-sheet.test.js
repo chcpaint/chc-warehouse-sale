@@ -236,33 +236,146 @@ function newItemsCsv() {
             row('MMM04903', '3M Plastic Contour Sheet', 'Glues/Metal/Bumper'), row('MMM08693', '3M Auto Glass Urethane Adhesive 310mL', 'Glues/Metal/Bumper')].join('\n') + '\n';
 }
 
-test('a new-items file with no prices: parts are read, new ones priced from the master list, known ones untouched, the rest listed', async () => {
+test('a new-items file with no prices: new parts are added "price on request" for an employee to price, known parts untouched', async () => {
     reset();
-    fake.db.item_library = [
-        { id: 'l1', sku_key: 'MMM02604', brand: '3M', list_price: 6.5 },
-        { id: 'l2', sku_key: 'MMM00344', brand: '3M', list_price: 9.99 },     // company already has this part
-        { id: 'l3', sku_key: 'MMM04903', brand: '3M', list_price: 21.0 }
-    ];
     global.__TEST_FILE__ = csvFile('3M_New_Items_Import.csv', newItemsCsv());
     const prev = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1', vendor: '3M' });
     assert.equal(prev.status, 200);
     assert.equal(prev.body.rows_read, 4);
     assert.equal(prev.body.mapping_info.no_price, true);
-    assert.equal(prev.body.priced_from_master, 2);
-    assert.equal(prev.body.unpriced, 1);
-    assert.equal(prev.body.unpriced_samples[0].sku, 'MMM08693');
+    assert.equal(prev.body.inserted, 3, 'three new parts');
+    assert.equal(prev.body.added_unpriced, 3);
     assert.equal(prev.body.errors, 0);
     assert.equal(fake.db.products.length, 1, 'preview writes nothing');
 
     const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ vendor: '3M' });
     assert.equal(res.status, 200);
     const by = sku => fake.db.products.find(p => p.sku === sku);
-    assert.equal(by('MMM02604').price, 6.5);
+    assert.equal(by('MMM02604').price, 0);
+    assert.equal(by('MMM02604').price_on_request, true, 'unpriced, not free');
     assert.equal(by('MMM02604').brand, '3M');
     assert.equal(by('MMM02604').name, '3M Softback Sanding Sponge Fine');
-    assert.equal(by('MMM04903').price, 21);
     assert.equal(by('MMM00344').price, 2.99, 'a part the shop already has keeps its own price');
-    assert.equal(by('MMM08693'), undefined, 'no price anywhere: not imported');
+    assert.equal(fake.db.products.length, 4);
+
+    // Running the same file again must not create anything twice.
+    const again = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ vendor: '3M' });
+    assert.equal(again.body.inserted, 0);
+    assert.equal(fake.db.products.length, 4);
+});
+
+test('optionally, new parts with no price in the file take the master list price', async () => {
+    reset();
+    fake.db.item_library = [{ id: 'l1', sku_key: 'MMM02604', brand: '3M', list_price: 6.5 }];
+    global.__TEST_FILE__ = csvFile('3M_New_Items_Import.csv', newItemsCsv());
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ vendor: '3M', price_from_master: '1' });
+    assert.equal(res.body.priced_from_master, 1);
+    const p = fake.db.products.find(x => x.sku === 'MMM02604');
+    assert.equal(p.price, 6.5);
+    assert.equal(p.price_on_request, false);
+    assert.equal(fake.db.products.find(x => x.sku === 'MMM04903').price_on_request, true);
+});
+
+// ---- Renamed / duplicate / new-number review ------------------------------------------------
+
+const PRICED = rows => 'SKU,Name,Price\n' + rows.map(r => r.join(',')).join('\n') + '\n';
+
+test('a part the manufacturer re-worded (same part number) is a rename, never a second product; its price is untouched', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', PRICED([['MMM00344', '3M Yellow Spreader 3 x 4 inch (new)', '']]));
+    const prev = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1' });
+    assert.equal(prev.body.renamed, 1);
+    assert.equal(prev.body.review[0].type, 'renamed');
+    assert.equal(prev.body.review[0].old_name, '3M Yellow Spreader 3x4');
+    assert.equal(fake.db.products[0].name, '3M Yellow Spreader 3x4', 'preview writes nothing');
+    await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({});
+    assert.equal(fake.db.products.length, 1);
+    assert.equal(fake.db.products[0].name, '3M Yellow Spreader 3 x 4 inch (new)');
+    assert.equal(fake.db.products[0].price, 2.99);
+    const audit = fake.db.audit_log.find(a => a.action === 'catalog_uploaded');
+    assert.ok(JSON.stringify(audit).includes('3M Yellow Spreader 3x4'), 'old name is kept in the log');
+});
+
+test('a rename can be declined, and then the old name stays (even when the file carries a new price)', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', PRICED([['MMM00344', 'Totally different words', '3.50']]));
+    await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ decisions: { MMM00344: 'skip' } });
+    assert.equal(fake.db.products[0].name, '3M Yellow Spreader 3x4');
+    assert.equal(fake.db.products[0].price, 3.5, 'the price change still applies');
+});
+
+test('part numbers that differ only in punctuation are the same part', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', PRICED([['MMM-00344', '3M Yellow Spreader 3x4', '3.10']]));
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({});
+    assert.equal(res.body.inserted, 0);
+    assert.equal(fake.db.products.length, 1);
+    assert.equal(fake.db.products[0].sku, 'MMM00344', 'the stored part number is not rewritten');
+    assert.equal(fake.db.products[0].price, 3.1);
+});
+
+test('the same wording under a NEW part number is held for a decision, not added twice', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', PRICED([['MMM90001', '3M Yellow Spreader 3x4', '']]));
+    const prev = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1' });
+    assert.equal(prev.body.held, 1);
+    assert.equal(prev.body.inserted, 0);
+    const r = prev.body.review[0];
+    assert.equal(r.type, 'possible_duplicate');
+    assert.equal(r.action, 'hold');
+    assert.equal(r.matches[0].sku, 'MMM00344');
+    await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({});
+    assert.equal(fake.db.products.length, 1, 'held means nothing is written');
+});
+
+test('...and the person can add it anyway, skip it, or say the manufacturer changed the part number', async () => {
+    for (const [choice, expect] of [['add', 2], ['skip', 1], ['replace_sku', 1]]) {
+        reset();
+        global.__TEST_FILE__ = csvFile('x.csv', PRICED([['MMM90001', '3M Yellow Spreader 3x4', '']]));
+        const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ decisions: JSON.stringify({ MMM90001: choice }) });
+        assert.equal(res.status, 200, choice);
+        assert.equal(fake.db.products.length, expect, choice);
+        if (choice === 'replace_sku') {
+            assert.equal(fake.db.products[0].sku, 'MMM90001', 'the existing product now carries the new part number');
+            assert.equal(fake.db.products[0].price, 2.99, 'its price is untouched');
+        }
+        if (choice === 'add') assert.equal(fake.db.products.find(p => p.sku === 'MMM90001').price_on_request, true);
+    }
+});
+
+test('items that differ in size or grit are different items, however alike the wording', async () => {
+    reset();
+    fake.db.products.push({ id: 'p-80', company_id: CO, sku: 'MMM31361', name: '3M Cubitron II Hookit Abrasive Disc P80 3in', brand: '3M', price: 1, is_active: true });
+    global.__TEST_FILE__ = csvFile('x.csv', PRICED([['MMM31362', '3M Cubitron II Hookit Abrasive Disc P120 3in', '']]));
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1' });
+    assert.equal(res.body.held, 0);
+    assert.equal(res.body.inserted, 1);
+});
+
+test('the same part number twice in one file is imported once and counted', async () => {
+    reset();
+    global.__TEST_FILE__ = csvFile('x.csv', PRICED([['A1', 'Alpha thing one', '1.00'], ['a-1', 'Alpha thing one again', '2.00']]));
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({});
+    assert.equal(res.body.file_duplicates, 1);
+    assert.equal(fake.db.products.filter(p => /^A/i.test(p.sku)).length, 1);
+});
+
+test('a rename arriving in a price-less file still renames (name only)', async () => {
+    reset();
+    global.__TEST_FILE__ = { originalname: 'n.csv', buffer: Buffer.from('MMM00344,3M Yellow Spreader Wide 3x4,B,S,I,1,2,3,,x,X,Misc,,,,,,3M,,HST,,1,0,0,$0.00\nMMM55555,Brand new item name here,B,S,I,1,2,3,,x,X,Misc,,,,,,3M,,HST,,1,0,0,$0.00\n') };
+    const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ vendor: '3M' });
+    assert.equal(res.status, 200);
+    assert.equal(fake.db.products.find(p => p.sku === 'MMM00344').name, '3M Yellow Spreader Wide 3x4');
+    assert.equal(fake.db.products.find(p => p.sku === 'MMM00344').price, 2.99);
+    assert.equal(fake.db.products.find(p => p.sku === 'MMM55555').price_on_request, true);
+});
+
+test('bad decisions are refused', async () => {
+    reset();
+    for (const decisions of ['{nope', JSON.stringify({ A: 'delete-everything' }), JSON.stringify(['add'])]) {
+        const res = await request(app).post(`/api/admin/companies/${CO}/catalog-upload`).send({ dry_run: '1', decisions });
+        assert.equal(res.status, 400);
+    }
 });
 
 test('a price heading over words still stops and asks, it is not treated as "no prices"', async () => {
