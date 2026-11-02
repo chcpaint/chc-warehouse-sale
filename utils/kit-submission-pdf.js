@@ -338,13 +338,28 @@ function buildKitSubmissionPdf({ submission, company, location, distributor, log
         }
 
         // ---------------- total ----------------
-        if (y + 40 > bottomLimit()) { doc.addPage(); y = doc.page.margins.top; }
+        if (y + 82 > bottomLimit()) { doc.addPage(); y = doc.page.margins.top; }
         y += 8;
         doc.moveTo(left, y).lineTo(right, y).lineWidth(1.5).strokeColor(INK).stroke();
-        doc.font('Helvetica-Bold').fontSize(11).fillColor(INK)
-            .text(`Total (${lines.length} line item${lines.length === 1 ? '' : 's'})`, left + pad, y + 8, { width: width - 140, lineBreak: false });
-        doc.text(money(submission.total_amount), right - 120, y + 8, { width: 120 - pad, align: 'right', lineBreak: false });
-        y += 34;
+        // Documents generated with tax show it; older ones (no tax recorded) read as they always did.
+        if (submission.tax_amount !== null && submission.tax_amount !== undefined && submission.subtotal_amount !== null && submission.subtotal_amount !== undefined) {
+            const pct = Math.round(Number(submission.tax_rate || 0) * 10000) / 100;
+            const label = submission.tax_label === 'Tax exempt' ? 'Tax exempt (0%)' : `${submission.tax_label || 'Tax'} (${pct}%)`;
+            doc.font('Helvetica').fontSize(10).fillColor(INK)
+                .text(`Subtotal (${lines.length} line item${lines.length === 1 ? '' : 's'})`, left + pad, y + 8, { width: width - 140, lineBreak: false });
+            doc.text(money(submission.subtotal_amount), right - 120, y + 8, { width: 120 - pad, align: 'right', lineBreak: false });
+            doc.text(label, left + pad, y + 24, { width: width - 140, lineBreak: false });
+            doc.text(money(submission.tax_amount), right - 120, y + 24, { width: 120 - pad, align: 'right', lineBreak: false });
+            doc.moveTo(left, y + 42).lineTo(right, y + 42).lineWidth(0.75).strokeColor(RULE).stroke();
+            doc.font('Helvetica-Bold').fontSize(11).fillColor(INK).text('Total', left + pad, y + 49, { width: width - 140, lineBreak: false });
+            doc.text(money(submission.total_amount), right - 120, y + 49, { width: 120 - pad, align: 'right', lineBreak: false });
+            y += 76;
+        } else {
+            doc.font('Helvetica-Bold').fontSize(11).fillColor(INK)
+                .text(`Total (${lines.length} line item${lines.length === 1 ? '' : 's'})`, left + pad, y + 8, { width: width - 140, lineBreak: false });
+            doc.text(money(submission.total_amount), right - 120, y + 8, { width: 120 - pad, align: 'right', lineBreak: false });
+            y += 34;
+        }
 
         // ---------------- estimate note + statement ----------------
         const note = suggestedNote(submission);

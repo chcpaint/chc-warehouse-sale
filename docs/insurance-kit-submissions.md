@@ -140,3 +140,18 @@ screen.
 - API (under `/api/store/:slug/kit-submissions`): `GET /my-kits/:kitId`,
   `PUT /my-kits/:kitId`, `POST /kits/:kitId/customize`. `GET /kits` also returns
   `allow_edit_kits`.
+
+## Tax on submissions (13% on every account)
+
+Every kit submission carries tax. The rate comes from the same place an order's
+tax does (`utils/tax.js`): exempt account 0%, the account's own rate, its region's
+rate, the distributor's rate, otherwise **13% (Ontario HST)**. So every account is
+charged 13% unless it has been set otherwise under Companies → Tax.
+
+- The preview shows Subtotal, HST (13%) and Total; the PDF prints the same.
+- Stored on the row and frozen with it (`migrations/052_kit_submission_tax.sql`):
+  `subtotal_amount`, `tax_rate`, `tax_amount`, `tax_label`; `total_amount` is
+  subtotal + tax (what is billed). A later rate change never alters a saved document.
+- Submissions created before the migration have no tax columns and print exactly as
+  they did (Total only); they are not recalculated.
+- Run the migration **before** deploying the code that writes the new columns.

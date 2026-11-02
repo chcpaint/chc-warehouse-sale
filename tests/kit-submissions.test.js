@@ -251,7 +251,9 @@ test('creates a submission with a shop-specific number and frozen lines', async 
     assert.equal(res.status, 201, JSON.stringify(res.body));
     const s = res.body.submission;
     assert.match(s.submission_no, /^AC-00001$/);
-    assert.equal(s.total_amount, 120);
+    assert.equal(s.subtotal_amount, 120);
+    assert.equal(s.tax_amount, 15.6);
+    assert.equal(s.total_amount, 135.6);          // 13% HST on every account by default
     assert.equal(s.line_count, 2);
     const row = fake.db.kit_submissions[0];
     assert.equal(row.vin, '2HGFE2F59NH000000');
@@ -339,12 +341,14 @@ test('line overrides adjust quantity or drop a line, when allowed', async () => 
         { kit_item_id: L_TAPE, skip: true }
     ] }));
     assert.equal(r.status, 201);
-    assert.equal(r.body.submission.total_amount, 200);
+    assert.equal(r.body.submission.subtotal_amount, 200);
+    assert.equal(r.body.submission.total_amount, 226);
     assert.equal(r.body.submission.line_count, 1);
 
     fake.db.companies[0].settings.kit_submissions.allow_line_overrides = false;
     r = await request(app()).post(S).send(body({ lines: [{ kit_item_id: L_CLEAR, quantity: 9 }] }));
-    assert.equal(r.body.submission.total_amount, 120);      // override ignored
+    assert.equal(r.body.submission.subtotal_amount, 120);      // override ignored
+    assert.equal(r.body.submission.total_amount, 135.6);
 });
 
 test('a later price change does not alter a saved submission', async () => {
@@ -352,7 +356,8 @@ test('a later price change does not alter a saved submission', async () => {
     const created = await request(app()).post(S).send(body());
     fake.db.products.find(p => p.id === CLEAR).price = 999;
     const r = await request(app()).get(`${S}/${created.body.submission.id}`);
-    assert.equal(r.body.submission.total_amount, 120);
+    assert.equal(r.body.submission.subtotal_amount, 120);
+    assert.equal(r.body.submission.total_amount, 135.6);
     assert.equal(r.body.submission.lines_snapshot[0].unit_price, 200);
 });
 
@@ -597,7 +602,8 @@ test('without inventory, kits need no mapping: lines come from the master kit, p
 
     const created = await request(app()).post(S).send(body());
     assert.equal(created.status, 201, JSON.stringify(created.body));
-    assert.equal(created.body.submission.total_amount, 164);
+    assert.equal(created.body.submission.subtotal_amount, 164);
+    assert.equal(created.body.submission.total_amount, 185.32);
 });
 
 test('without inventory, a part that is in neither the shop catalogue nor the library is still blocked, not invented', async () => {
@@ -697,7 +703,8 @@ test('a kit built in the shop can then be submitted for a job', async () => {
     const made = await request(app()).post(S + '/my-kits').send({ name: 'Quick', lines: [{ sku: 'PRF611N', quantity: 2 }] });
     const res = await request(app()).post(S).send(body({ kit_id: made.body.kit.id }));
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    assert.equal(Number(res.body.submission.total_amount), 400);
+    assert.equal(Number(res.body.submission.subtotal_amount), 400);
+    assert.equal(Number(res.body.submission.total_amount), 452);
 });
 
 test('add kit refuses unknown parts, other shops\' parts, duplicates, bad quantities and empty kits', async () => {
@@ -839,7 +846,8 @@ test('edit: change a quantity, set a price, remove a part, add a part — then i
     // the same figures land on the saved submission
     const sub = await request(app()).post(S).send(body({ kit_id: id }));
     assert.equal(sub.status, 201, JSON.stringify(sub.body));
-    assert.equal(Number(sub.body.submission.total_amount), 2 * 180 + 4 * 12 + 35);
+    assert.equal(Number(sub.body.submission.subtotal_amount), 2 * 180 + 4 * 12 + 35);
+    assert.equal(Number(sub.body.submission.total_amount), Math.round((2 * 180 + 4 * 12 + 35) * 1.13 * 100) / 100);
 });
 
 test('edit: a price can be cleared back to the standard price, and an untouched price is not frozen', async () => {
@@ -895,4 +903,77 @@ test('edit refuses bad input and never touches CHC kits or another shop\'s kit',
     // nothing was changed by any refusal
     assert.equal(fake.db.kit_items.filter(i => i.kit_id === KIT).length, 3);
     assert.equal(fake.db.kit_items.find(i => i.id === l.kit_item_id).quantity, 0.5);
+});
+
+// ==================================================================
+// TAX: 13% on every account's kit submissions, frozen with the document
+// ==================================================================
+const zlib = require('node:zlib');
+function pdfText(buf) {
+    // pdfkit deflates its content streams and writes each string as hex inside TJ arrays;
+    // inflate and decode them so the words actually printed can be checked.
+    const raw = buf.toString('latin1'); const out = []; let i = 0;
+    while ((i = raw.indexOf('stream', i)) !== -1) {
+        const start = raw.indexOf('\n', i) + 1, end = raw.indexOf('endstream', start);
+        if (end < 0) break;
+        try {
+            const content = zlib.inflateSync(buf.subarray(start, end)).toString('latin1');
+            for (const m of content.matchAll(/\[(.*?)\] TJ/g)) {
+                out.push([...m[1].matchAll(/<([0-9a-fA-F]*)>/g)].map(h => Buffer.from(h[1], 'hex').toString('latin1')).join(''));
+            }
+        } catch (_) { /* not a deflated stream */ }
+        i = end + 9;
+    }
+    return out.join('\n');
+}
+
+test('every account is charged 13% by default, previewed and stored on the document', async () => {
+    reset(); mapKit();
+    const prev = await request(app()).get(`${S}/kits/${KIT}/preview?multiplier=1`);
+    assert.equal(prev.body.subtotal, 120);
+    assert.equal(prev.body.tax_rate, 0.13);
+    assert.equal(prev.body.tax_label, 'HST');
+    assert.equal(prev.body.tax_amount, 15.6);
+    assert.equal(prev.body.grand_total, 135.6);
+    const res = await request(app()).post(S).send(body());
+    const s = fake.db.kit_submissions[0];
+    assert.deepEqual([s.subtotal_amount, s.tax_rate, s.tax_amount, s.tax_label, s.total_amount], [120, 0.13, 15.6, 'HST', 135.6]);
+    assert.equal(res.body.submission.total_amount, 135.6);
+});
+
+test('a tax-exempt account pays no tax; an account with its own rate uses it; the distributor rate applies to the rest', async () => {
+    reset(); mapKit();
+    fake.db.companies[0].settings.tax = { exempt: true };
+    let prev = await request(app()).get(`${S}/kits/${KIT}/preview`);
+    assert.equal(prev.body.tax_amount, 0); assert.equal(prev.body.tax_label, 'Tax exempt'); assert.equal(prev.body.grand_total, 120);
+
+    fake.db.companies[0].settings.tax = { rate: 0.15 };
+    prev = await request(app()).get(`${S}/kits/${KIT}/preview`);
+    assert.equal(prev.body.tax_rate, 0.15); assert.equal(prev.body.tax_label, 'Tax'); assert.equal(prev.body.tax_amount, 18); assert.equal(prev.body.grand_total, 138);
+
+    delete fake.db.companies[0].settings.tax;
+    fake.db.distributors[0].settings = { tax: { country: 'CA', region: 'ON', rate: 0.05 } };
+    prev = await request(app()).get(`${S}/kits/${KIT}/preview`);
+    assert.equal(prev.body.tax_rate, 0.05); assert.equal(prev.body.grand_total, 126);
+});
+
+test('a saved document keeps the rate it was generated with when the rate later changes', async () => {
+    reset(); mapKit();
+    const made = await request(app()).post(S).send(body());
+    fake.db.companies[0].settings.tax = { rate: 0.5 };
+    const again = await request(app()).get(`${S}/${made.body.submission.id}`);
+    assert.equal(again.body.submission.tax_rate, 0.13);
+    assert.equal(again.body.submission.total_amount, 135.6);
+});
+
+test('the PDF itemizes subtotal, HST and total; an older document with no tax still prints as before', async () => {
+    const base = { submission_no: 'AC-00001', kit_name: 'Door Skin', multiplier: 1, ro_number: '77', created_at: new Date().toISOString(),
+        lines_snapshot: [{ sku: 'A', brand: 'B', name: 'Thing', unit: 'each', quantity: 2, unit_price: 50, line_cost: 100 }] };
+    const args = { company: { name: 'Assured' }, location: null, distributor: { name: 'CHC' }, logo: null };
+    const taxed = pdfText(await buildKitSubmissionPdf({ ...args, submission: { ...base, total_amount: 113, subtotal_amount: 100, tax_rate: 0.13, tax_amount: 13, tax_label: 'HST' } }));
+    assert.match(taxed, /Subtotal/); assert.match(taxed, /HST \(13%\)/); assert.match(taxed, /\$113\.00/); assert.match(taxed, /\$13\.00/);
+    const exempt = pdfText(await buildKitSubmissionPdf({ ...args, submission: { ...base, total_amount: 100, subtotal_amount: 100, tax_rate: 0, tax_amount: 0, tax_label: 'Tax exempt' } }));
+    assert.match(exempt, /Tax exempt \(0%\)/);
+    const old = pdfText(await buildKitSubmissionPdf({ ...args, submission: { ...base, total_amount: 100 } }));
+    assert.doesNotMatch(old, /Subtotal/); assert.match(old, /Total \(1 line item\)/);
 });

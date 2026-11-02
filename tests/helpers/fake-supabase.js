@@ -89,7 +89,7 @@ const KNOWN_COLUMNS = {
     kit_submissions: new Set([
         'id', 'company_id', 'location_id', 'submission_no', 'kit_id', 'kit_name', 'multiplier',
         'ro_number', 'claim_no', 'insurer', 'vehicle', 'vin', 'notes', 'line_count',
-        'total_amount', 'lines_snapshot', 'status', 'paid_at', 'voided_at', 'void_reason',
+        'total_amount', 'subtotal_amount', 'tax_rate', 'tax_amount', 'tax_label', 'lines_snapshot', 'status', 'paid_at', 'voided_at', 'void_reason',
         'created_by_name', 'created_by_user_id', 'created_at', 'updated_at'
     ]),
     order_receipts: new Set([

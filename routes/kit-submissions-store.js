@@ -35,13 +35,14 @@ const { moduleSettings, moduleEnabled } = require('../utils/modules');
 const { round4 } = require('../utils/inventory');
 const { buildKitSubmissionPdf, loadSupplierLogo } = require('../utils/kit-submission-pdf');
 const { resolveKitLines, kitsForCompany } = require('./inventory-kits');
+const { taxSettings, computeTax } = require('../utils/tax');
 
 const router = express.Router({ mergeParams: true });
 
 router.use(requireCompanyAuth);
 
 const MODULE = 'kit_submissions';
-const SELECT_LIST = 'id, submission_no, kit_name, multiplier, ro_number, claim_no, insurer, vehicle, vin, line_count, total_amount, status, paid_at, voided_at, void_reason, location_id, created_by_name, created_at';
+const SELECT_LIST = 'id, submission_no, kit_name, multiplier, ro_number, claim_no, insurer, vehicle, vin, line_count, total_amount, subtotal_amount, tax_rate, tax_amount, tax_label, status, paid_at, voided_at, void_reason, location_id, created_by_name, created_at';
 
 // ------------------------------------------------------------
 // Guard: the module must be on for this company
@@ -92,6 +93,36 @@ function prefixFor(name) {
     let p = words.length >= 2 ? words.slice(0, 4).map(w => w[0]).join('') : (words[0] || '').slice(0, 4);
     p = p.toUpperCase();
     return p.length >= 2 ? p : 'SHOP';
+}
+
+// ------------------------------------------------------------
+// Tax. Every account is charged 13% (Ontario HST) unless it is marked exempt or
+// has its own rate -- the same resolution an order uses (utils/tax.js). The rate
+// is frozen on the document when it is generated.
+// ------------------------------------------------------------
+async function resolveTax(req) {
+    let distributorSettings = null;
+    const did = req.companyRow && req.companyRow.distributor_id;
+    if (did) {
+        const { data } = await supabaseAdmin.from('distributors').select('settings').eq('id', did).maybeSingle();
+        distributorSettings = (data && data.settings) || null;
+    }
+    return taxSettings(req.companyRow && req.companyRow.settings, distributorSettings);
+}
+
+function taxLabelFor(ts) {
+    if (ts.exempt) return 'Tax exempt';
+    return Math.abs(ts.rate - 0.13) < 1e-9 ? 'HST' : 'Tax';
+}
+
+/** subtotal -> { subtotal, tax_rate, tax_amount, tax_label, total } with cents rounded once. */
+function applyTax(subtotal, ts) {
+    const sub = Math.round(Number(subtotal || 0) * 100) / 100;
+    const tax = computeTax(sub, ts.rate);
+    return {
+        subtotal: sub, tax_rate: ts.rate, tax_amount: tax, tax_label: taxLabelFor(ts),
+        total: Math.round((sub + tax) * 100) / 100
+    };
 }
 
 /** Price one kit for this company: resolved lines, with quantities for a multiplier. */
@@ -191,11 +222,14 @@ router.get('/kits/:kitId/preview', async (req, res) => {
             unpriced: !(Number(l.unit_price) > 0)
         }));
         const reason = blockedReason(priced, unresolved, req.autoMapping);
+        const taxed = applyTax(lines.reduce((s, l) => s + l.line_cost, 0), await resolveTax(req));
         res.json({
             kit: { id: kit.id, name: kit.name, description: kit.description || null },
             multiplier: multiplier.value,
             lines, unresolved,
             total: round4(lines.reduce((s, l) => s + l.line_cost, 0)),
+            subtotal: taxed.subtotal, tax_rate: taxed.tax_rate, tax_label: taxed.tax_label,
+            tax_amount: taxed.tax_amount, grand_total: taxed.total,
             blocked: !!reason, blocked_reason: reason,
             allow_line_overrides: req.moduleSettings.allow_line_overrides !== false
         });
@@ -731,7 +765,7 @@ router.post('/', async (req, res) => {
             category: l.category || null, unit: l.unit, quantity: round4(l.quantity),
             unit_price: l.unit_price, line_cost: round4(round4(l.quantity) * l.unit_price)
         }));
-        const total = Math.round(lines.reduce((s, l) => s + l.line_cost, 0) * 100) / 100;
+        const t = applyTax(lines.reduce((s, l) => s + l.line_cost, 0), await resolveTax(req));
 
         const row = {
             company_id: companyId,
@@ -746,7 +780,11 @@ router.post('/', async (req, res) => {
             vin: vin || null,
             notes: text(body.notes, 1000) || null,
             line_count: lines.length,
-            total_amount: total,
+            total_amount: t.total,
+            subtotal_amount: t.subtotal,
+            tax_rate: t.tax_rate,
+            tax_amount: t.tax_amount,
+            tax_label: t.tax_label,
             lines_snapshot: lines,
             created_by_name: actor,
             created_by_user_id: req.companyUser ? req.companyUser.id : null

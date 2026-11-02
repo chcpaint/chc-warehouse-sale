@@ -114,7 +114,10 @@
                             (st.allowOverrides ? '<td class="py-2 pl-2 text-center"><input type="checkbox" class="ks-inc" checked aria-label="Include ' + esc(l.sku || l.name) + '"></td>' : '') +
                             '</tr>';
                     }).join('') +
-                    '</tbody><tfoot><tr><td colspan="5" class="py-3 text-right font-bold">Total</td><td class="py-3 text-right font-bold" id="ks-total">' + money(p.total) + '</td>' +
+                    '</tbody><tfoot>' +
+                    '<tr><td colspan="5" class="pt-3 text-right text-gray-600">Subtotal</td><td class="pt-3 text-right" id="ks-sub">' + money(p.subtotal != null ? p.subtotal : p.total) + '</td>' + (st.allowOverrides ? '<td></td>' : '') + '</tr>' +
+                    '<tr><td colspan="5" class="py-1 text-right text-gray-600" id="ks-taxlabel">' + esc(taxText(p)) + '</td><td class="py-1 text-right" id="ks-tax">' + money(p.tax_amount || 0) + '</td>' + (st.allowOverrides ? '<td></td>' : '') + '</tr>' +
+                    '<tr><td colspan="5" class="py-2 text-right font-bold">Total</td><td class="py-2 text-right font-bold" id="ks-total">' + money(p.grand_total != null ? p.grand_total : p.total) + '</td>' +
                     (st.allowOverrides ? '<td></td>' : '') + '</tr></tfoot></table></div>';
             }
         }
@@ -176,6 +179,12 @@
         wire();
     }
 
+    function taxText(p) {
+        if (p.tax_label === 'Tax exempt') return 'Tax exempt (0%)';
+        var pct = Math.round(Number(p.tax_rate || 0) * 10000) / 100;
+        return (p.tax_label || 'Tax') + ' (' + pct + '%)';
+    }
+
     function recalcTotals() {
         var total = 0;
         document.querySelectorAll('#tab-kitsub tr[data-line]').forEach(function (tr) {
@@ -187,7 +196,11 @@
             tr.style.opacity = inc && !inc.checked ? '0.45' : '';
             total += ext;
         });
-        var t = $('ks-total'); if (t) t.textContent = money(total);
+        var sub = Math.round(total * 100) / 100;
+        var tax = Math.round((sub * Number((st.preview && st.preview.tax_rate) || 0) + Number.EPSILON) * 100) / 100;
+        var a = $('ks-sub'); if (a) a.textContent = money(sub);
+        var b = $('ks-tax'); if (b) b.textContent = money(tax);
+        var t = $('ks-total'); if (t) t.textContent = money(Math.round((sub + tax) * 100) / 100);
     }
 
     // ------------------------------------------------------------
@@ -548,7 +561,7 @@
                 '<td class="py-2 text-right"><button type="button" class="text-red-600 hover:underline" data-ke-del="' + i + '" aria-label="Remove ' + esc(l.sku) + '">Remove</button></td></tr>';
         }).join('');
         host.innerHTML = '<table class="w-full text-sm"><thead><tr class="text-left text-xs uppercase text-gray-500 border-b"><th class="py-2 pr-2">Part number</th><th class="py-2 pr-2">Description</th><th class="py-2 pr-2 text-right">Quantity</th><th class="py-2 pr-2 text-right">Unit price</th><th class="py-2 pr-2 text-right">Line total</th><th class="py-2"></th></tr></thead><tbody>' + body +
-            '</tbody><tfoot><tr><td colspan="4" class="py-3 text-right font-bold">Kit total (one use)</td><td class="py-3 pr-2 text-right font-bold" id="ke-total">' + money(total) + '</td><td></td></tr></tfoot></table>' +
+            '</tbody><tfoot><tr><td colspan="4" class="py-3 text-right font-bold">Kit total (one use, before tax)</td><td class="py-3 pr-2 text-right font-bold" id="ke-total">' + money(total) + '</td><td></td></tr></tfoot></table>' +
             (unpriced ? '<p class="text-xs text-amber-700 mt-1">' + unpriced + ' part' + (unpriced === 1 ? ' has' : 's have') + ' no price yet. Enter one, or the kit cannot be submitted.</p>' : '');
         host.querySelectorAll('[data-ke-qty]').forEach(function (el) { el.addEventListener('input', function () { ed.lines[Number(el.getAttribute('data-ke-qty'))].quantity = Number(el.value); refreshEdTotals(); }); });
         host.querySelectorAll('[data-ke-price]').forEach(function (el) { el.addEventListener('input', function () { var l = ed.lines[Number(el.getAttribute('data-ke-price'))]; l.touched = true; l.priceText = el.value; refreshEdTotals(); }); el.addEventListener('change', updateEdLines); });
