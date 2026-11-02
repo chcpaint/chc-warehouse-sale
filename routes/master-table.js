@@ -44,6 +44,7 @@
 const express = require('express');
 const XLSX = require('xlsx');
 const { supabaseAdmin } = require('../utils/supabase');
+const { detectSymbology } = require('../utils/inventory');   // values the product_barcodes check constraint allows (lower-case)
 const { requireSuperAdmin } = require('../middleware/auth');
 const { catalogUpload } = require('../middleware/upload');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
@@ -1080,7 +1081,7 @@ router.post('/push', async (req, res) => {
                 if (clash) continue;
                 const { error: bErr } = await supabaseAdmin.from('product_barcodes').insert({
                     product_id: rows[j].id, barcode: code,
-                    symbology: code.length === 13 ? 'EAN_13' : code.length === 12 ? 'UPC_A' : 'OTHER',
+                    symbology: detectSymbology(code),
                     is_primary: true, source: 'master', is_internal: false
                 });
                 if (!bErr) barcodesSet += 1;
@@ -1338,7 +1339,7 @@ router.post('/sync', async (req, res) => {
                 if (w.replace) await supabaseAdmin.from('product_barcodes').delete().eq('id', w.replace);
                 const { error } = await supabaseAdmin.from('product_barcodes').insert({
                     product_id: w.product_id, barcode: w.barcode,
-                    symbology: w.barcode.length === 13 ? 'EAN_13' : w.barcode.length === 12 ? 'UPC_A' : 'OTHER',
+                    symbology: detectSymbology(w.barcode),
                     is_primary: true, source: 'master_sync', is_internal: false
                 });
                 if (!error) done += 1;

@@ -7,6 +7,7 @@ const { ROLES: SHEET_ROLES } = require('../utils/sheet-detect');
 const { buildIndex: buildCatalogIndex, classify: classifyCatalogRow } = require('../utils/catalog-review');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
+const { detectSymbology } = require('../utils/inventory');   // lower-case values the product_barcodes check constraint allows
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requirePasswordCurrent, requireOrderAccess } = require('../middleware/auth');
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
@@ -951,7 +952,7 @@ router.put('/companies/:companyId/products/:productId/barcode', requireCompanyAc
             .insert({
                 product_id: productId, barcode: raw,
                 // Length is the only honest signal we have about the symbology.
-                symbology: raw.length === 13 ? 'EAN_13' : raw.length === 12 ? 'UPC_A' : 'OTHER',
+                symbology: detectSymbology(raw),
                 is_primary: true, source: 'manual',
                 // An internal code is one we invented for an item with no
                 // manufacturer barcode. A typed one is assumed real.

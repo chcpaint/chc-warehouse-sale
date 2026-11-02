@@ -192,9 +192,9 @@ test('a product from another company cannot be reached through this company\'s p
 test('symbology is inferred from length rather than guessed', async () => {
     reset();
     await setBarcode(CO_A, TAPE, '051131066526');            // 12
-    assert.equal(fake.db.product_barcodes.find(b => b.product_id === TAPE).symbology, 'UPC_A');
+    assert.equal(fake.db.product_barcodes.find(b => b.product_id === TAPE).symbology, 'upc_a');
     await setBarcode(CO_A, TAPE, '5025427724426');           // 13
-    assert.equal(fake.db.product_barcodes.find(b => b.product_id === TAPE).symbology, 'EAN_13');
+    assert.equal(fake.db.product_barcodes.find(b => b.product_id === TAPE).symbology, 'ean_13');
     await setBarcode(CO_A, TAPE, 'CHC-INTERNAL-01');
-    assert.equal(fake.db.product_barcodes.find(b => b.product_id === TAPE).symbology, 'OTHER');
+    assert.equal(fake.db.product_barcodes.find(b => b.product_id === TAPE).symbology, 'code_39');
 });
