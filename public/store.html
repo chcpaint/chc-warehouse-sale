@@ -657,6 +657,7 @@
             <!-- Plans & billing -->
             <section id="tab-kitsub" class="hidden fade-in"></section>
             <section id="tab-kitadd" class="hidden fade-in"></section>
+            <section id="tab-kitedit" class="hidden fade-in"></section>
 
             <section id="tab-billing" class="hidden fade-in">
                 <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
@@ -1419,7 +1420,8 @@
         ]},
         { group: 'Insurance', requires: 'kit_submissions', items: [
             { tab: 'kitsub',     label: 'Insurance Kits', icon: 'fa-file-invoice-dollar' },
-            { tab: 'kitadd',     label: 'Add Kit',        icon: 'fa-plus' }
+            { tab: 'kitadd',     label: 'Add Kit',        icon: 'fa-plus' },
+            { tab: 'kitedit',    label: 'Edit Kits',      icon: 'fa-pen-to-square' }
         ]},
         { group: 'Compliance', requires: 'shopsafe', items: [
             { tab: 'shopsafe',   label: 'ShopSafe',      icon: 'fa-shield-halved' }
@@ -1464,6 +1466,11 @@
         const k = state.company && state.company.settings && state.company.settings.kit_submissions;
         return !(k && k.allow_add_kit === false);
     }
+    /** "Edit Kits" shows only where CHC switched it on (settings.kit_submissions.allow_edit_kits = true). */
+    function kitEditAllowed() {
+        const k = state.company && state.company.settings && state.company.settings.kit_submissions;
+        return !!(k && k.allow_edit_kits === true);
+    }
     /** Plans & billing only appears for a customer their supplier has put on paid billing. */
     function billingVisible() {
         return !!(state.company && state.company.settings && state.company.settings.billing && state.company.settings.billing.mode === 'paid');
@@ -1493,7 +1500,7 @@
         const current = document.querySelector('[data-tab].tab-active')?.dataset.tab || 'products';
 
         const navGroups = NAV.filter(g => !g.requires || navModuleOn(g.requires))
-            .map(g => ({ ...g, items: g.items.filter(i => (i.tab !== 'reports' || reportsAllowed()) && (i.tab !== 'billing' || billingVisible())) }));
+            .map(g => ({ ...g, items: g.items.filter(i => (i.tab !== 'reports' || reportsAllowed()) && (i.tab !== 'billing' || billingVisible()) && (i.tab !== 'kitadd' || kitAddAllowed()) && (i.tab !== 'kitedit' || kitEditAllowed())) }));
         host.innerHTML = navGroups.map(g => {
             const holdsCurrent = g.items.some(i => i.tab === current);
             // A collapsed group hiding the screen you are on would be a lie
@@ -1657,6 +1664,7 @@
         if (tab === 'billing') bpLoad();
         if (tab === 'kitsub' && window.KITSUB) window.KITSUB.show();
         if (tab === 'kitadd' && window.KITSUB) window.KITSUB.showAdd();
+        if (tab === 'kitedit' && window.KITSUB) window.KITSUB.showEdit();
         if (tab === 'contact') loadContactNotes();
 
         // Landing back on Products -- from the drawer, "Continue shopping" in
@@ -3816,7 +3824,8 @@
                 getUser: () => state.companyUser,
                 getLocation: () => state.location,
                 mount: document.getElementById('tab-kitsub'),
-                addMount: document.getElementById('tab-kitadd')
+                addMount: document.getElementById('tab-kitadd'),
+                editMount: document.getElementById('tab-kitedit')
             });
             if (ok) document.getElementById('nav-kitsub')?.classList.remove('hidden');
         } catch (err) {

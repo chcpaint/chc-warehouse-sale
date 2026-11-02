@@ -743,3 +743,156 @@ test('a shop can remove its own kit but never a CHC kit or another shop\'s', asy
     assert.ok(!list.body.kits.some(k => k.id === made.body.kit.id));
     assert.equal(fake.db.repair_kits.find(k => k.id === KIT).is_active, true);
 });
+
+// ==================================================================
+// EDIT KITS: a shop changes parts, quantities and prices of its own kit
+// ==================================================================
+function allowEdit() { fake.db.companies[0].settings.kit_submissions.allow_edit_kits = true; }
+async function ownCopy() {
+    const r = await request(app()).post(`${S}/kits/${KIT}/customize`).send({});
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    return r.body.kit.id;
+}
+
+test('editing is off unless CHC switches it on for the shop', async () => {
+    reset();
+    const made = await request(app()).post(S + '/my-kits').send({ name: 'Mine', lines: [{ sku: 'PRF611N', quantity: 1 }] });
+    const id = made.body.kit.id;
+    assert.equal((await request(app()).get(`${S}/my-kits/${id}`)).status, 403);
+    assert.equal((await request(app()).put(`${S}/my-kits/${id}`).send({ name: 'x', lines: [{ kit_item_id: 'x', quantity: 1 }] })).status, 403);
+    assert.equal((await request(app()).post(`${S}/kits/${KIT}/customize`).send({})).status, 403);
+    assert.equal((await request(app()).get(S + '/kits')).body.allow_edit_kits, false);
+    allowEdit();
+    assert.equal((await request(app()).get(S + '/kits')).body.allow_edit_kits, true);
+    assert.equal((await request(app()).get(`${S}/my-kits/${id}`)).status, 200);
+});
+
+test('a shop makes its own copy of a CHC kit; the original is untouched and hidden from the shop', async () => {
+    reset(); allowEdit(); fake.db.item_library = libParts();
+    fake.db.item_library.push({ id: 'l3', sku: 'FUS123EZ', sku_key: 'FUS123EZ', name: 'Fusor Adhesive', brand: 'Fusor', unit: 'each', list_price: 30 });
+    // a line the shop already dropped, and a price it already negotiated
+    fake.db.kit_product_map.push(
+        { id: 'p1', company_id: CO, kit_item_id: L_GHOST, product_id: null, quantity: null, is_excluded: true },
+        { id: 'p2', company_id: CO, kit_item_id: L_CLEAR, product_id: CLEAR, quantity: 0.75, is_excluded: false, unit_price_override: 150 }
+    );
+    const id = await ownCopy();
+    const copy = fake.db.repair_kits.find(k => k.id === id);
+    assert.equal(copy.company_id, CO);
+    assert.equal(copy.name, 'Door Skin (my copy)');
+    const items = fake.db.kit_items.filter(i => i.kit_id === id);
+    assert.deepEqual(items.map(i => i.sku).sort(), ['MMM08852', 'PRF611N'], 'the dropped line is not copied');
+    assert.equal(items.find(i => i.sku === 'PRF611N').quantity, 0.75, 'the shop quantity carried across');
+    assert.equal(fake.db.kit_product_map.find(m => m.kit_item_id === items.find(i => i.sku === 'PRF611N').id).unit_price_override, 150);
+
+    assert.equal(fake.db.repair_kits.find(k => k.id === KIT).is_active, true);
+    assert.equal(fake.db.kit_items.filter(i => i.kit_id === KIT).length, 3, 'CHC original unchanged');
+    const list = await request(app()).get(S + '/kits');
+    assert.ok(!list.body.kits.some(k => k.id === KIT), 'original hidden from this shop');
+    assert.ok(list.body.kits.some(k => k.id === id && k.own));
+    // another shop still has it
+    assert.equal(fake.db.company_kit_access.find(a => a.company_id === CO && a.kit_id === KIT).enabled, false);
+});
+
+test('customize can keep the original, and refuses a repeated name, other shops\' kits and CHC kits not on for the shop', async () => {
+    reset(); allowEdit();
+    let r = await request(app()).post(`${S}/kits/${KIT}/customize`).send({ name: 'Keep both', hide_original: false });
+    assert.equal(r.status, 201);
+    assert.equal(fake.db.company_kit_access.find(a => a.kit_id === KIT).enabled, true);
+    r = await request(app()).post(`${S}/kits/${KIT}/customize`).send({ name: 'keep both' });
+    assert.equal(r.status, 409);
+    r = await request(app()).post(`${S}/kits/${FOREIGN_KIT}/customize`).send({});
+    assert.equal(r.status, 404);
+});
+
+test('edit: change a quantity, set a price, remove a part, add a part — then it is what gets billed', async () => {
+    reset(); allowEdit(); fake.db.item_library = libParts();
+    const id = await ownCopy();
+    let r = await request(app()).get(`${S}/my-kits/${id}`);
+    assert.equal(r.status, 200);
+    const byS = Object.fromEntries(r.body.lines.map(l => [l.sku, l]));
+    assert.equal(byS.PRF611N.unit_price, 200);
+    assert.ok(byS.FUS123EZ.problem, 'a part not in the library is shown with its problem, so it can be removed');
+
+    const lines = [
+        { kit_item_id: byS.PRF611N.kit_item_id, sku: 'PRF611N', quantity: 2, unit: 'each', unit_price: 180 },
+        { kit_item_id: byS.MMM08852.kit_item_id, sku: 'MMM08852', quantity: 4, unit: 'each' },
+        { sku: 'MMM-09999', quantity: 1, unit: 'each', unit_price: 35 }                 // new, library part, own price
+    ];
+    r = await request(app()).put(`${S}/my-kits/${id}`).send({ name: 'Door Skin (Leons)', description: 'Our version', lines });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(fake.db.repair_kits.find(k => k.id === id).name, 'Door Skin (Leons)');
+
+    const items = fake.db.kit_items.filter(i => i.kit_id === id);
+    assert.equal(items.length, 3, 'the unpriceable FUS123EZ line was removed');
+    assert.ok(!items.some(i => i.sku === 'FUS123EZ'));
+
+    const prev = await request(app()).get(`${S}/kits/${id}/preview?multiplier=1`);
+    assert.equal(prev.body.blocked, false, JSON.stringify(prev.body));
+    const price = sku => prev.body.lines.find(l => l.sku === sku);
+    assert.equal(price('PRF611N').quantity, 2);
+    assert.equal(price('PRF611N').unit_price, 180, 'the shop price, not the catalogue price');
+    assert.equal(price('MMM08852').quantity, 4);
+    assert.equal(price('MMM08852').unit_price, 12, 'untouched price stays at the library price');
+    assert.equal(price('MMM-09999').unit_price, 35);
+    assert.equal(prev.body.total, 2 * 180 + 4 * 12 + 35);
+
+    // the same figures land on the saved submission
+    const sub = await request(app()).post(S).send(body({ kit_id: id }));
+    assert.equal(sub.status, 201, JSON.stringify(sub.body));
+    assert.equal(Number(sub.body.submission.total_amount), 2 * 180 + 4 * 12 + 35);
+});
+
+test('edit: a price can be cleared back to the standard price, and an untouched price is not frozen', async () => {
+    reset(); allowEdit();
+    const id = await ownCopy();
+    const get = async () => Object.fromEntries((await request(app()).get(`${S}/my-kits/${id}`)).body.lines.map(l => [l.sku, l]));
+    let l = await get();
+    const lines = ids => [{ kit_item_id: l.PRF611N.kit_item_id, sku: 'PRF611N', quantity: 1, ...ids }];
+    // quantity-only save: no price field -> no override is created
+    await request(app()).put(`${S}/my-kits/${id}`).send({ name: 'K', lines: lines({}) });
+    assert.equal(fake.db.kit_product_map.filter(m => m.kit_item_id === l.PRF611N.kit_item_id).length, 0);
+    // set, then clear
+    await request(app()).put(`${S}/my-kits/${id}`).send({ name: 'K', lines: lines({ unit_price: 150 }) });
+    l = await get(); assert.equal(l.PRF611N.unit_price, 150); assert.equal(l.PRF611N.price_overridden, true);
+    await request(app()).put(`${S}/my-kits/${id}`).send({ name: 'K', lines: lines({}) });
+    l = await get(); assert.equal(l.PRF611N.unit_price, 150, 'omitted = left alone');
+    await request(app()).put(`${S}/my-kits/${id}`).send({ name: 'K', lines: lines({ unit_price: null }) });
+    l = await get(); assert.equal(l.PRF611N.unit_price, 200); assert.equal(l.PRF611N.price_overridden, false);
+});
+
+test('edit keeps resolving for a shop that runs inventory (price-only overrides never break the line)', async () => {
+    reset(); requireMapping(); allowEdit();
+    const made = await request(app()).post(S + '/my-kits').send({ name: 'Mine', lines: [{ sku: 'PRF611N', quantity: 1 }] });
+    const id = made.body.kit.id;
+    const l = (await request(app()).get(`${S}/my-kits/${id}`)).body.lines[0];
+    const r = await request(app()).put(`${S}/my-kits/${id}`).send({ name: 'Mine', lines: [{ kit_item_id: l.kit_item_id, sku: 'PRF611N', quantity: 3, unit_price: 190 }] });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const prev = await request(app()).get(`${S}/kits/${id}/preview?multiplier=1`);
+    assert.equal(prev.body.blocked, false, JSON.stringify(prev.body));
+    assert.equal(prev.body.total, 570);
+});
+
+test('edit refuses bad input and never touches CHC kits or another shop\'s kit', async () => {
+    reset(); allowEdit(); fake.db.item_library = libParts();
+    const id = await ownCopy();
+    const l = (await request(app()).get(`${S}/my-kits/${id}`)).body.lines.find(x => x.sku === 'PRF611N');
+    const put = (b, kit = id) => request(app()).put(`${S}/my-kits/${kit}`).send(b);
+    const good = { kit_item_id: l.kit_item_id, sku: 'PRF611N', quantity: 1 };
+    assert.equal((await put({ name: '', lines: [good] })).status, 400);
+    assert.equal((await put({ name: 'K', lines: [] })).status, 400);
+    assert.match((await put({ name: 'K', lines: [{ ...good, quantity: 0 }] })).body.error, /above zero/);
+    assert.match((await put({ name: 'K', lines: [{ ...good, unit_price: -5 }] })).body.error, /price must be a number/);
+    assert.match((await put({ name: 'K', lines: [{ ...good, unit_price: 'abc' }] })).body.error, /price must be a number/);
+    assert.match((await put({ name: 'K', lines: [{ kit_item_id: 'bbbbbbb9-9999-4999-8999-999999999999', sku: 'X', quantity: 1 }] })).body.error, /not in this kit/);
+    assert.match((await put({ name: 'K', lines: [good, { sku: 'prf-611n', quantity: 1 }] })).body.error, /listed twice/);
+    assert.match((await put({ name: 'K', lines: [good, { sku: 'NOPE999', quantity: 1 }] })).body.error, /not a part your shop can use/);
+    assert.equal((await put({ name: 'K', lines: [good] }, KIT)).status, 404, 'CHC master kit');
+    assert.equal((await put({ name: 'K', lines: [good] }, FOREIGN_KIT)).status, 404, 'another shop');
+    assert.equal((await request(app()).get(`${S}/my-kits/${FOREIGN_KIT}`)).status, 404);
+    // two kits cannot share a name
+    await request(app()).post(S + '/my-kits').send({ name: 'Other kit', lines: [{ sku: 'PRF611N', quantity: 1 }] });
+    assert.equal((await put({ name: 'other KIT', lines: [good] })).status, 409);
+    // nothing was changed by any refusal
+    assert.equal(fake.db.kit_items.filter(i => i.kit_id === KIT).length, 3);
+    assert.equal(fake.db.kit_items.find(i => i.id === l.kit_item_id).quantity, 0.5);
+});

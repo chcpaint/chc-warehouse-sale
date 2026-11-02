@@ -115,3 +115,28 @@ straight away; lines are priced the same way as any other kit.
 - API (under `/api/store/:slug/kit-submissions`): `GET /parts?q=`,
   `POST /my-kits`, `DELETE /my-kits/:kitId`. `GET /kits` now returns `own` per
   kit and `allow_add_kit`.
+
+## Edit Kits (change parts, quantities and prices)
+
+Off by default. Switch it on for a shop with
+`settings.kit_submissions.allow_edit_kits = true` (see
+`chc-leons-allow-kit-editing.sql`). The shop then sees **Edit Kits** under
+Insurance in the main menu and an **Edit kits** button on the Insurance Kits
+screen.
+
+- A CHC master kit is shared by every shop and is never edited. The shop first
+  takes its own copy (**Make my copy to edit**), which carries across anything
+  already changed for it (dropped lines, quantities, prices). The CHC original
+  is hidden from that shop's list by default so there is one version of it.
+- In the editor a shop changes quantities, removes parts, adds parts (same
+  search as Add Kit) and sets a price per line, then saves. Part numbers of
+  existing lines are fixed.
+- A price is stored per shop against the line (`kit_product_map.unit_price_override`,
+  with the line's own product kept so it keeps resolving). Leaving a price alone
+  does not freeze it; clearing it returns the line to the catalogue or CHC
+  library price. Previews, saved submissions and PDFs all use the shop price.
+- Nothing is saved unless the whole kit validates: parts must be ones the shop
+  can use, no repeats, quantities above zero, prices zero or more.
+- API (under `/api/store/:slug/kit-submissions`): `GET /my-kits/:kitId`,
+  `PUT /my-kits/:kitId`, `POST /kits/:kitId/customize`. `GET /kits` also returns
+  `allow_edit_kits`.

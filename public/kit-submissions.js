@@ -12,7 +12,7 @@
 (function () {
     'use strict';
 
-    var ctx = null;          // { apiBase, slug, getToken, getUser, getLocation, mount, addMount }
+    var ctx = null;          // { apiBase, slug, getToken, getUser, getLocation, mount, addMount, editMount }
     var st = {
         kits: [], allowOverrides: true, preview: null, loaded: false,
         busy: false, search: '', status: '', list: [], total: 0, banner: null
@@ -44,6 +44,7 @@
                 st.kits = x.d.kits || [];
                 st.allowOverrides = x.d.allow_line_overrides !== false;
                 ad.allowed = x.d.allow_add_kit !== false;
+                st.allowEditKits = x.d.allow_edit_kits === true;
             });
     }
     function loadList() {
@@ -143,7 +144,8 @@
         ctx.mount.innerHTML =
             '<button onclick="showTab(\'products\')" type="button" class="mb-3 text-blue-600 hover:underline text-sm"><i class="fas fa-arrow-left mr-1"></i>Back to Products</button>' +
             '<div class="flex items-start justify-between gap-3 flex-wrap"><h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-file-invoice-dollar mr-2"></i>Insurance kit submissions</h2>' +
-            (ad.allowed ? '<button type="button" onclick="showTab(\'kitadd\')" class="text-sm font-semibold text-blue-700 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50"><i class="fas fa-plus mr-1"></i>Add kit</button>' : '') + '</div>' +
+            '<div class="flex gap-2">' + (st.allowEditKits ? '<button type="button" onclick="showTab(\'kitedit\')" class="text-sm font-semibold text-blue-700 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50"><i class="fas fa-pen-to-square mr-1"></i>Edit kits</button>' : '') +
+            (ad.allowed ? '<button type="button" onclick="showTab(\'kitadd\')" class="text-sm font-semibold text-blue-700 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50"><i class="fas fa-plus mr-1"></i>Add kit</button>' : '') + '</div></div>' +
             '<p class="text-gray-500 mb-4">Pick a kit, add the repair order and claim, and get a numbered PDF itemizing its materials to load into Mitchell, CCC ONE or Audatex. Every one is saved below.</p>' +
             banner() +
             '<div class="bg-white rounded-xl shadow-sm border p-5 mb-6">' +
@@ -436,10 +438,206 @@
     }
 
     // ------------------------------------------------------------
+    // Edit Kits: change the shop's own kits (parts, quantities, prices)
+    // ------------------------------------------------------------
+    var ed = { view: 'list', kit: null, lines: [], q: '', results: [], searching: false, busy: false, banner: null, allowed: false };
+
+    function edRoot() { return ctx && ctx.editMount; }
+    function edFail(msg) { ed.banner = { kind: 'err', text: msg }; ed.busy = false; if (ed.view === 'edit') renderEditor(); else renderEditList(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    function edBanner() {
+        if (!ed.banner) return '';
+        var cls = ed.banner.kind === 'ok' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800';
+        return '<div class="mb-4 rounded-lg border px-4 py-3 text-sm ' + cls + '" role="status">' + esc(ed.banner.text) + '</div>';
+    }
+    function jsonOf(r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); }
+
+    function showEdit() {
+        if (!ctx || !ctx.editMount) return;
+        ed.view = 'list'; ed.banner = null; ed.kit = null;
+        renderEditList();
+        loadKits().then(function () { ed.allowed = !!st.allowEditKits; renderEditList(); })
+            .catch(function (e) { edFail(e.message); });
+    }
+
+    function renderEditList() {
+        var root = edRoot(); if (!root) return;
+        var rows = st.kits.length ? st.kits.map(function (k) {
+            var own = !!k.own;
+            return '<li class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-3 border-b last:border-0">' +
+                '<div><span class="font-semibold text-gray-800">' + esc(k.name) + '</span> ' +
+                '<span class="text-xs px-2 py-0.5 rounded-full ' + (own ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600') + '">' + (own ? 'Your kit' : 'CHC kit') + '</span>' +
+                '<div class="text-xs text-gray-500">' + esc(k.line_count) + ' part' + (k.line_count === 1 ? '' : 's') + (k.estimated_total ? ' &middot; about ' + money(k.estimated_total) : '') + '</div></div>' +
+                (own ? '<button type="button" class="bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold px-4 py-1.5 rounded-lg" data-ke-edit="' + esc(k.id) + '"><i class="fas fa-pen mr-1"></i>Edit</button>'
+                     : '<button type="button" class="text-blue-700 border border-blue-200 hover:bg-blue-50 text-sm font-semibold px-4 py-1.5 rounded-lg" data-ke-copy="' + esc(k.id) + '" data-name="' + esc(k.name) + '"><i class="fas fa-copy mr-1"></i>Make my copy to edit</button>') +
+                '</li>';
+        }).join('') : '<li class="py-4 text-sm text-gray-500">No kits yet.</li>';
+        root.innerHTML =
+            '<button onclick="showTab(\'kitsub\')" type="button" class="mb-3 text-blue-600 hover:underline text-sm"><i class="fas fa-arrow-left mr-1"></i>Back to Insurance Kits</button>' +
+            '<div class="flex items-start justify-between gap-3 flex-wrap"><h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-pen-to-square mr-2"></i>Edit kits</h2>' +
+            '<button type="button" onclick="showTab(\'kitadd\')" class="text-sm font-semibold text-blue-700 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50"><i class="fas fa-plus mr-1"></i>Add kit</button></div>' +
+            '<p class="text-gray-500 mb-4">Change the parts, quantities and prices in your kits. CHC kits are shared by everyone, so to change one you first make your own copy; the original stays as CHC set it.</p>' +
+            edBanner() +
+            (ed.allowed || !st.loaded ? '<div class="bg-white rounded-xl shadow-sm border p-5"><ul>' + rows + '</ul></div>'
+                : '<div class="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">Editing kits is not turned on for your shop. Ask CHC to switch it on.</div>');
+        root.querySelectorAll('[data-ke-edit]').forEach(function (b) { b.addEventListener('click', function () { openEditor(b.getAttribute('data-ke-edit')); }); });
+        root.querySelectorAll('[data-ke-copy]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                if (!window.confirm('Make your own copy of "' + b.getAttribute('data-name') + '"?\n\nYou can then change its parts, quantities and prices. The CHC original will be hidden from your list so you only see your version.')) return;
+                b.disabled = true;
+                api('/kits/' + b.getAttribute('data-ke-copy') + '/customize', { method: 'POST', body: {} })
+                    .then(jsonOf)
+                    .then(function (x) { if (!x.ok) throw new Error(x.d.error || 'Could not make your copy.'); return loadKits().then(function () { ed.banner = { kind: 'ok', text: 'Your copy is ready. Make your changes below.' }; return openEditor(x.d.kit.id, true); }); })
+                    .catch(function (e) { edFail(e.message); });
+            });
+        });
+    }
+
+    function openEditor(kitId, keepBanner) {
+        if (!keepBanner) ed.banner = null;
+        return api('/my-kits/' + kitId).then(jsonOf).then(function (x) {
+            if (!x.ok) throw new Error(x.d.error || 'Could not open that kit.');
+            ed.view = 'edit';
+            ed.kit = x.d.kit;
+            ed.lines = x.d.lines.map(function (l) { l.touched = false; l.priceText = l.unit_price == null ? '' : String(l.unit_price); return l; });
+            ed.q = ''; ed.results = [];
+            renderEditor(); window.scrollTo({ top: 0, behavior: 'smooth' });
+        }).catch(function (e) { edFail(e.message); });
+    }
+
+    function linePrice(l) {
+        var t = String(l.priceText == null ? '' : l.priceText).trim();
+        if (t === '') return l.touched ? (l.catalogue_price == null ? null : Number(l.catalogue_price)) : (l.unit_price == null ? null : Number(l.unit_price));
+        var n = Number(t); return isFinite(n) ? n : null;
+    }
+
+    function renderEditor() {
+        var root = edRoot(); if (!root) return;
+        root.innerHTML =
+            '<button type="button" id="ke-back" class="mb-3 text-blue-600 hover:underline text-sm"><i class="fas fa-arrow-left mr-1"></i>Back to all kits</button>' +
+            '<h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-pen mr-2"></i>Edit kit</h2>' +
+            '<p class="text-gray-500 mb-4">Change a quantity or price, remove a part, or add one, then save. A price you set applies to your shop only; clear it to go back to the standard price.</p>' +
+            edBanner() +
+            '<div class="bg-white rounded-xl shadow-sm border p-5">' +
+            '<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">' +
+            '<div><label for="ke-name" class="block text-xs font-semibold text-gray-600 mb-1">Kit name <span class="text-red-600">*</span></label><input id="ke-name" maxlength="120" value="' + esc(ed.kit.name) + '" class="w-full px-3 py-2 border rounded-lg text-sm"></div>' +
+            '<div class="md:col-span-2"><label for="ke-desc" class="block text-xs font-semibold text-gray-600 mb-1">Description (optional)</label><input id="ke-desc" maxlength="500" value="' + esc(ed.kit.description || '') + '" class="w-full px-3 py-2 border rounded-lg text-sm"></div></div>' +
+            '<div id="ke-lines" class="overflow-x-auto"></div>' +
+            '<div class="mt-5"><label for="ke-search" class="block text-xs font-semibold text-gray-600 mb-1">Add a part (part number or name)</label>' +
+            '<input id="ke-search" type="search" autocomplete="off" value="' + esc(ed.q) + '" class="w-full md:w-96 px-3 py-2 border rounded-lg text-sm" placeholder="e.g. 05915 or body filler"><div id="ke-results" class="mt-2"></div></div>' +
+            '<div class="mt-5 flex items-center gap-3"><button type="button" id="ke-save" class="bg-blue-700 hover:bg-blue-800 text-white font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed">' +
+            (ed.busy ? '<i class="fas fa-spinner fa-spin mr-1"></i>Saving&hellip;' : '<i class="fas fa-save mr-1"></i>Save changes') + '</button>' +
+            '<button type="button" id="ke-cancel" class="text-sm text-gray-600 hover:underline">Cancel</button></div></div>';
+        updateEdLines(); updateEdResults(); wireEditor();
+    }
+
+    function updateEdLines() {
+        var host = $('ke-lines'), save = $('ke-save'); if (!host) return;
+        if (save) save.disabled = ed.busy || !ed.lines.length;
+        if (!ed.lines.length) { host.innerHTML = '<p class="text-sm text-gray-500">No parts. Add at least one below, or go back and remove the kit.</p>'; return; }
+        var total = 0, unpriced = 0;
+        var body = ed.lines.map(function (l, i) {
+            var pr = linePrice(l), q = Number(l.quantity);
+            var ext = pr != null && q > 0 ? pr * q : 0; total += ext; if (pr == null) unpriced++;
+            var overridden = l.touched ? String(l.priceText || '').trim() !== '' : l.price_overridden;
+            return '<tr class="border-b align-top"><td class="py-2 pr-2 font-mono text-xs">' + esc(l.sku) + '</td>' +
+                '<td class="py-2 pr-2">' + (l.problem ? '<span class="text-amber-700 text-xs">' + esc(l.problem) + '</span>' : esc(l.name || '') + (l.brand ? ' <span class="text-xs text-gray-500">' + esc(l.brand) + '</span>' : '')) + '</td>' +
+                '<td class="py-2 pr-2 text-right"><input type="number" step="any" min="0" value="' + esc(qty(l.quantity)) + '" data-ke-qty="' + i + '" aria-label="Quantity for ' + esc(l.sku) + '" class="w-20 px-2 py-1 border rounded text-right"> <span class="text-xs text-gray-400">' + esc(l.unit || 'each') + '</span></td>' +
+                '<td class="py-2 pr-2 text-right"><div class="inline-flex items-center"><span class="text-gray-400 mr-1">$</span><input type="number" step="0.01" min="0" value="' + esc(l.priceText) + '" data-ke-price="' + i + '" placeholder="' + (l.catalogue_price != null ? esc(Number(l.catalogue_price).toFixed(2)) : 'set price') + '" aria-label="Unit price for ' + esc(l.sku) + '" class="w-24 px-2 py-1 border rounded text-right ' + (overridden ? 'border-blue-400 bg-blue-50' : '') + '"></div>' +
+                (overridden ? '<div><button type="button" class="text-xs text-blue-700 hover:underline" data-ke-reset="' + i + '">Use standard price' + (l.catalogue_price != null ? ' ($' + Number(l.catalogue_price).toFixed(2) + ')' : '') + '</button></div>' : '') + '</td>' +
+                '<td class="py-2 pr-2 text-right font-semibold" data-ke-ext="' + i + '">' + (pr == null ? '&mdash;' : money(ext)) + '</td>' +
+                '<td class="py-2 text-right"><button type="button" class="text-red-600 hover:underline" data-ke-del="' + i + '" aria-label="Remove ' + esc(l.sku) + '">Remove</button></td></tr>';
+        }).join('');
+        host.innerHTML = '<table class="w-full text-sm"><thead><tr class="text-left text-xs uppercase text-gray-500 border-b"><th class="py-2 pr-2">Part number</th><th class="py-2 pr-2">Description</th><th class="py-2 pr-2 text-right">Quantity</th><th class="py-2 pr-2 text-right">Unit price</th><th class="py-2 pr-2 text-right">Line total</th><th class="py-2"></th></tr></thead><tbody>' + body +
+            '</tbody><tfoot><tr><td colspan="4" class="py-3 text-right font-bold">Kit total (one use)</td><td class="py-3 pr-2 text-right font-bold" id="ke-total">' + money(total) + '</td><td></td></tr></tfoot></table>' +
+            (unpriced ? '<p class="text-xs text-amber-700 mt-1">' + unpriced + ' part' + (unpriced === 1 ? ' has' : 's have') + ' no price yet. Enter one, or the kit cannot be submitted.</p>' : '');
+        host.querySelectorAll('[data-ke-qty]').forEach(function (el) { el.addEventListener('input', function () { ed.lines[Number(el.getAttribute('data-ke-qty'))].quantity = Number(el.value); refreshEdTotals(); }); });
+        host.querySelectorAll('[data-ke-price]').forEach(function (el) { el.addEventListener('input', function () { var l = ed.lines[Number(el.getAttribute('data-ke-price'))]; l.touched = true; l.priceText = el.value; refreshEdTotals(); }); el.addEventListener('change', updateEdLines); });
+        host.querySelectorAll('[data-ke-reset]').forEach(function (b) { b.addEventListener('click', function () { var l = ed.lines[Number(b.getAttribute('data-ke-reset'))]; l.touched = true; l.priceText = ''; updateEdLines(); }); });
+        host.querySelectorAll('[data-ke-del]').forEach(function (b) { b.addEventListener('click', function () { ed.lines.splice(Number(b.getAttribute('data-ke-del')), 1); updateEdLines(); updateEdResults(); }); });
+    }
+
+    function refreshEdTotals() {
+        var total = 0;
+        ed.lines.forEach(function (l, i) {
+            var pr = linePrice(l), q = Number(l.quantity), ext = pr != null && q > 0 ? pr * q : 0; total += ext;
+            var c = document.querySelector('[data-ke-ext="' + i + '"]'); if (c) c.innerHTML = pr == null ? '&mdash;' : money(ext);
+        });
+        var t = $('ke-total'); if (t) t.textContent = money(total);
+    }
+
+    function updateEdResults() {
+        var host = $('ke-results'); if (!host) return;
+        if (ed.searching) { host.innerHTML = '<p class="text-sm text-gray-500"><i class="fas fa-spinner fa-spin mr-1"></i>Searching&hellip;</p>'; return; }
+        if (ed.q.length < 2) { host.innerHTML = ''; return; }
+        if (!ed.results.length) { host.innerHTML = '<p class="text-sm text-gray-500">Nothing matches. Check the part number, or ask CHC to add the part.</p>'; return; }
+        host.innerHTML = '<ul class="border rounded-lg divide-y max-h-64 overflow-y-auto">' + ed.results.map(function (p, i) {
+            var have = ed.lines.some(function (l) { return skuKey(l.sku) === skuKey(p.sku); });
+            return '<li><button type="button" data-ke-add="' + i + '" class="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center justify-between gap-3 disabled:opacity-50"' + (have ? ' disabled' : '') + '>' +
+                '<span><span class="font-mono text-xs font-semibold">' + esc(p.sku) + '</span> <span class="text-sm">' + esc(p.name) + '</span>' + (p.brand ? ' <span class="text-xs text-gray-500">' + esc(p.brand) + '</span>' : '') + '</span>' +
+                '<span class="text-xs ' + (have ? 'text-gray-400' : 'text-blue-700 font-semibold') + '">' + (have ? 'In kit' : '+ Add') + '</span></button></li>';
+        }).join('') + '</ul>';
+        host.querySelectorAll('[data-ke-add]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var p = ed.results[Number(b.getAttribute('data-ke-add'))];
+                if (!p || ed.lines.some(function (l) { return skuKey(l.sku) === skuKey(p.sku); })) return;
+                ed.lines.push({ kit_item_id: null, sku: p.sku, name: p.name, brand: p.brand, unit: p.unit || 'each', quantity: 1, unit_price: null, catalogue_price: null, price_overridden: false, problem: null, touched: false, priceText: '', isNew: true });
+                updateEdLines(); updateEdResults();
+            });
+        });
+    }
+
+    function saveEditor() {
+        if (ed.busy) return;
+        var name = ($('ke-name').value || '').trim();
+        if (!name) { $('ke-name').focus(); return edFail('Give the kit a name.'); }
+        if (!ed.lines.length) return edFail('A kit needs at least one part.');
+        for (var i = 0; i < ed.lines.length; i++) {
+            if (!(Number(ed.lines[i].quantity) > 0)) return edFail('Set a quantity above zero for ' + ed.lines[i].sku + '.');
+            var t = String(ed.lines[i].priceText || '').trim();
+            if (ed.lines[i].touched && t !== '' && !(Number(t) >= 0)) return edFail('The price for ' + ed.lines[i].sku + ' must be a number, zero or more.');
+        }
+        var lines = ed.lines.map(function (l) {
+            var o = { sku: l.sku, quantity: Number(l.quantity), unit: l.unit };
+            if (l.kit_item_id) o.kit_item_id = l.kit_item_id;
+            if (l.touched) { var t = String(l.priceText || '').trim(); o.unit_price = t === '' ? null : Number(t); }
+            return o;
+        });
+        ed.busy = true; ed.banner = null; renderEditor();
+        api('/my-kits/' + ed.kit.id, { method: 'PUT', body: { name: name, description: ($('ke-desc') && $('ke-desc').value) || '', lines: lines } })
+            .then(jsonOf)
+            .then(function (x) {
+                if (!x.ok) throw new Error(x.d.error || 'Could not save that kit.');
+                ed.busy = false;
+                return loadKits().then(function () { ed.banner = { kind: 'ok', text: '"' + name + '" saved.' }; return openEditor(ed.kit.id, true); });
+            })
+            .catch(function (e) { edFail(e.message); });
+    }
+
+    function wireEditor() {
+        var back = $('ke-back'); if (back) back.addEventListener('click', function () { showEdit(); });
+        var cancel = $('ke-cancel'); if (cancel) cancel.addEventListener('click', function () { showEdit(); });
+        var save = $('ke-save'); if (save) save.addEventListener('click', saveEditor);
+        var search = $('ke-search'), timer = null;
+        if (search) search.addEventListener('input', function () {
+            ed.q = search.value.trim(); clearTimeout(timer);
+            if (ed.q.length < 2) { ed.results = []; ed.searching = false; updateEdResults(); return; }
+            ed.searching = true; updateEdResults();
+            timer = setTimeout(function () {
+                var asked = ed.q;
+                api('/parts?q=' + encodeURIComponent(asked)).then(jsonOf).then(function (x) {
+                    if (asked !== ed.q) return;
+                    ed.searching = false; ed.results = x.ok ? (x.d.parts || []) : []; updateEdResults();
+                }).catch(function () { ed.searching = false; ed.results = []; updateEdResults(); });
+            }, 300);
+        });
+    }
+
+    // ------------------------------------------------------------
     // Public surface
     // ------------------------------------------------------------
     window.KITSUB = {
         init: function (c) { ctx = c; return !!(c && c.mount); },
+        showEdit: showEdit,
         showAdd: function () {
             if (!ctx || !ctx.addMount) return;
             ad.banner = null;

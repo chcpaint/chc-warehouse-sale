@@ -164,7 +164,8 @@ router.get('/kits', async (req, res) => {
         res.json({
             kits: out,
             allow_line_overrides: req.moduleSettings.allow_line_overrides !== false,
-            allow_add_kit: req.moduleSettings.allow_add_kit !== false
+            allow_add_kit: req.moduleSettings.allow_add_kit !== false,
+            allow_edit_kits: req.moduleSettings.allow_edit_kits === true
         });
     } catch (err) {
         console.error('Kit submission kit list error:', err);
@@ -223,10 +224,20 @@ function addKitAllowed(req, res) {
     return true;
 }
 
+function editKitAllowed(req, res) {
+    if (req.moduleSettings.allow_edit_kits !== true) {
+        res.status(403).json({ error: 'Editing kits is not turned on for your shop. Ask CHC.' });
+        return false;
+    }
+    return true;
+}
+
 /** GET /parts?q=  -- part numbers / names this shop can put in a kit. */
 router.get('/parts', async (req, res) => {
     try {
-        if (!addKitAllowed(req, res)) return;
+        if (req.moduleSettings.allow_add_kit === false && req.moduleSettings.allow_edit_kits !== true) {
+            return res.status(403).json({ error: 'Adding kits is not turned on for your shop. Ask CHC.' });
+        }
         const q = String(req.query.q || '').replace(/[^A-Za-z0-9 .\-\/#]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
         if (q.length < 2) return res.json({ parts: [] });
         const qKey = skuKeyOf(q);
@@ -373,6 +384,294 @@ router.delete('/my-kits/:kitId', async (req, res) => {
     } catch (err) {
         console.error('Remove kit error:', err);
         res.status(500).json({ error: 'Could not remove that kit.' });
+    }
+});
+
+// ------------------------------------------------------------
+// Edit Kits: change a shop's own kit (parts, quantities, prices)
+//
+// Only where CHC has switched it on for the shop
+// (settings.kit_submissions.allow_edit_kits = true). A CHC master kit is shared
+// by every shop and is never edited: the shop first takes its own copy
+// ("customize"), then edits that. A price set here is stored per shop against
+// the kit line (kit_product_map.unit_price_override); clearing it returns the
+// line to the catalogue / library price.
+// ------------------------------------------------------------
+const MAX_PRICE = 1000000;
+
+function validPrice(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= MAX_PRICE ? Math.round(n * 10000) / 10000 : null;
+}
+
+async function ownKit(req, kitId) {
+    if (!isValidUUID(kitId)) return null;
+    const { data: kit } = await supabaseAdmin.from('repair_kits')
+        .select('id, name, description, company_id, is_active').eq('id', kitId).maybeSingle();
+    return kit && kit.company_id === req.company.id && kit.is_active !== false ? kit : null;
+}
+
+/** GET /my-kits/:kitId  -- the kit as an editor needs it: every line, priced. */
+router.get('/my-kits/:kitId', async (req, res) => {
+    try {
+        if (!editKitAllowed(req, res)) return;
+        const kit = await ownKit(req, req.params.kitId);
+        if (!kit) return res.status(404).json({ error: 'Kit not found. Only your own kits can be edited.' });
+
+        const { lines, unresolved } = await resolveKitLines(req.company.id, kit.id, { auto: req.autoMapping });
+        const { data: items } = await supabaseAdmin.from('kit_items')
+            .select('id, sku, quantity, unit, sort_order').eq('kit_id', kit.id).order('sort_order', { ascending: true });
+        const byId = new Map(lines.map(l => [l.kit_item_id, l]));
+        const badById = new Map(unresolved.map(u => [u.kit_item_id, u]));
+
+        const out = (items || []).map(i => {
+            const l = byId.get(i.id);
+            if (l) {
+                return {
+                    kit_item_id: i.id, sku: l.sku, name: l.name, brand: l.brand, unit: i.unit || 'each',
+                    quantity: Number(i.quantity), unit_price: l.unit_price, catalogue_price: l.catalogue_unit_price,
+                    price_overridden: !!l.price_overridden, problem: null
+                };
+            }
+            const u = badById.get(i.id);
+            return {
+                kit_item_id: i.id, sku: i.sku, name: null, brand: null, unit: i.unit || 'each',
+                quantity: Number(i.quantity), unit_price: null, catalogue_price: null,
+                price_overridden: false, problem: (u && u.reason) || 'This part cannot be priced.'
+            };
+        });
+        res.json({ kit: { id: kit.id, name: kit.name, description: kit.description || '' }, lines: out });
+    } catch (err) {
+        console.error('Load kit for edit error:', err);
+        res.status(500).json({ error: 'Could not load that kit.' });
+    }
+});
+
+/**
+ * PUT /my-kits/:kitId
+ * Body: { name, description, lines: [{ kit_item_id?, sku, quantity, unit, unit_price? }] }
+ *   kit_item_id present  -> an existing line (part number is fixed; quantity / unit / price may change)
+ *   kit_item_id absent   -> a new part, checked like Add Kit
+ *   a line left out      -> removed
+ *   unit_price omitted   -> price left as it is;  null -> back to the catalogue price;  number -> that price
+ */
+router.put('/my-kits/:kitId', async (req, res) => {
+    try {
+        if (!editKitAllowed(req, res)) return;
+        const companyId = req.company.id;
+        const kit = await ownKit(req, req.params.kitId);
+        if (!kit) return res.status(404).json({ error: 'Kit not found. Only your own kits can be edited.' });
+
+        const name = text(req.body && req.body.name, 120);
+        if (!name) return res.status(400).json({ error: 'Give the kit a name.' });
+        const raw = Array.isArray(req.body && req.body.lines) ? req.body.lines : [];
+        if (raw.length === 0) return res.status(400).json({ error: 'A kit needs at least one part. Remove the whole kit instead if you no longer use it.' });
+        if (raw.length > 200) return res.status(400).json({ error: 'A kit can hold up to 200 parts.' });
+
+        const { data: others } = await supabaseAdmin.from('repair_kits')
+            .select('id, name').eq('company_id', companyId).eq('is_active', true);
+        if ((others || []).some(k => k.id !== kit.id && String(k.name).trim().toLowerCase() === name.toLowerCase())) {
+            return res.status(409).json({ error: `You already have a kit called "${name}". Choose a different name.` });
+        }
+
+        const { data: existingItems, error: eErr } = await supabaseAdmin.from('kit_items')
+            .select('id, sku, product_id, quantity, unit').eq('kit_id', kit.id);
+        if (eErr) throw eErr;
+        const existingById = new Map((existingItems || []).map(i => [i.id, i]));
+
+        // ---- validate everything before changing anything
+        const keep = [];       // existing lines: { item, quantity, unit, price }
+        const added = [];      // new lines:      { sku, key, quantity, unit }
+        const seen = new Set();
+        for (const [i, l] of raw.entries()) {
+            const n = i + 1;
+            const quantity = Number(l && l.quantity);
+            if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 100000) {
+                return res.status(400).json({ error: `Line ${n}: quantity must be a number above zero.` });
+            }
+            const unit = text(l && l.unit, 20) || 'each';
+            let price;                                     // undefined = leave, null = clear, number = set
+            if (l && Object.prototype.hasOwnProperty.call(l, 'unit_price')) {
+                if (l.unit_price === null || l.unit_price === '') price = null;
+                else {
+                    price = validPrice(l.unit_price);
+                    if (price === null) return res.status(400).json({ error: `Line ${n}: the price must be a number, zero or more.` });
+                }
+            }
+            if (l && l.kit_item_id) {
+                const item = existingById.get(l.kit_item_id);
+                if (!item) return res.status(400).json({ error: `Line ${n}: that part is not in this kit.` });
+                const key = skuKeyOf(item.sku);
+                if (seen.has(key)) return res.status(400).json({ error: `Line ${n}: ${item.sku} is listed twice.` });
+                seen.add(key);
+                keep.push({ item, quantity, unit, price });
+            } else {
+                const sku = text(l && l.sku, 80);
+                const key = skuKeyOf(sku);
+                if (!key) return res.status(400).json({ error: `Line ${n}: choose a part.` });
+                if (seen.has(key)) return res.status(400).json({ error: `Line ${n}: ${sku} is listed twice. Change its quantity instead.` });
+                seen.add(key);
+                added.push({ sku, key, quantity, unit, price });
+            }
+        }
+
+        // new parts must be ones this shop can use
+        let resolvedNew = [];
+        if (added.length) {
+            const { data: prods, error: pErr } = await supabaseAdmin.from('products')
+                .select('id, sku, is_active').eq('company_id', companyId).in('sku', added.map(a => a.sku));
+            if (pErr) throw pErr;
+            const prodByKey = new Map();
+            for (const p of prods || []) if (p.is_active !== false) prodByKey.set(skuKeyOf(p.sku), p);
+            let libByKey = new Map();
+            if (req.autoMapping) {
+                const missing = added.filter(a => !prodByKey.has(a.key)).map(a => a.key);
+                if (missing.length) {
+                    const { data: lib, error: lErr } = await supabaseAdmin.from('item_library').select('sku, sku_key').in('sku_key', missing);
+                    if (lErr) throw lErr;
+                    libByKey = new Map((lib || []).map(r => [r.sku_key, r]));
+                }
+            }
+            for (const a of added) {
+                const p = prodByKey.get(a.key), lib = libByKey.get(a.key);
+                if (!p && !lib) return res.status(400).json({ error: `${a.sku} is not a part your shop can use. Pick it from the search results.` });
+                resolvedNew.push({ ...a, sku: p ? p.sku : lib.sku, product_id: p ? p.id : null });
+            }
+        }
+
+        // ---- apply
+        const { error: kErr } = await supabaseAdmin.from('repair_kits')
+            .update({ name, description: text(req.body && req.body.description, 500) || null }).eq('id', kit.id);
+        if (kErr) throw kErr;
+
+        const keptIds = new Set(keep.map(k => k.item.id));
+        const removeIds = (existingItems || []).filter(i => !keptIds.has(i.id)).map(i => i.id);
+        if (removeIds.length) {
+            const { error } = await supabaseAdmin.from('kit_items').delete().in('id', removeIds).eq('kit_id', kit.id);
+            if (error) throw error;
+        }
+
+        let order = 0;
+        const priceWrites = [];                            // { item_id, product_id, price }
+        // keep the order the person arranged them in
+        for (const [i, l] of raw.entries()) {
+            order = i + 1;
+            if (l && l.kit_item_id) {
+                const k = keep.find(x => x.item.id === l.kit_item_id);
+                const { error } = await supabaseAdmin.from('kit_items')
+                    .update({ quantity: k.quantity, unit: k.unit, sort_order: order }).eq('id', k.item.id);
+                if (error) throw error;
+                if (k.price !== undefined) priceWrites.push({ item_id: k.item.id, product_id: k.item.product_id || null, price: k.price });
+            }
+        }
+        for (const a of resolvedNew) {
+            const position = raw.findIndex(l => !l.kit_item_id && skuKeyOf(l.sku) === a.key) + 1;
+            const { data: row, error } = await supabaseAdmin.from('kit_items')
+                .insert({ kit_id: kit.id, sku: a.sku, product_id: a.product_id, quantity: a.quantity, unit: a.unit, sort_order: position || ++order })
+                .select('id').single();
+            if (error) throw error;
+            if (a.price !== undefined && a.price !== null) priceWrites.push({ item_id: row.id, product_id: a.product_id, price: a.price });
+        }
+
+        for (const w of priceWrites) {
+            const { data: existing } = await supabaseAdmin.from('kit_product_map')
+                .select('id').eq('company_id', companyId).eq('kit_item_id', w.item_id).maybeSingle();
+            if (existing) {
+                const { error } = await supabaseAdmin.from('kit_product_map')
+                    .update({ unit_price_override: w.price }).eq('id', existing.id);
+                if (error) throw error;
+            } else if (w.price !== null) {
+                // product_id carries the line's own product so the line keeps resolving
+                const { error } = await supabaseAdmin.from('kit_product_map')
+                    .insert({ company_id: companyId, kit_item_id: w.item_id, product_id: w.product_id, is_excluded: false, unit_price_override: w.price });
+                if (error) throw error;
+            }
+        }
+
+        res.json({ message: `${name} saved.`, kit: { id: kit.id, name, line_count: raw.length } });
+    } catch (err) {
+        console.error('Edit kit error:', err);
+        res.status(500).json({ error: 'Could not save that kit. Reload it to see what was saved.' });
+    }
+});
+
+/**
+ * POST /kits/:kitId/customize   Body: { name?, hide_original? }
+ * Take a copy of a CHC kit that belongs to this shop, carrying across anything
+ * already changed for it (quantities, dropped lines, prices), so it can be
+ * edited freely. By default the CHC original is hidden from the shop's list so
+ * there is one version of it, not two.
+ */
+router.post('/kits/:kitId/customize', async (req, res) => {
+    let newId = null;
+    try {
+        if (!editKitAllowed(req, res)) return;
+        const companyId = req.company.id;
+        const kits = await kitsForCompany(companyId);
+        const master = kits.find(k => k.id === req.params.kitId);
+        if (!master || master.company_id !== null) return res.status(404).json({ error: 'That CHC kit is not available to copy.' });
+
+        const { data: existing } = await supabaseAdmin.from('repair_kits')
+            .select('id, name').eq('company_id', companyId).eq('is_active', true);
+        const taken = new Set((existing || []).map(k => String(k.name).trim().toLowerCase()));
+        let name = text(req.body && req.body.name, 120) || `${master.name} (my copy)`;
+        if (taken.has(name.toLowerCase())) return res.status(409).json({ error: `You already have a kit called "${name}". Choose a different name.` });
+
+        const { data: items, error: iErr } = await supabaseAdmin.from('kit_items')
+            .select('id, sku, product_id, quantity, unit, sort_order').eq('kit_id', master.id).order('sort_order', { ascending: true });
+        if (iErr) throw iErr;
+        const { data: maps } = await supabaseAdmin.from('kit_product_map')
+            .select('kit_item_id, product_id, quantity, is_excluded, unit_price_override')
+            .eq('company_id', companyId).in('kit_item_id', (items || []).map(i => i.id));
+        const mapBy = new Map((maps || []).map(m => [m.kit_item_id, m]));
+
+        // The shop's own catalogue, so each copied line links to its own product when it has one
+        const skus = [...new Set((items || []).map(i => i.sku).filter(Boolean))];
+        const { data: prods } = skus.length ? await supabaseAdmin.from('products')
+            .select('id, sku, is_active').eq('company_id', companyId).in('sku', skus) : { data: [] };
+        const prodByKey = new Map();
+        for (const p of prods || []) if (p.is_active !== false) prodByKey.set(skuKeyOf(p.sku), p);
+
+        const copies = [];
+        for (const i of items || []) {
+            const m = mapBy.get(i.id);
+            if (m && m.is_excluded) continue;                         // a line this shop already dropped
+            const qty = Number(m && m.quantity != null ? m.quantity : i.quantity);
+            if (!Number.isFinite(qty) || qty <= 0) continue;
+            const p = prodByKey.get(skuKeyOf(i.sku));
+            copies.push({ src: i, sku: i.sku, product_id: (m && m.product_id) || i.product_id || (p ? p.id : null), quantity: qty, unit: i.unit || 'each',
+                          price: m && m.unit_price_override != null ? Number(m.unit_price_override) : null });
+        }
+        if (!copies.length) return res.status(400).json({ error: 'That kit has no lines to copy.' });
+
+        const { data: kit, error: kErr } = await supabaseAdmin.from('repair_kits')
+            .insert({ company_id: companyId, name, description: master.description || null, source: 'company', is_active: true, sort_order: 900 })
+            .select('id, name').single();
+        if (kErr) throw kErr;
+        newId = kit.id;
+
+        for (const [idx, c] of copies.entries()) {
+            const { data: row, error } = await supabaseAdmin.from('kit_items')
+                .insert({ kit_id: kit.id, sku: c.sku, product_id: c.product_id, quantity: c.quantity, unit: c.unit, sort_order: idx + 1 })
+                .select('id').single();
+            if (error) throw error;
+            if (c.price !== null) {
+                const { error: mErr } = await supabaseAdmin.from('kit_product_map')
+                    .insert({ company_id: companyId, kit_item_id: row.id, product_id: c.product_id, is_excluded: false, unit_price_override: c.price });
+                if (mErr) throw mErr;
+            }
+        }
+
+        if (!(req.body && req.body.hide_original === false)) {
+            const { error } = await supabaseAdmin.from('company_kit_access')
+                .upsert({ company_id: companyId, kit_id: master.id, enabled: false }, { onConflict: 'company_id,kit_id' });
+            if (error) throw error;
+        }
+        res.status(201).json({ kit: { id: kit.id, name: kit.name, line_count: copies.length } });
+    } catch (err) {
+        console.error('Customize kit error:', err);
+        if (newId) { try { await supabaseAdmin.from('repair_kits').delete().eq('id', newId); } catch (_) { /* noop */ } }
+        res.status(500).json({ error: 'Could not make your copy of that kit.' });
     }
 });
 
