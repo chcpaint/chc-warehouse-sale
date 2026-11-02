@@ -641,3 +641,105 @@ test('a shop with Inventory on still has to map (kits are tied to its stock)', a
     assert.equal(res.status, 409);
     assert.match(res.body.error, /not matched to your catalogue/);
 });
+
+// ==================================================================
+// ADD KIT: a shop builds its own kit
+// ==================================================================
+const libParts = () => [
+    { id: 'l1', sku: 'MMM08852', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', unit: 'each', list_price: 12 },
+    { id: 'l2', sku: 'MMM-09999', sku_key: 'MMM09999', name: '3M Body Filler', brand: '3M', unit: 'each', list_price: 40 }
+];
+
+test('part search finds the shop catalogue and, without inventory, the CHC library; never twice', async () => {
+    reset(); fake.db.item_library = libParts();
+    let res = await request(app()).get(S + '/parts?q=tape');
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.parts.map(p => [p.sku, p.source]).sort(), [['MMM06334', 'catalogue'], ['MMM08852', 'library']]);
+    res = await request(app()).get(S + '/parts?q=PRF611');
+    assert.deepEqual(res.body.parts.map(p => p.sku), ['PRF611N']);
+    res = await request(app()).get(S + '/parts?q=x');
+    assert.deepEqual(res.body.parts, [], 'a one-letter search is ignored');
+});
+
+test('part search only offers the shop catalogue when the shop runs inventory (mapping required)', async () => {
+    reset(); requireMapping(); fake.db.item_library = libParts();
+    const res = await request(app()).get(S + '/parts?q=tape');
+    assert.deepEqual(res.body.parts.map(p => p.sku), ['MMM06334']);
+});
+
+test('a shop saves its own kit and it appears in its kit list, priced, ready, and marked as its own', async () => {
+    reset(); fake.db.item_library = libParts();
+    const res = await request(app()).post(S + '/my-kits').send({
+        name: 'Bumper repair', description: 'Our usual', lines: [
+            { sku: 'PRF611N', quantity: 1 }, { sku: 'mmm 08852', quantity: 2 }, { sku: 'MMM06334', quantity: 3, unit: 'roll' }
+        ]
+    });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const kit = fake.db.repair_kits.find(k => k.name === 'Bumper repair');
+    assert.equal(kit.company_id, CO);
+    assert.equal(kit.source, 'company');
+    const items = fake.db.kit_items.filter(i => i.kit_id === kit.id);
+    assert.equal(items.length, 3);
+    assert.equal(items.find(i => i.sku === 'PRF611N').product_id, CLEAR, 'a catalogue part is linked');
+    assert.equal(items.find(i => i.sku === 'MMM08852').product_id, null, 'a library part is read by part number');
+    assert.equal(items.find(i => i.sku === 'MMM06334').unit, 'roll');
+
+    const list = await request(app()).get(S + '/kits');
+    const mine = list.body.kits.find(k => k.id === kit.id);
+    assert.equal(mine.own, true);
+    assert.equal(mine.ready, true);
+    assert.equal(mine.estimated_total, 200 + 24 + 30);        // 200 + 2*12(library) + 3*10
+    assert.equal(list.body.kits.find(k => k.id === KIT).own, false);
+});
+
+test('a kit built in the shop can then be submitted for a job', async () => {
+    reset();
+    const made = await request(app()).post(S + '/my-kits').send({ name: 'Quick', lines: [{ sku: 'PRF611N', quantity: 2 }] });
+    const res = await request(app()).post(S).send(body({ kit_id: made.body.kit.id }));
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(Number(res.body.submission.total_amount), 400);
+});
+
+test('add kit refuses unknown parts, other shops\' parts, duplicates, bad quantities and empty kits', async () => {
+    reset(); fake.db.item_library = libParts();
+    fake.db.products.push({ id: 'x1', company_id: OTHER_CO, sku: 'THEIRS1', name: 'Theirs', price: 5, is_active: true });
+    const post = (b) => request(app()).post(S + '/my-kits').send(b);
+    assert.equal((await post({ name: '', lines: [{ sku: 'PRF611N', quantity: 1 }] })).status, 400);
+    assert.equal((await post({ name: 'K', lines: [] })).status, 400);
+    assert.match((await post({ name: 'K', lines: [{ sku: 'NOPE123', quantity: 1 }] })).body.error, /not a part your shop can use/);
+    assert.match((await post({ name: 'K', lines: [{ sku: 'THEIRS1', quantity: 1 }] })).body.error, /not a part your shop can use/);
+    assert.match((await post({ name: 'K', lines: [{ sku: 'PRF611N', quantity: 1 }, { sku: 'prf-611n', quantity: 2 }] })).body.error, /listed twice/);
+    assert.match((await post({ name: 'K', lines: [{ sku: 'PRF611N', quantity: 0 }] })).body.error, /above zero/);
+    assert.match((await post({ name: 'K', lines: [{ sku: 'PRF611N', quantity: 'abc' }] })).body.error, /above zero/);
+    assert.equal(fake.db.repair_kits.filter(k => k.company_id === CO).length, 0, 'nothing half-saved');
+});
+
+test('a shop that runs inventory can only build from its catalogue', async () => {
+    reset(); requireMapping(); fake.db.item_library = libParts();
+    const res = await request(app()).post(S + '/my-kits').send({ name: 'K', lines: [{ sku: 'MMM08852', quantity: 1 }] });
+    assert.equal(res.status, 400);
+    assert.equal(fake.db.repair_kits.filter(k => k.company_id === CO).length, 0);
+});
+
+test('add kit refuses a repeated kit name and can be switched off per shop', async () => {
+    reset();
+    const mk = () => request(app()).post(S + '/my-kits').send({ name: 'Same Name', lines: [{ sku: 'PRF611N', quantity: 1 }] });
+    assert.equal((await mk()).status, 201);
+    assert.equal((await mk()).status, 409);
+    fake.db.companies[0].settings.kit_submissions.allow_add_kit = false;
+    assert.equal((await mk()).status, 403);
+    assert.equal((await request(app()).get(S + '/parts?q=tape')).status, 403);
+    const list = await request(app()).get(S + '/kits');
+    assert.equal(list.body.allow_add_kit, false);
+});
+
+test('a shop can remove its own kit but never a CHC kit or another shop\'s', async () => {
+    reset();
+    const made = await request(app()).post(S + '/my-kits').send({ name: 'Mine', lines: [{ sku: 'PRF611N', quantity: 1 }] });
+    assert.equal((await request(app()).delete(`${S}/my-kits/${KIT}`)).status, 404, 'CHC master kit');
+    assert.equal((await request(app()).delete(`${S}/my-kits/${FOREIGN_KIT}`)).status, 404, 'another shop');
+    assert.equal((await request(app()).delete(`${S}/my-kits/${made.body.kit.id}`)).status, 200);
+    const list = await request(app()).get(S + '/kits');
+    assert.ok(!list.body.kits.some(k => k.id === made.body.kit.id));
+    assert.equal(fake.db.repair_kits.find(k => k.id === KIT).is_active, true);
+});

@@ -12,7 +12,7 @@
 (function () {
     'use strict';
 
-    var ctx = null;          // { apiBase, slug, getToken, getUser, getLocation, mount }
+    var ctx = null;          // { apiBase, slug, getToken, getUser, getLocation, mount, addMount }
     var st = {
         kits: [], allowOverrides: true, preview: null, loaded: false,
         busy: false, search: '', status: '', list: [], total: 0, banner: null
@@ -43,6 +43,7 @@
                 if (!x.ok) throw new Error(x.d.error || 'Could not load kits.');
                 st.kits = x.d.kits || [];
                 st.allowOverrides = x.d.allow_line_overrides !== false;
+                ad.allowed = x.d.allow_add_kit !== false;
             });
     }
     function loadList() {
@@ -141,7 +142,8 @@
 
         ctx.mount.innerHTML =
             '<button onclick="showTab(\'products\')" type="button" class="mb-3 text-blue-600 hover:underline text-sm"><i class="fas fa-arrow-left mr-1"></i>Back to Products</button>' +
-            '<h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-file-invoice-dollar mr-2"></i>Insurance kit submissions</h2>' +
+            '<div class="flex items-start justify-between gap-3 flex-wrap"><h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-file-invoice-dollar mr-2"></i>Insurance kit submissions</h2>' +
+            (ad.allowed ? '<button type="button" onclick="showTab(\'kitadd\')" class="text-sm font-semibold text-blue-700 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50"><i class="fas fa-plus mr-1"></i>Add kit</button>' : '') + '</div>' +
             '<p class="text-gray-500 mb-4">Pick a kit, add the repair order and claim, and get a numbered PDF itemizing its materials to load into Mitchell, CCC ONE or Audatex. Every one is saved below.</p>' +
             banner() +
             '<div class="bg-white rounded-xl shadow-sm border p-5 mb-6">' +
@@ -288,10 +290,163 @@
     }
 
     // ------------------------------------------------------------
+    // Add Kit: build a kit of the shop's own
+    // ------------------------------------------------------------
+    var ad = { name: '', desc: '', lines: [], results: [], q: '', searching: false, busy: false, banner: null, mine: [], allowed: true };
+
+    function adRoot() { return ctx && ctx.addMount; }
+    function adFail(msg) { ad.banner = { kind: 'err', text: msg }; ad.busy = false; renderAdd(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+
+    function loadMine() {
+        return loadKits().then(function () {
+            ad.mine = st.kits.filter(function (k) { return k.own; });
+        });
+    }
+
+    function renderAdd() {
+        var root = adRoot(); if (!root) return;
+        var cls = ad.banner ? (ad.banner.kind === 'ok' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800') : '';
+        var mine = ad.mine.length ? ad.mine.map(function (k) {
+            return '<li class="flex items-center justify-between py-2 border-b last:border-0"><span><span class="font-semibold text-gray-800">' + esc(k.name) + '</span> <span class="text-xs text-gray-500">' + esc(k.line_count) + ' part' + (k.line_count === 1 ? '' : 's') + '</span></span>' +
+                '<button type="button" class="text-red-600 hover:underline text-sm" data-ka-remove="' + esc(k.id) + '" data-name="' + esc(k.name) + '">Remove</button></li>';
+        }).join('') : '<li class="py-3 text-sm text-gray-500">You have not added any kits of your own yet.</li>';
+
+        root.innerHTML =
+            '<button onclick="showTab(\'kitsub\')" type="button" class="mb-3 text-blue-600 hover:underline text-sm"><i class="fas fa-arrow-left mr-1"></i>Back to Insurance Kits</button>' +
+            '<h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-plus-circle mr-2"></i>Add a kit</h2>' +
+            '<p class="text-gray-500 mb-4">Name your kit, search for the parts it uses and set the quantity of each. It shows up in your Insurance Kits list right away.</p>' +
+            (ad.banner ? '<div class="mb-4 rounded-lg border px-4 py-3 text-sm ' + cls + '" role="status">' + esc(ad.banner.text) +
+                (ad.banner.kind === 'ok' ? ' <button type="button" class="underline font-semibold ml-1" onclick="showTab(\'kitsub\')">Use it now</button>' : '') + '</div>' : '') +
+            (ad.allowed ? (
+            '<div class="bg-white rounded-xl shadow-sm border p-5 mb-6">' +
+            '<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">' +
+            '<div class="md:col-span-1"><label for="ka-name" class="block text-xs font-semibold text-gray-600 mb-1">Kit name <span class="text-red-600">*</span></label><input id="ka-name" maxlength="120" value="' + esc(ad.name) + '" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. Door skin repair"></div>' +
+            '<div class="md:col-span-2"><label for="ka-desc" class="block text-xs font-semibold text-gray-600 mb-1">Description (optional)</label><input id="ka-desc" maxlength="500" value="' + esc(ad.desc) + '" class="w-full px-3 py-2 border rounded-lg text-sm"></div></div>' +
+            '<label for="ka-search" class="block text-xs font-semibold text-gray-600 mb-1">Find a part (part number or name)</label>' +
+            '<input id="ka-search" type="search" autocomplete="off" value="' + esc(ad.q) + '" class="w-full md:w-96 px-3 py-2 border rounded-lg text-sm" placeholder="e.g. 05915 or body filler">' +
+            '<div id="ka-results" class="mt-2"></div>' +
+            '<h3 class="font-bold text-gray-800 mt-5 mb-2">Parts in this kit <span id="ka-count" class="text-sm font-normal text-gray-500"></span></h3>' +
+            '<div id="ka-lines" class="overflow-x-auto"></div>' +
+            '<div class="mt-4"><button type="button" id="ka-save" class="bg-blue-700 hover:bg-blue-800 text-white font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed">' +
+            (ad.busy ? '<i class="fas fa-spinner fa-spin mr-1"></i>Saving&hellip;' : '<i class="fas fa-save mr-1"></i>Save kit') + '</button></div></div>'
+            ) : '<div class="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 mb-6">Adding kits is not turned on for your shop. Ask CHC to switch it on.</div>') +
+            '<div class="bg-white rounded-xl shadow-sm border p-5"><h3 class="font-bold text-gray-800 mb-2">Your own kits</h3><ul>' + mine + '</ul></div>';
+        if (ad.allowed) { updateResults(); updateLines(); }
+        wireAdd();
+    }
+
+    function updateResults() {
+        var host = $('ka-results'); if (!host) return;
+        if (ad.searching) { host.innerHTML = '<p class="text-sm text-gray-500"><i class="fas fa-spinner fa-spin mr-1"></i>Searching&hellip;</p>'; return; }
+        if (ad.q.length < 2) { host.innerHTML = ''; return; }
+        if (!ad.results.length) { host.innerHTML = '<p class="text-sm text-gray-500">Nothing matches. Check the part number, or ask CHC to add the part.</p>'; return; }
+        host.innerHTML = '<ul class="border rounded-lg divide-y max-h-64 overflow-y-auto">' + ad.results.map(function (p, i) {
+            var have = ad.lines.some(function (l) { return skuKey(l.sku) === skuKey(p.sku); });
+            return '<li><button type="button" data-ka-add="' + i + '" class="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center justify-between gap-3 disabled:opacity-50"' + (have ? ' disabled' : '') + '>' +
+                '<span><span class="font-mono text-xs font-semibold">' + esc(p.sku) + '</span> <span class="text-sm">' + esc(p.name) + '</span>' + (p.brand ? ' <span class="text-xs text-gray-500">' + esc(p.brand) + '</span>' : '') + '</span>' +
+                '<span class="text-xs ' + (have ? 'text-gray-400' : 'text-blue-700 font-semibold') + '">' + (have ? 'Added' : '+ Add') + '</span></button></li>';
+        }).join('') + '</ul>';
+        host.querySelectorAll('[data-ka-add]').forEach(function (b) {
+            b.addEventListener('click', function () { addLine(ad.results[Number(b.getAttribute('data-ka-add'))]); });
+        });
+    }
+
+    function skuKey(v) { return String(v == null ? '' : v).replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
+
+    function updateLines() {
+        var host = $('ka-lines'), count = $('ka-count'), save = $('ka-save');
+        if (!host) return;
+        if (count) count.textContent = ad.lines.length ? '(' + ad.lines.length + ')' : '';
+        if (save) save.disabled = ad.busy || !ad.lines.length;
+        if (!ad.lines.length) { host.innerHTML = '<p class="text-sm text-gray-500">No parts yet. Search above and click a part to add it.</p>'; return; }
+        host.innerHTML = '<table class="w-full text-sm"><thead><tr class="text-left text-xs uppercase text-gray-500 border-b"><th class="py-2 pr-2">Part number</th><th class="py-2 pr-2">Description</th><th class="py-2 pr-2 text-right">Quantity</th><th class="py-2"></th></tr></thead><tbody>' +
+            ad.lines.map(function (l, i) {
+                return '<tr class="border-b"><td class="py-2 pr-2 font-mono text-xs">' + esc(l.sku) + '</td><td class="py-2 pr-2">' + esc(l.name) + '</td>' +
+                    '<td class="py-2 pr-2 text-right"><input type="number" step="any" min="0" value="' + esc(qty(l.quantity)) + '" data-ka-qty="' + i + '" aria-label="Quantity for ' + esc(l.sku) + '" class="w-24 px-2 py-1 border rounded text-right"> <span class="text-xs text-gray-400">' + esc(l.unit || 'each') + '</span></td>' +
+                    '<td class="py-2 text-right"><button type="button" class="text-red-600 hover:underline" data-ka-del="' + i + '" aria-label="Remove ' + esc(l.sku) + '">Remove</button></td></tr>';
+            }).join('') + '</tbody></table>';
+        host.querySelectorAll('[data-ka-qty]').forEach(function (el) {
+            el.addEventListener('input', function () { ad.lines[Number(el.getAttribute('data-ka-qty'))].quantity = Number(el.value); });
+        });
+        host.querySelectorAll('[data-ka-del]').forEach(function (b) {
+            b.addEventListener('click', function () { ad.lines.splice(Number(b.getAttribute('data-ka-del')), 1); updateLines(); updateResults(); });
+        });
+    }
+
+    function addLine(p) {
+        if (!p || ad.lines.some(function (l) { return skuKey(l.sku) === skuKey(p.sku); })) return;
+        ad.lines.push({ sku: p.sku, name: p.name, unit: p.unit || 'each', quantity: 1 });
+        updateLines(); updateResults();
+    }
+
+    function saveKit() {
+        if (ad.busy) return;
+        ad.name = ($('ka-name').value || '').trim(); ad.desc = ($('ka-desc').value || '').trim();
+        if (!ad.name) { $('ka-name').focus(); return adFail('Give the kit a name.'); }
+        if (!ad.lines.length) return adFail('Add at least one part.');
+        for (var i = 0; i < ad.lines.length; i++) {
+            if (!(Number(ad.lines[i].quantity) > 0)) return adFail('Set a quantity above zero for ' + ad.lines[i].sku + '.');
+        }
+        ad.busy = true; ad.banner = null; renderAdd();
+        api('/my-kits', { method: 'POST', body: { name: ad.name, description: ad.desc, lines: ad.lines.map(function (l) { return { sku: l.sku, quantity: Number(l.quantity), unit: l.unit }; }) } })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (x) {
+                if (!x.ok) return adFail(x.d.error || 'Could not save that kit.');
+                var nm = x.d.kit.name;
+                ad.name = ''; ad.desc = ''; ad.lines = []; ad.results = []; ad.q = ''; ad.busy = false;
+                ad.banner = { kind: 'ok', text: '"' + nm + '" is saved and ready in your kit list.' };
+                return loadMine().then(function () { renderAdd(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+            })
+            .catch(function (e) { adFail(e.message || 'Could not save that kit.'); });
+    }
+
+    function wireAdd() {
+        var root = adRoot(); if (!root) return;
+        var save = $('ka-save'); if (save) save.addEventListener('click', saveKit);
+        var search = $('ka-search'), timer = null;
+        if (search) search.addEventListener('input', function () {
+            ad.q = search.value.trim();
+            clearTimeout(timer);
+            if (ad.q.length < 2) { ad.results = []; ad.searching = false; updateResults(); return; }
+            ad.searching = true; updateResults();
+            timer = setTimeout(function () {
+                var asked = ad.q;
+                api('/parts?q=' + encodeURIComponent(asked))
+                    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+                    .then(function (x) {
+                        if (asked !== ad.q) return;
+                        ad.searching = false;
+                        ad.results = x.ok ? (x.d.parts || []) : [];
+                        if (!x.ok) ad.banner = { kind: 'err', text: x.d.error || 'Could not search parts.' };
+                        updateResults();
+                    })
+                    .catch(function () { ad.searching = false; ad.results = []; updateResults(); });
+            }, 300);
+        });
+        root.querySelectorAll('[data-ka-remove]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                if (!window.confirm('Remove "' + b.getAttribute('data-name') + '" from your kits? Past submissions keep their record.')) return;
+                api('/my-kits/' + b.getAttribute('data-ka-remove'), { method: 'DELETE' })
+                    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+                    .then(function (x) { if (!x.ok) throw new Error(x.d.error || 'Could not remove that kit.'); ad.banner = { kind: 'ok', text: x.d.message }; return loadMine(); })
+                    .then(renderAdd)
+                    .catch(function (e) { adFail(e.message); });
+            });
+        });
+    }
+
+    // ------------------------------------------------------------
     // Public surface
     // ------------------------------------------------------------
     window.KITSUB = {
         init: function (c) { ctx = c; return !!(c && c.mount); },
+        showAdd: function () {
+            if (!ctx || !ctx.addMount) return;
+            ad.banner = null;
+            renderAdd();
+            loadMine().then(function () { ad.allowed = true; renderAdd(); })
+                .catch(function (e) { adFail(e.message); });
+        },
         show: function () {
             if (!ctx) return;
             st.banner = null;

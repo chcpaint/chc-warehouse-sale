@@ -656,6 +656,7 @@
             <!-- ============ CONTACT TAB ============ -->
             <!-- Plans & billing -->
             <section id="tab-kitsub" class="hidden fade-in"></section>
+            <section id="tab-kitadd" class="hidden fade-in"></section>
 
             <section id="tab-billing" class="hidden fade-in">
                 <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
@@ -1417,7 +1418,8 @@
             { tab: 'inventory',  label: 'Stock on Hand', icon: 'fa-boxes-stacked', badge: 'lowstock' }
         ]},
         { group: 'Insurance', requires: 'kit_submissions', items: [
-            { tab: 'kitsub',     label: 'Insurance Kits', icon: 'fa-file-invoice-dollar' }
+            { tab: 'kitsub',     label: 'Insurance Kits', icon: 'fa-file-invoice-dollar' },
+            { tab: 'kitadd',     label: 'Add Kit',        icon: 'fa-plus' }
         ]},
         { group: 'Compliance', requires: 'shopsafe', items: [
             { tab: 'shopsafe',   label: 'ShopSafe',      icon: 'fa-shield-halved' }
@@ -1456,6 +1458,11 @@
         const ok = reportsAllowed();
         document.querySelectorAll('button[data-tab="reports"]').forEach(b => b.classList.toggle('hidden', !ok));
         document.querySelectorAll('button[data-tab="billing"]').forEach(b => b.classList.toggle('hidden', !billingVisible()));
+    }
+    /** "Add Kit" shows unless CHC turned it off for this shop (settings.kit_submissions.allow_add_kit = false). */
+    function kitAddAllowed() {
+        const k = state.company && state.company.settings && state.company.settings.kit_submissions;
+        return !(k && k.allow_add_kit === false);
     }
     /** Plans & billing only appears for a customer their supplier has put on paid billing. */
     function billingVisible() {
@@ -1649,6 +1656,7 @@
         if (tab === 'reports') loadReports();
         if (tab === 'billing') bpLoad();
         if (tab === 'kitsub' && window.KITSUB) window.KITSUB.show();
+        if (tab === 'kitadd' && window.KITSUB) window.KITSUB.showAdd();
         if (tab === 'contact') loadContactNotes();
 
         // Landing back on Products -- from the drawer, "Continue shopping" in
@@ -3807,7 +3815,8 @@
                 getToken: () => state.token,
                 getUser: () => state.companyUser,
                 getLocation: () => state.location,
-                mount: document.getElementById('tab-kitsub')
+                mount: document.getElementById('tab-kitsub'),
+                addMount: document.getElementById('tab-kitadd')
             });
             if (ok) document.getElementById('nav-kitsub')?.classList.remove('hidden');
         } catch (err) {

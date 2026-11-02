@@ -154,13 +154,18 @@ router.get('/kits', async (req, res) => {
                 id: kit.id,
                 name: kit.name,
                 description: kit.description || null,
+                own: kit.company_id === req.company.id,
                 line_count: priced.length,
                 unresolved_count: unresolved.length,
                 ready: !blockedReason(priced, unresolved, req.autoMapping),
                 estimated_total: round4(priced.reduce((s, l) => s + l.quantity * l.unit_price, 0))
             });
         }
-        res.json({ kits: out, allow_line_overrides: req.moduleSettings.allow_line_overrides !== false });
+        res.json({
+            kits: out,
+            allow_line_overrides: req.moduleSettings.allow_line_overrides !== false,
+            allow_add_kit: req.moduleSettings.allow_add_kit !== false
+        });
     } catch (err) {
         console.error('Kit submission kit list error:', err);
         res.status(500).json({ error: 'Failed to load kits.' });
@@ -196,6 +201,178 @@ router.get('/kits/:kitId/preview', async (req, res) => {
     } catch (err) {
         console.error('Kit submission preview error:', err);
         res.status(500).json({ error: 'Failed to preview that kit.' });
+    }
+});
+
+// ------------------------------------------------------------
+// Add Kit: a shop builds its own kit
+//
+// A shop can assemble a kit from parts it can already order (its catalogue)
+// and, when it does not run inventory, from the CHC item library. The kit is
+// private to the shop (company_id set, source 'company') and appears in its kit
+// list straight away. Off per shop with settings.kit_submissions.allow_add_kit
+// = false. CHC master kits are never touched from here.
+// ------------------------------------------------------------
+const skuKeyOf = v => String(v == null ? '' : v).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+
+function addKitAllowed(req, res) {
+    if (req.moduleSettings.allow_add_kit === false) {
+        res.status(403).json({ error: 'Adding kits is not turned on for your shop. Ask CHC.' });
+        return false;
+    }
+    return true;
+}
+
+/** GET /parts?q=  -- part numbers / names this shop can put in a kit. */
+router.get('/parts', async (req, res) => {
+    try {
+        if (!addKitAllowed(req, res)) return;
+        const q = String(req.query.q || '').replace(/[^A-Za-z0-9 .\-\/#]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+        if (q.length < 2) return res.json({ parts: [] });
+        const qKey = skuKeyOf(q);
+
+        const own = await supabaseAdmin.from('products')
+            .select('id, sku, name, brand, unit')
+            .eq('company_id', req.company.id).eq('is_active', true)
+            .or(`sku.ilike.%${q}%,name.ilike.%${q}%`)
+            .order('sku').limit(12);
+        if (own.error) throw own.error;
+
+        const parts = [];
+        const seen = new Set();
+        for (const p of own.data || []) {
+            const k = skuKeyOf(p.sku);
+            if (!k || seen.has(k)) continue;
+            seen.add(k);
+            parts.push({ sku: p.sku, name: p.name, brand: p.brand || null, unit: p.unit || 'each', source: 'catalogue' });
+        }
+
+        if (req.autoMapping) {
+            let filter = `sku.ilike.%${q}%,name.ilike.%${q}%`;
+            if (qKey) filter += `,sku_key.ilike.%${qKey}%`;
+            const lib = await supabaseAdmin.from('item_library')
+                .select('sku, name, brand, unit').or(filter).order('sku').limit(12);
+            if (lib.error) throw lib.error;
+            for (const p of lib.data || []) {
+                const k = skuKeyOf(p.sku);
+                if (!k || seen.has(k)) continue;
+                seen.add(k);
+                parts.push({ sku: p.sku, name: p.name, brand: p.brand || null, unit: p.unit || 'each', source: 'library' });
+            }
+        }
+        res.json({ parts: parts.slice(0, 20) });
+    } catch (err) {
+        console.error('Kit part search error:', err);
+        res.status(500).json({ error: 'Could not search parts.' });
+    }
+});
+
+/**
+ * POST /my-kits   Body: { name, description, lines: [{ sku, quantity, unit }] }
+ * Every part number must be one this shop can use; nothing is invented.
+ */
+router.post('/my-kits', async (req, res) => {
+    let kitId = null;
+    try {
+        if (!addKitAllowed(req, res)) return;
+        const companyId = req.company.id;
+
+        const name = text(req.body && req.body.name, 120);
+        if (!name) return res.status(400).json({ error: 'Give the kit a name.' });
+        const raw = Array.isArray(req.body && req.body.lines) ? req.body.lines : [];
+        if (raw.length === 0) return res.status(400).json({ error: 'Add at least one part to the kit.' });
+        if (raw.length > 200) return res.status(400).json({ error: 'A kit can hold up to 200 parts.' });
+
+        const { data: existing } = await supabaseAdmin.from('repair_kits')
+            .select('id, name').eq('company_id', companyId).eq('is_active', true);
+        if ((existing || []).some(k => String(k.name).trim().toLowerCase() === name.toLowerCase())) {
+            return res.status(409).json({ error: `You already have a kit called "${name}". Choose a different name.` });
+        }
+
+        const wanted = [];
+        const seen = new Set();
+        for (const [i, l] of raw.entries()) {
+            const sku = text(l && l.sku, 80);
+            const key = skuKeyOf(sku);
+            if (!key) return res.status(400).json({ error: `Line ${i + 1}: choose a part.` });
+            if (seen.has(key)) return res.status(400).json({ error: `Line ${i + 1}: ${sku} is listed twice. Change its quantity instead.` });
+            seen.add(key);
+            const quantity = Number(l && l.quantity);
+            if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 100000) {
+                return res.status(400).json({ error: `Line ${i + 1}: quantity must be a number above zero.` });
+            }
+            wanted.push({ sku, key, quantity, unit: text(l && l.unit, 20) || 'each' });
+        }
+
+        const { data: prods, error: pErr } = await supabaseAdmin.from('products')
+            .select('id, sku, unit, is_active').eq('company_id', companyId)
+            .in('sku', wanted.map(w => w.sku));
+        if (pErr) throw pErr;
+        const prodByKey = new Map();
+        for (const p of prods || []) if (p.is_active !== false) prodByKey.set(skuKeyOf(p.sku), p);
+
+        let libByKey = new Map();
+        if (req.autoMapping) {
+            const missing = wanted.filter(w => !prodByKey.has(w.key)).map(w => w.key);
+            if (missing.length) {
+                const { data: lib, error: lErr } = await supabaseAdmin.from('item_library')
+                    .select('sku, sku_key, unit').in('sku_key', missing);
+                if (lErr) throw lErr;
+                libByKey = new Map((lib || []).map(r => [r.sku_key, r]));
+            }
+        }
+
+        const lines = [];
+        for (const [i, w] of wanted.entries()) {
+            const p = prodByKey.get(w.key);
+            const lib = libByKey.get(w.key);
+            if (!p && !lib) {
+                return res.status(400).json({ error: `Line ${i + 1}: ${w.sku} is not a part your shop can use. Pick it from the search results.` });
+            }
+            lines.push({
+                sku: p ? p.sku : lib.sku,
+                product_id: p ? p.id : null,
+                quantity: w.quantity,
+                unit: w.unit,
+                sort_order: i + 1
+            });
+        }
+
+        const { data: kit, error: kErr } = await supabaseAdmin.from('repair_kits')
+            .insert({
+                company_id: companyId, name,
+                description: text(req.body && req.body.description, 500) || null,
+                source: 'company', is_active: true, sort_order: 900
+            }).select('id, name').single();
+        if (kErr) throw kErr;
+        kitId = kit.id;
+
+        const { error: iErr } = await supabaseAdmin.from('kit_items').insert(lines.map(l => ({ ...l, kit_id: kit.id })));
+        if (iErr) throw iErr;
+
+        res.status(201).json({ kit: { id: kit.id, name: kit.name, line_count: lines.length } });
+    } catch (err) {
+        console.error('Add kit error:', err);
+        if (kitId) { try { await supabaseAdmin.from('repair_kits').delete().eq('id', kitId); } catch (_) { /* noop */ } }
+        res.status(500).json({ error: 'Could not save that kit.' });
+    }
+});
+
+/** DELETE /my-kits/:kitId -- retire one of the shop's own kits. Saved submissions keep their own copy. */
+router.delete('/my-kits/:kitId', async (req, res) => {
+    try {
+        if (!addKitAllowed(req, res)) return;
+        const kitId = req.params.kitId;
+        if (!isValidUUID(kitId)) return res.status(400).json({ error: 'Invalid kit.' });
+        const { data: kit } = await supabaseAdmin.from('repair_kits')
+            .select('id, name, company_id').eq('id', kitId).maybeSingle();
+        if (!kit || kit.company_id !== req.company.id) return res.status(404).json({ error: 'Kit not found.' });
+        const { error } = await supabaseAdmin.from('repair_kits').update({ is_active: false }).eq('id', kitId);
+        if (error) throw error;
+        res.json({ message: `${kit.name} removed. Past submissions keep their record.` });
+    } catch (err) {
+        console.error('Remove kit error:', err);
+        res.status(500).json({ error: 'Could not remove that kit.' });
     }
 });
 

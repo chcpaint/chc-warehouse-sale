@@ -95,3 +95,23 @@ admin/user/company token gets its own bucket (`RATE_LIMIT_AUTH_MAX`, default
 3000 per 15 minutes); anonymous traffic stays at `RATE_LIMIT_MAX` (default 100)
 per IP. Tokens are verified, so a forged one only falls back to the IP bucket.
 See `utils/rate-limit.js`.
+
+## Add Kit (customers build their own kits)
+
+Under **Insurance** in the main menu there are two links: *Insurance Kits* and
+*Add Kit*. Add Kit opens a builder: name the kit, search for parts by part
+number or name, set a quantity for each, save. The kit is private to that shop
+(`repair_kits.company_id` set, `source = 'company'`) and appears in its kit list
+straight away; lines are priced the same way as any other kit.
+
+- Parts a shop can pick: its own catalogue, plus the CHC item library when the
+  shop does not run inventory. A shop that does run inventory can only use its
+  catalogue, because its kit lines must be mapped.
+- Nothing is invented: every part number is checked server-side, duplicates and
+  non-positive quantities are refused, and a repeated kit name is refused.
+- A shop can remove its own kits (soft remove; saved submissions keep their
+  record) but can never change or remove a CHC master kit.
+- Turn it off for one shop with `settings.kit_submissions.allow_add_kit = false`.
+- API (under `/api/store/:slug/kit-submissions`): `GET /parts?q=`,
+  `POST /my-kits`, `DELETE /my-kits/:kitId`. `GET /kits` now returns `own` per
+  kit and `allow_add_kit`.
