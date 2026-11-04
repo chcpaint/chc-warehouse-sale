@@ -436,6 +436,8 @@ class Query {
         const count = rows.length;
         if (this._range) rows = rows.slice(this._range[0], this._range[1] + 1);
         if (this._limit !== null) rows = rows.slice(0, this._limit);
+        // Opt-in: the real database returns at most `max_rows` (1,000) rows per request.
+        if (db.__maxRows) rows = rows.slice(0, db.__maxRows);
         rows = this._withEmbeds(rows);
 
         if (this._single) {

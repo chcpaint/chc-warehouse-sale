@@ -15,8 +15,34 @@ const { hidePricingEnabled, stripOrderPricing } = require('../utils/pricing-visi
 const { labelFor } = require('../utils/order-status');
 const { resolveOrderingUser } = require('../utils/people-activity');
 const { moduleEnabled } = require('../utils/modules');
+const { lineFor, orFilterFor, brandOptions } = require('../utils/product-lines');
 
 const router = express.Router();
+
+const FILTER_PAGE = 1000;
+const FILTER_MAX_PAGES = 50;
+
+/**
+ * brand / category / name / sku of every active item of a company, read a page at a
+ * time (the database returns at most 1,000 rows per request).
+ */
+async function allProductFilterRows(companyId) {
+    const rows = [];
+    for (let page = 0; page < FILTER_MAX_PAGES; page++) {
+        const { data, error } = await supabaseAdmin
+            .from('products')
+            .select('brand, category, name, sku')
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .order('id')
+            .range(page * FILTER_PAGE, page * FILTER_PAGE + FILTER_PAGE - 1);
+        if (error) throw error;
+        const batch = data || [];
+        rows.push(...batch);
+        if (batch.length < FILTER_PAGE) break;
+    }
+    return rows;
+}
 
 /** Postgres "undefined_column" -- a column from a migration that has not been run yet. */
 function isMissingColumn(err) {
@@ -121,7 +147,11 @@ router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
             .order('sort_order')
             .order('name');
 
-        if (brand) query = query.eq('brand', brand);
+        // EHP / OneChoice / Shopline are product lines, not always brands: choosing one
+        // shows every item in the line whatever brand it is filed under.
+        const line = brand ? lineFor(brand) : null;
+        if (line) query = query.or(orFilterFor(line));
+        else if (brand) query = query.eq('brand', brand);
         if (effectiveCategory) query = query.eq('category', effectiveCategory);
         if (search) query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%,brand.ilike.%${search}%`);
 
@@ -136,26 +166,13 @@ router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
             return res.status(500).json({ error: 'Failed to load products.' });
         }
 
-        // Get available brands and categories for filters
-        const { data: brands } = await supabaseAdmin
-            .from('products')
-            .select('brand')
-            .eq('company_id', companyId)
-            .eq('is_active', true)
-            .order('brand');
-
-        const uniqueBrands = [...new Set((brands?.map(b => b.brand) || []).filter(Boolean))];
-
-        const { data: categories } = await supabaseAdmin
-            .from('products')
-            .select('category')
-            .eq('company_id', companyId)
-            .eq('is_active', true)
-            .not('category', 'is', null)
-            .neq('category', '')
-            .order('category');
-
-        const uniqueCategories = [...new Set((categories?.map(c => c.category) || []).filter(Boolean))];
+        // Brands and categories for the filters. A single select stops at the database's
+        // row cap (1,000), which silently dropped every brand late in the alphabet once a
+        // catalogue grew, so read the whole catalogue a page at a time.
+        const filterRows = await allProductFilterRows(companyId);
+        const uniqueBrands = brandOptions(filterRows);
+        const uniqueCategories = [...new Set(filterRows.map(r => r.category).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
 
         res.json({
             products,
