@@ -752,38 +752,62 @@ router.delete('/branches/:id', requireSuperAdmin, async (req, res) => {
 });
 
 /**
- * POST /api/admin/companies/:companyId/orders/:orderId/invoice
- * A CHC employee uploads an invoice for an order; stores it privately and
- * emails the same recipients as the order confirmation.
+ * Upload an invoice file for an order. One implementation for both slots:
+ *   - the first invoice            -> invoice_* columns
+ *   - the follow-up invoice        -> followup_invoice_* columns, for the
+ *     backordered items of a partial shipment
+ * Stores the file privately and emails the same recipients as the order
+ * confirmation.
  */
-router.post('/companies/:companyId/orders/:orderId/invoice', requireOrderAccess, invoiceUpload.single('invoice'), async (req, res) => {
+async function handleInvoiceUpload(req, res, { followup }) {
     try {
         if (!req.file) return res.status(400).json({ error: 'No invoice file provided.' });
         const { companyId, orderId } = req.params;
 
         const { data: order, error: oErr } = await supabaseAdmin
-            .from('orders').select('id, order_number, company_id, location_id, contact_email')
+            .from('orders').select('id, order_number, company_id, location_id, contact_email, followup_invoice_items')
             .eq('id', orderId).eq('company_id', companyId).single();
         if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
 
         const ext = (req.file.originalname.split('.').pop() || 'pdf').toLowerCase();
-        const storagePath = `${companyId}/${orderId}/invoice-${Date.now()}.${ext}`;
+        const storagePath = `${companyId}/${orderId}/${followup ? 'followup-invoice' : 'invoice'}-${Date.now()}.${ext}`;
         const { error: upErr } = await supabaseAdmin.storage.from('invoices')
             .upload(storagePath, req.file.buffer, { contentType: req.file.mimetype || 'application/octet-stream', upsert: true });
         if (upErr) { console.error('Invoice storage error:', upErr); return res.status(500).json({ error: 'Failed to store invoice file.' }); }
 
-        const { data: updated, error: updErr } = await supabaseAdmin.from('orders').update({
-            invoice_path: storagePath,
-            invoice_filename: stripHtml(req.file.originalname),
-            invoice_uploaded_at: new Date().toISOString(),
-            invoice_uploaded_by: req.admin.id,
+        const now = new Date().toISOString();
+        const handled = {
             handled_by: req.admin.id,
             handled_by_name: req.admin.name || req.admin.email,
-            handled_at: new Date().toISOString()
-        }).eq('id', orderId).select('id, order_number, invoice_filename, invoice_uploaded_at').single();
+            handled_at: now
+        };
+        const patch = followup ? {
+            followup_invoice_path: storagePath,
+            followup_invoice_filename: stripHtml(req.file.originalname),
+            followup_invoice_uploaded_at: now,
+            followup_invoice_uploaded_by: req.admin.id,
+            // Uploading one is the answer to "is it owed?": keep the order
+            // consistent whether or not it was flagged as a backorder first.
+            followup_invoice_due: true,
+            followup_invoice_waived_at: null,
+            followup_invoice_waived_by: null,
+            followup_invoice_waived_note: null,
+            ...handled
+        } : {
+            invoice_path: storagePath,
+            invoice_filename: stripHtml(req.file.originalname),
+            invoice_uploaded_at: now,
+            invoice_uploaded_by: req.admin.id,
+            ...handled
+        };
+        const selectCols = followup
+            ? 'id, order_number, followup_invoice_filename, followup_invoice_uploaded_at'
+            : 'id, order_number, invoice_filename, invoice_uploaded_at';
+        const { data: updated, error: updErr } = await supabaseAdmin.from('orders')
+            .update(patch).eq('id', orderId).select(selectCols).single();
         if (updErr) throw updErr;
 
-        await logAction(req.admin.id, 'invoice_uploaded', 'order', orderId, { filename: req.file.originalname }, req.ip);
+        await logAction(req.admin.id, followup ? 'followup_invoice_uploaded' : 'invoice_uploaded', 'order', orderId, { filename: req.file.originalname }, req.ip);
 
         // Notify the same recipients as the order confirmation (company + managers + branch)
         try {
@@ -791,17 +815,39 @@ router.post('/companies/:companyId/orders/:orderId/invoice', requireOrderAccess,
             if (recipients.length) {
                 const { data: company } = await supabaseAdmin.from('companies').select('name, slug').eq('id', companyId).single();
                 const retrieveUrl = `${process.env.APP_URL || ''}/store/${company?.slug || ''}`;
-                sendInvoiceReady({ to: recipients, replyTo, order: { order_number: order.order_number, id: order.id }, companyName: company?.name || '', retrieveUrl })
-                    .catch(e => console.error('Invoice email failed (non-blocking):', e.message));
+                sendInvoiceReady({
+                    to: recipients, replyTo,
+                    order: { order_number: order.order_number, id: order.id },
+                    companyName: company?.name || '', retrieveUrl,
+                    followUp: followup, backorderItems: followup ? (order.followup_invoice_items || []) : undefined
+                }).catch(e => console.error('Invoice email failed (non-blocking):', e.message));
             }
         } catch (e) { console.error('Invoice recipients error:', e.message); }
 
-        res.json({ message: 'Invoice uploaded and recipients notified.', order: updated });
+        res.json({
+            message: followup ? 'Follow-up invoice uploaded and recipients notified.' : 'Invoice uploaded and recipients notified.',
+            order: updated
+        });
     } catch (err) {
         console.error('Invoice upload error:', err);
-        res.status(500).json({ error: 'Failed to upload invoice.' });
+        res.status(500).json({ error: followup ? 'Failed to upload the follow-up invoice.' : 'Failed to upload invoice.' });
     }
-});
+}
+
+/**
+ * POST /api/admin/companies/:companyId/orders/:orderId/invoice
+ * A CHC employee uploads the order's invoice.
+ */
+router.post('/companies/:companyId/orders/:orderId/invoice', requireOrderAccess, invoiceUpload.single('invoice'),
+    (req, res) => handleInvoiceUpload(req, res, { followup: false }));
+
+/**
+ * POST /api/admin/companies/:companyId/orders/:orderId/followup-invoice
+ * The second invoice, for the backordered items of a partial shipment. Works
+ * exactly like the first, and replaces only the follow-up (never the first).
+ */
+router.post('/companies/:companyId/orders/:orderId/followup-invoice', requireOrderAccess, invoiceUpload.single('invoice'),
+    (req, res) => handleInvoiceUpload(req, res, { followup: true }));
 
 /**
  * GET /api/admin/companies/:companyId/orders/:orderId/invoice
@@ -821,6 +867,78 @@ router.get('/companies/:companyId/orders/:orderId/invoice', requireOrderAccess, 
     } catch (err) {
         console.error('Admin invoice fetch error:', err);
         res.status(500).json({ error: 'Failed to get invoice.' });
+    }
+});
+
+/**
+ * GET /api/admin/companies/:companyId/orders/:orderId/followup-invoice
+ * Short-lived signed URL for the follow-up invoice.
+ */
+router.get('/companies/:companyId/orders/:orderId/followup-invoice', requireOrderAccess, async (req, res) => {
+    try {
+        const { companyId, orderId } = req.params;
+        const { data: order, error } = await supabaseAdmin
+            .from('orders').select('followup_invoice_path, followup_invoice_filename')
+            .eq('id', orderId).eq('company_id', companyId).single();
+        if (error || !order || !order.followup_invoice_path) return res.status(404).json({ error: 'No follow-up invoice on file for this order.' });
+        const { data: signed, error: sErr } = await supabaseAdmin.storage.from('invoices')
+            .createSignedUrl(order.followup_invoice_path, 300);
+        if (sErr || !signed) return res.status(500).json({ error: 'Failed to prepare invoice download.' });
+        res.json({ url: signed.signedUrl, filename: order.followup_invoice_filename });
+    } catch (err) {
+        console.error('Admin follow-up invoice fetch error:', err);
+        res.status(500).json({ error: 'Failed to get the follow-up invoice.' });
+    }
+});
+
+/**
+ * True while an order owes a follow-up invoice: a partial shipment with
+ * backorder was recorded, and neither an invoice nor a "not needed" decision
+ * has been recorded since.
+ */
+function followupOwed(order) {
+    return !!(order && order.followup_invoice_due && !order.followup_invoice_filename);
+}
+
+const FOLLOWUP_REQUIRED = {
+    error: 'This order shipped partially and still needs its follow-up invoice. Upload it first, or choose "Follow-up invoice not needed".',
+    code: 'followup_invoice_required'
+};
+
+/**
+ * PUT /api/admin/companies/:companyId/orders/:orderId/followup-invoice/waive
+ * "No follow-up invoice is needed" (e.g. the backorder was cancelled). Clears
+ * the reminder and records who said so, and why, in the order history.
+ */
+router.put('/companies/:companyId/orders/:orderId/followup-invoice/waive', requireOrderAccess, async (req, res) => {
+    try {
+        const { companyId, orderId } = req.params;
+        const note = stripHtml(req.body?.note || '').slice(0, 300);
+        const { data: order, error: oErr } = await supabaseAdmin
+            .from('orders').select('id, order_number, followup_invoice_due, followup_invoice_filename, status, status_history')
+            .eq('id', orderId).eq('company_id', companyId).single();
+        if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
+        if (!followupOwed(order)) return res.status(409).json({ error: 'This order is not waiting on a follow-up invoice.' });
+
+        const now = new Date().toISOString();
+        const history = order.status_history || [];
+        history.push({
+            status: order.status, timestamp: now, updated_by: req.admin.email,
+            note: 'Follow-up invoice not needed' + (note ? ': ' + note : '')
+        });
+        const { error } = await supabaseAdmin.from('orders').update({
+            followup_invoice_due: false,
+            followup_invoice_waived_at: now,
+            followup_invoice_waived_by: req.admin.id,
+            followup_invoice_waived_note: note || null,
+            status_history: history
+        }).eq('id', orderId);
+        if (error) throw error;
+        await logAction(req.admin.id, 'followup_invoice_waived', 'order', orderId, { note }, req.ip);
+        res.json({ message: 'Updated \u2014 no follow-up invoice is needed for this order.' });
+    } catch (err) {
+        console.error('Follow-up invoice waive error:', err);
+        res.status(500).json({ error: 'Failed to update the order.' });
     }
 });
 
@@ -2006,11 +2124,20 @@ router.put('/orders/:orderId/status', async (req, res) => {
         // visibility without a second round trip later.
         const { data: order } = await supabaseAdmin
             .from('orders')
-            .select('status_history, company_id, location_id, contact_email, order_number, company_name, items')
+            .select('status_history, company_id, location_id, contact_email, order_number, company_name, items, followup_invoice_due, followup_invoice_filename')
             .eq('id', req.params.orderId)
             .single();
 
         const partial = is_partial_shipment === true && status === 'out_on_delivery';
+
+        // A partially shipped order owes a follow-up invoice for the backordered
+        // items, so it cannot be closed from here until that is uploaded (or
+        // staff say none is needed -- the console asks, then resends with
+        // waive_followup).
+        const waiveFollowup = req.body?.waive_followup === true;
+        if (status === 'closed' && followupOwed(order) && !waiveFollowup) {
+            return res.status(409).json(FOLLOWUP_REQUIRED);
+        }
 
         // A partial shipment with nothing recorded as short is exactly the
         // gap that let one order's status email go out with an empty
@@ -2051,7 +2178,7 @@ router.put('/orders/:orderId/status', async (req, res) => {
         statusHistory.push({
             status,
             timestamp: new Date().toISOString(),
-            note: stripHtml(note || ''),
+            note: stripHtml(note || '') + (status === 'closed' && followupOwed(order) ? ' (closed without a follow-up invoice)' : ''),
             updated_by: req.admin.email,
             ...(partial ? { is_partial_shipment: true } : {}),
             ...(backorderItems.length ? { backorder_items: backorderItems } : {})
@@ -2063,6 +2190,21 @@ router.put('/orders/:orderId/status', async (req, res) => {
                 status, status_history: statusHistory,
                 is_partial_shipment: partial,
                 backorder_items: backorderItems,
+                // A partial shipment with backorder means a follow-up invoice
+                // is owed. It stays owed after the backorder ships (and the
+                // partial flag clears) until it is uploaded or waived, so keep
+                // a copy of what was short for the reminder to point at.
+                ...(partial ? {
+                    followup_invoice_due: true,
+                    ...(order?.followup_invoice_filename ? {} : { followup_invoice_items: backorderItems }),
+                    followup_invoice_waived_at: null, followup_invoice_waived_by: null, followup_invoice_waived_note: null
+                } : {}),
+                ...(status === 'closed' && followupOwed(order) && waiveFollowup ? {
+                    followup_invoice_due: false,
+                    followup_invoice_waived_at: new Date().toISOString(),
+                    followup_invoice_waived_by: req.admin.id,
+                    followup_invoice_waived_note: 'Closed without a follow-up invoice'
+                } : {}),
                 // Who dealt with this. status_history is the full trail; these
                 // columns answer the question without parsing JSON per row.
                 handled_by: req.admin.id,
@@ -2123,7 +2265,7 @@ router.put('/companies/:companyId/orders/:orderId/close', requireOrderAccess, as
 
         const { data: order, error: oErr } = await supabaseAdmin
             .from('orders')
-            .select('id, order_number, company_id, location_id, contact_email, status, payment_status, invoice_filename, status_history')
+            .select('id, order_number, company_id, location_id, contact_email, status, payment_status, invoice_filename, followup_invoice_due, followup_invoice_filename, status_history')
             .eq('id', orderId).eq('company_id', companyId).single();
         if (oErr || !order) return res.status(404).json({ error: 'Order not found for this company.' });
 
@@ -2131,12 +2273,19 @@ router.put('/companies/:companyId/orders/:orderId/close', requireOrderAccess, as
             return res.status(409).json({ error: 'This order is already closed / marked paid.' });
         }
 
+        // A backorder owes its own follow-up invoice. Closing without one is
+        // allowed only when staff say so explicitly (same spirit as closing an
+        // order that never got a first invoice), and that is written down.
+        const waiveFollowup = req.body?.waive_followup === true;
+        const owed = followupOwed(order);
+        if (owed && !waiveFollowup) return res.status(409).json(FOLLOWUP_REQUIRED);
+
         const now = new Date().toISOString();
         const statusHistory = order.status_history || [];
         statusHistory.push({
             status: 'closed',
             timestamp: now,
-            note: note || 'Payment received — order closed',
+            note: (note || 'Payment received — order closed') + (owed ? ' (closed without a follow-up invoice)' : ''),
             updated_by: req.admin.email
         });
 
@@ -2149,6 +2298,12 @@ router.put('/companies/:companyId/orders/:orderId/close', requireOrderAccess, as
                 closed_at: now,
                 closed_by: req.admin.id,
                 status_history: statusHistory,
+                ...(owed ? {
+                    followup_invoice_due: false,
+                    followup_invoice_waived_at: now,
+                    followup_invoice_waived_by: req.admin.id,
+                    followup_invoice_waived_note: 'Closed without a follow-up invoice'
+                } : {}),
                 handled_by: req.admin.id,
                 handled_by_name: req.admin.name || req.admin.email,
                 handled_at: now

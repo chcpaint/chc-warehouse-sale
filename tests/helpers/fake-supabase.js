@@ -40,6 +40,10 @@ const KNOWN_COLUMNS = {
         'po_number', 'location_id',
         'payment_status', 'payment_provider', 'payment_intent_id', 'amount_paid', 'paid_at',
         'invoice_path', 'invoice_filename', 'invoice_uploaded_at', 'invoice_uploaded_by',
+        // Migration 055: the follow-up invoice for a partial shipment's backorder.
+        'followup_invoice_due', 'followup_invoice_items', 'followup_invoice_path', 'followup_invoice_filename',
+        'followup_invoice_uploaded_at', 'followup_invoice_uploaded_by',
+        'followup_invoice_waived_at', 'followup_invoice_waived_by', 'followup_invoice_waived_note',
         'closed_at', 'closed_by',
         'po_source', 'po_normalized', 'placed_by_user_id',
         // Added by migration 025 for order attribution. They were missing here

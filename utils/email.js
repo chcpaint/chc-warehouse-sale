@@ -356,28 +356,38 @@ async function sendContactNote(options) {
  */
 async function sendInvoiceReady(options) {
     if (!ensureInit()) return { sent: false, reason: 'not_configured' };
-    const { to, order, companyName, retrieveUrl, replyTo } = options;
+    const { to, order, companyName, retrieveUrl, replyTo, followUp, backorderItems } = options;
     const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
     if (!recipients.length) return { sent: false, reason: 'no_recipient' };
     const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
     const orderNo = order.order_number || order.id;
+    // The second invoice for a partial shipment: say so, and say what it is for.
+    const shortItems = Array.isArray(backorderItems) ? backorderItems.filter(i => i && i.name) : [];
+    const title = followUp ? 'Follow-up Invoice Ready' : 'Invoice Ready';
+    const itemsHtml = followUp && shortItems.length
+        ? `<p>This invoice covers the items that were on backorder:</p><ul>${shortItems.map(i => `<li>${escHtml(i.quantity)} &times; ${escHtml(i.name)}${i.sku ? ' (' + escHtml(i.sku) + ')' : ''}</li>`).join('')}</ul>`
+        : '';
+    const itemsText = followUp && shortItems.length
+        ? '\nCovers the backordered items: ' + shortItems.map(i => `${i.quantity} x ${i.name}`).join(', ')
+        : '';
     const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">Invoice Ready</h2>
+            <h2 style="margin: 0;">${title}</h2>
             <p style="margin: 5px 0 0; opacity: 0.9;">Order #${escHtml(orderNo)}</p>
         </div>
         <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-            <p>An invoice is now available for <strong>${escHtml(companyName)}</strong> order <strong>#${escHtml(orderNo)}</strong>.</p>
-            <p>Sign in to your store, open the order in your order history, and download the invoice to print and make payment.</p>
+            <p>${followUp ? 'A follow-up invoice' : 'An invoice'} is now available for <strong>${escHtml(companyName)}</strong> order <strong>#${escHtml(orderNo)}</strong>.</p>
+            ${itemsHtml}
+            <p>Sign in to your store, open the order in your order history, and download the ${followUp ? 'follow-up ' : ''}invoice to print and make payment.</p>
             ${retrieveUrl ? `<p style="margin-top:20px;"><a href="${escHtml(retrieveUrl)}" style="background:#1e40af;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;">Go to your store</a></p>` : ''}
             <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
         </div>
     </div>`;
-    const text = `Invoice ready for ${companyName} order #${orderNo}.\nSign in to your store and open the order to download the invoice.${retrieveUrl ? '\n' + retrieveUrl : ''}`;
+    const text = `${followUp ? 'Follow-up invoice' : 'Invoice'} ready for ${companyName} order #${orderNo}.${itemsText}\nSign in to your store and open the order to download the ${followUp ? 'follow-up ' : ''}invoice.${retrieveUrl ? '\n' + retrieveUrl : ''}`;
     try {
-        await sgMail.send({ to: recipients, from: fromAddress, subject: `Invoice ready — ${companyName} order ${orderNo}`, text, html });
-        console.log(`Email: Invoice-ready sent to ${recipients.join(', ')} for order ${orderNo}`);
+        await sgMail.send({ to: recipients, from: fromAddress, subject: `${followUp ? 'Follow-up invoice' : 'Invoice'} ready — ${companyName} order ${orderNo}`, text, html });
+        console.log(`Email: ${followUp ? 'Follow-up invoice' : 'Invoice'}-ready sent to ${recipients.join(', ')} for order ${orderNo}`);
         return { sent: true };
     } catch (err) {
         const errMsg = err.response?.body?.errors?.[0]?.message || err.message;

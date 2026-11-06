@@ -3548,9 +3548,10 @@
         URL.revokeObjectURL(url);
     }
 
-    async function downloadInvoice(orderId) {
+    async function downloadInvoice(orderId, which) {
         try {
-            const resp = await apiFetch(`/store/${state.slug}/orders/${orderId}/invoice`);
+            // which === 'followup' is the second invoice, for a backorder
+            const resp = await apiFetch(`/store/${state.slug}/orders/${orderId}/invoice${which === 'followup' ? '?which=followup' : ''}`);
             const data = await resp.json();
             if (!resp.ok || !data.url) { alert(data.error || 'Invoice not available.'); return; }
             window.open(data.url, '_blank');
@@ -3637,6 +3638,9 @@
                             <p class="text-sm text-gray-500">${items.length} item${items.length !== 1 ? 's' : ''}</p>
                             <div class="flex items-center gap-3">
                                 ${o.invoice_filename ? `<button onclick="event.stopPropagation(); downloadInvoice('${o.id}')" class="text-xs font-semibold text-green-600 hover:text-green-800"><i class="fas fa-file-invoice-dollar mr-1"></i>Download Invoice</button>` : ''}
+                                ${o.followup_invoice_filename
+                                    ? `<button onclick="event.stopPropagation(); downloadInvoice('${o.id}', 'followup')" class="text-xs font-semibold text-green-600 hover:text-green-800"><i class="fas fa-file-invoice-dollar mr-1"></i>Download Backorder Invoice</button>`
+                                    : (o.followup_invoice_due && o.invoice_filename && o.status !== 'closed' && o.status !== 'cancelled' ? '<span class="text-xs text-amber-700" title="CHC will send a second invoice for the backordered items once they ship"><i class="fas fa-clock mr-1"></i>Backorder invoice to follow</span>' : '')}
                                 <p class="text-xs text-blue-500"><i class="fas fa-chevron-down mr-1" id="order-chevron-${idx}"></i>View Details</p>
                             </div>
                         </div>

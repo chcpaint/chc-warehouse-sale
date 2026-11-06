@@ -263,6 +263,11 @@ const ORDER_DESK_ALLOW = [
     ['PUT', /^\/orders\/[^/]+\/status$/],
     ['POST', /^\/companies\/[^/]+\/orders\/[^/]+\/invoice$/],
     ['GET', /^\/companies\/[^/]+\/orders\/[^/]+\/invoice$/],
+    // The second invoice, for a partial shipment's backordered items: whoever
+    // can upload and view the first can handle this one.
+    ['POST', /^\/companies\/[^/]+\/orders\/[^/]+\/followup-invoice$/],
+    ['GET', /^\/companies\/[^/]+\/orders\/[^/]+\/followup-invoice$/],
+    ['PUT', /^\/companies\/[^/]+\/orders\/[^/]+\/followup-invoice\/waive$/],
     ['PUT', /^\/companies\/[^/]+\/orders\/[^/]+\/close$/],
     // Any CHC staff account may adjust pricing on an order (discounts, price
     // matches) and add a note to it -- per Adam, deliberately not fenced

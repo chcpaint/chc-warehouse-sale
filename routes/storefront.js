@@ -1012,7 +1012,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
  */
 router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
-        const historyCols = 'id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, is_partial_shipment, backorder_items, notes, notes_log, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at';
+        const historyCols = 'id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, is_partial_shipment, backorder_items, notes, notes_log, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at, followup_invoice_due, followup_invoice_items, followup_invoice_filename, followup_invoice_uploaded_at';
         const readHistory = (cols) => supabaseAdmin.from('orders').select(cols)
             .eq('company_id', req.company.id).order('created_at', { ascending: false }).limit(50);
         // fuel_surcharge / fee_lines arrive with migration 047; until then history reads without them.
@@ -1161,19 +1161,22 @@ router.post('/:slug/payments/create-intent', requireCompanyAuth, async (req, res
 router.get('/:slug/orders/:orderId/invoice', requireCompanyAuth, async (req, res) => {
     try {
         const { data: order } = await supabaseAdmin
-            .from('orders').select('id, invoice_path, invoice_filename')
+            .from('orders').select('id, invoice_path, invoice_filename, followup_invoice_path, followup_invoice_filename')
             .eq('id', req.params.orderId).eq('company_id', req.company.id).single();
-        if (!order || !order.invoice_path) {
+        // ?which=followup is the second invoice for a partial shipment's backordered items
+        const followup = req.query.which === 'followup';
+        const invoicePath = order && (followup ? order.followup_invoice_path : order.invoice_path);
+        if (!order || !invoicePath) {
             return res.status(404).json({ error: 'No invoice available for this order.' });
         }
         const { data: signed, error } = await supabaseAdmin.storage
             .from('invoices')
-            .createSignedUrl(order.invoice_path, 300);  // inline: opens the PDF in the browser instead of forcing a desktop download
+            .createSignedUrl(invoicePath, 300);  // inline: opens the PDF in the browser instead of forcing a desktop download
         if (error || !signed) {
             console.error('Invoice signed URL error:', error);
             return res.status(500).json({ error: 'Failed to prepare invoice download.' });
         }
-        res.json({ url: signed.signedUrl, filename: order.invoice_filename });
+        res.json({ url: signed.signedUrl, filename: followup ? order.followup_invoice_filename : order.invoice_filename });
     } catch (err) {
         console.error('Invoice download error:', err);
         res.status(500).json({ error: 'Failed to get invoice.' });
