@@ -1,0 +1,26 @@
+/*
+ * Field outlines - one rule for every screen (store, admin, landing page).
+ *
+ * The default outline on a text box, drop-down or text area is a very pale grey
+ * (#e5e7eb / #d1d5db), which is hard to find on a white card. #6b7280 is about
+ * 4.8:1 against white, above the 3:1 that WCAG 1.4.11 asks of a control's edge.
+ *
+ * Specificity is kept deliberately low so state colours still win: a focus ring
+ * (focus:border-blue-500), an error outline (border-red-500) and an intentionally
+ * borderless field (border-0) all keep working. Only the pale grey defaults are
+ * replaced. Tick boxes, radio buttons, sliders, colour pickers, file choosers and
+ * buttons are left as they are.
+ */
+input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="color"],
+                 [type="file"], [type="button"], [type="submit"], [type="reset"],
+                 [type="image"], [type="hidden"])),
+select,
+textarea {
+    border-color: #6b7280;
+}
+
+/* The same fields when a page spells the pale grey out as a class. */
+:is(input, select, textarea).border-gray-200:where(:not([type="checkbox"], [type="radio"])),
+:is(input, select, textarea).border-gray-300:where(:not([type="checkbox"], [type="radio"])) {
+    border-color: #6b7280;
+}
