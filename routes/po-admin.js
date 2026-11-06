@@ -27,6 +27,31 @@ const {
     PO_MODES, poSettings, validatePrefix, validatePadWidth, exampleFor, formatPo, inspectPo
 } = require('../utils/po');
 
+// The most a "no PO under $X" rule can be set to. A typo like 500000 for 500 would let
+// nearly every order through without a PO, so it is refused rather than saved.
+const MAX_OPTIONAL_BELOW = 100000;
+
+/**
+ * Read the "no PO needed under $X" field of a save request.
+ *   absent / undefined  -> leave the stored value as it is
+ *   null or ''          -> remove the rule (every order needs a PO again)
+ *   a positive number   -> set it, to the cent
+ * @returns {{ok:true, change:'keep'|'clear'|'set', value?:number}|{ok:false, error:string}}
+ */
+function parseOptionalBelow(raw) {
+    if (raw === undefined) return { ok: true, change: 'keep' };
+    if (raw === null || raw === '') return { ok: true, change: 'clear' };
+    if (typeof raw === 'boolean') return { ok: false, error: 'The dollar amount must be a number, for example 500.' };
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+        return { ok: false, error: 'The dollar amount must be a number above zero, for example 500.' };
+    }
+    if (n > MAX_OPTIONAL_BELOW) {
+        return { ok: false, error: `The dollar amount cannot be more than $${MAX_OPTIONAL_BELOW.toLocaleString('en-CA')}. Check for an extra zero.` };
+    }
+    return { ok: true, change: 'set', value: Math.round(n * 100) / 100 };
+}
+
 const router = express.Router({ mergeParams: true });
 
 router.use(requireCompanyAccess);
@@ -72,6 +97,8 @@ router.get('/', async (req, res) => {
             company: { id: company.id, name: company.name },
             mode: settings.mode,
             modes: PO_MODES,
+            // Dollars before tax under which a PO is not needed; null = every order needs one.
+            optional_below: settings.optional_below,
             sequence: seq ? {
                 prefix: seq.prefix,
                 next_number: Number(seq.next_number),
@@ -108,6 +135,12 @@ router.put('/', async (req, res) => {
         if (!PO_MODES.includes(mode)) {
             return res.status(400).json({ error: `Mode must be one of: ${PO_MODES.join(', ')}.` });
         }
+
+        // "No PO needed under $X": only meaningful when the shop supplies its own PO.
+        // Validated before anything is written so a bad value saves nothing at all.
+        const thresholdCheck = parseOptionalBelow(req.body?.optional_below);
+        if (!thresholdCheck.ok) return res.status(400).json({ error: thresholdCheck.error });
+        const thresholdChange = mode === 'manual' ? thresholdCheck.change : 'keep';
 
         // ---- the sequence, only when CHC is issuing ----
         if (mode === 'generated') {
@@ -179,9 +212,12 @@ router.put('/', async (req, res) => {
         // The sequence row is KEPT when switching away from 'generated'. The
         // counter is the record of what has been issued; deleting it and later
         // switching back would start again at 1 and reissue every number.
+        const poBlock = { ...((company.settings || {}).purchase_orders || {}), mode };
+        if (thresholdChange === 'clear') delete poBlock.optional_below;
+        else if (thresholdChange === 'set') poBlock.optional_below = thresholdCheck.value;
         const settings = {
             ...(company.settings || {}),
-            purchase_orders: { ...((company.settings || {}).purchase_orders || {}), mode }
+            purchase_orders: poBlock
         };
 
         const { error: companyError } = await supabaseAdmin
@@ -191,7 +227,8 @@ router.put('/', async (req, res) => {
         if (companyError) throw companyError;
 
         await logAction(req.admin.id, 'po_settings_updated', 'company', companyId,
-            { mode, prefix: req.body?.prefix || null }, req.ip);
+            { mode, prefix: req.body?.prefix || null,
+              ...(thresholdChange !== 'keep' ? { optional_below: thresholdChange === 'set' ? thresholdCheck.value : null } : {}) }, req.ip);
 
         const { data: seq } = await supabaseAdmin
             .from('company_po_sequences')
@@ -204,8 +241,11 @@ router.put('/', async (req, res) => {
                 ? `${company.name} will not be asked for a purchase order.`
                 : mode === 'manual'
                     ? `${company.name} will supply their own purchase order number.`
+                        + (poSettings(settings).optional_below !== null
+                            ? ` Orders under $${poSettings(settings).optional_below.toFixed(2)} before tax need no PO.` : '')
                     : `${company.name} will be issued purchase orders starting ${formatPo(seq.prefix, seq.next_number, { padWidth: seq.pad_width, checkDigit: seq.use_check_digit })}.`,
             mode,
+            optional_below: poSettings(settings).optional_below,
             sequence: seq ? {
                 prefix: seq.prefix,
                 next_number: Number(seq.next_number),

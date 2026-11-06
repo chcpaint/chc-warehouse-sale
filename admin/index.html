@@ -1712,6 +1712,30 @@
                 <div class="space-y-2" id="po-modes"></div>
                 <p id="po-save-note" class="hidden mt-2 text-sm text-green-600"><i class="fas fa-check mr-1"></i><span></span></p>
 
+                <!-- "No PO needed on small orders": only when the shop supplies its own PO -->
+                <div id="po-threshold-setup" class="hidden mt-3 bg-gray-50 rounded-lg p-4">
+                    <label class="flex items-start gap-3 cursor-pointer">
+                        <input type="checkbox" id="po-threshold-on" onchange="onPoThresholdToggle()"
+                               class="mt-1 w-4 h-4 rounded border-gray-300 text-blue-600">
+                        <span>
+                            <span class="font-semibold text-gray-800 block">No PO needed on small orders</span>
+                            <span class="text-sm text-gray-500">Orders under the amount below, before tax, can be placed without a PO.
+                                At or above it, a PO is required as usual.</span>
+                        </span>
+                    </label>
+                    <div class="mt-3 flex flex-wrap items-end gap-3">
+                        <div>
+                            <label for="po-threshold-amount" class="block text-xs font-semibold text-gray-600 mb-1">Orders under ($, before tax)</label>
+                            <input type="number" id="po-threshold-amount" min="0.01" max="100000" step="0.01" placeholder="500.00"
+                                   oninput="onPoThresholdToggle(true)" class="px-3 py-2 border rounded-lg text-sm w-40">
+                        </div>
+                        <button onclick="savePoThreshold()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                            Save rule
+                        </button>
+                    </div>
+                    <p id="po-threshold-hint" class="text-xs text-gray-500 mt-2"></p>
+                </div>
+
                 <div id="po-sequence-setup" class="hidden mt-3 bg-gray-50 rounded-lg p-4">
                     <div class="grid grid-cols-3 gap-3">
                         <div>
@@ -5501,7 +5525,7 @@
     // customer has the same number on four orders.
     // ============================================================
 
-    let poState = { mode: 'manual', sequence: null, issued: 0 };
+    let poState = { mode: 'manual', sequence: null, issued: 0, optionalBelow: null };
 
     const PO_MODE_COPY = {
         off:       ['Not used', 'No PO field at checkout. Orders go straight through.'],
@@ -5518,7 +5542,8 @@
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Failed to load purchase order settings.');
 
-            poState = { mode: data.mode, sequence: data.sequence, issued: data.issued_count || 0 };
+            poState = { mode: data.mode, sequence: data.sequence, issued: data.issued_count || 0,
+                        optionalBelow: data.optional_below ?? null };
 
             host.innerHTML = Object.entries(PO_MODE_COPY).map(([mode, [title, blurb]]) => `
                 <label class="flex items-start gap-3 border rounded-lg px-4 py-3 cursor-pointer ${data.mode === mode ? 'bg-blue-50 border-blue-300' : 'bg-white hover:border-gray-300'}">
@@ -5543,14 +5568,49 @@
                 document.getElementById('po-start').placeholder = String(data.sequence.next_number);
             }
 
+            // The "no PO under $X" rule as saved. Filled in before the mode handler shows the box.
+            document.getElementById('po-threshold-on').checked = poState.optionalBelow !== null;
+            document.getElementById('po-threshold-amount').value = poState.optionalBelow !== null ? poState.optionalBelow.toFixed(2) : '';
+            onPoThresholdToggle();
+
             onPoModeChange(data.mode, true);
         } catch (err) {
             host.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
         }
     }
 
+    // The hint says in plain words
+    // what is saved right now and what pressing Save will do.
+    function onPoThresholdToggle(fromAmount) {
+        const on = document.getElementById('po-threshold-on');
+        const amount = document.getElementById('po-threshold-amount');
+        // Typing an amount ticks the box, so the order the operator does things in does not matter.
+        if (fromAmount && amount.value !== '') on.checked = true;
+        const saved = poState.optionalBelow;
+        const hint = document.getElementById('po-threshold-hint');
+        hint.textContent = saved !== null
+            ? `Saved: orders under $${saved.toFixed(2)} before tax need no PO. Change the amount or untick the box, then Save rule.`
+            : 'Saved: every order needs a PO. Tick the box, enter an amount, then Save rule.';
+    }
+
+    async function savePoThreshold() {
+        const on = document.getElementById('po-threshold-on').checked;
+        const raw = document.getElementById('po-threshold-amount').value.trim();
+        let optional_below = null;
+        if (on) {
+            const n = Number(raw);
+            if (raw === '' || !Number.isFinite(n) || n <= 0) {
+                alert('Enter the dollar amount (before tax) under which no PO is needed, for example 500.');
+                return;
+            }
+            optional_below = Math.round(n * 100) / 100;
+        }
+        await savePoSettings('manual', { optional_below });
+    }
+
     function onPoModeChange(mode, initial) {
         document.getElementById('po-sequence-setup').classList.toggle('hidden', mode !== 'generated');
+        document.getElementById('po-threshold-setup').classList.toggle('hidden', mode !== 'manual');
         previewPo();
 
         // Switching to off or manual takes effect immediately; there is nothing
@@ -5622,12 +5682,12 @@
         poSaveNoteTimer = setTimeout(() => note.classList.add('hidden'), 4000);
     }
 
-    async function savePoSettings(forcedMode) {
+    async function savePoSettings(forcedMode, extra) {
         const mode = forcedMode
             || document.querySelector('input[name="po-mode"]:checked')?.value
             || 'manual';
 
-        const payload = { mode };
+        const payload = { mode, ...(extra || {}) };
         if (mode === 'generated') {
             payload.prefix = (document.getElementById('po-prefix').value || '').trim().toUpperCase();
             payload.pad_width = Number(document.getElementById('po-pad').value);

@@ -27,6 +27,11 @@ A `manual` company can be given a threshold so small orders need no PO:
   `off` or `generated` companies.
 * The cart shows "Purchases under $X before tax do not require a PO" for any company that has the
   rule, relaxes the PO field for small carts, and the quote PDF's closing line says so too.
+* **Set it for any company in the admin console:** Companies > Modules (the boxes icon) > Purchase orders.
+  Choose "The shop supplies it", tick "No PO needed on small orders", type the dollar amount (before tax) and press
+  **Save rule**. Unticking the box and saving removes the rule. The amount must be above $0 and no more than $100,000.
+  Changes are written to the audit log. API: `PUT /api/admin/companies/:id/po` with `{ mode: 'manual', optional_below: 500 }`
+  (`null` removes it; leaving the field out keeps what is saved).
 * Set it for Assured with `chc-assured-po-under-500.sql`; remove it with
   `update public.companies set settings = settings #- '{purchase_orders,optional_below}' where slug = 'assured';`.
 * Saving the mode in the admin console keeps `optional_below` (it merges into the existing block).
