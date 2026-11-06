@@ -1692,7 +1692,9 @@
     <!-- ============================================================
          SCAN-OUT KIOSK (per company): tablets, ID badges, the ID-scan switch
          ============================================================ -->
-    <div id="scanout-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+    <!-- Opened from the Modules panel, so it must stack ABOVE it (both are z-50, and
+         the Modules panel comes later in the page, so without this it covers this one). -->
+    <div id="scanout-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4" style="z-index:60">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
             <div class="flex justify-between items-center mb-2">
                 <h3 class="text-xl font-bold"><i class="fas fa-barcode text-blue-500 mr-2"></i> Scan-out kiosk — <span id="so-company-name"></span></h3>
@@ -3230,7 +3232,7 @@
             if (!panel || panel.querySelector('[data-done-bar]')) return;
             const bar = document.createElement('div');
             bar.setAttribute('data-done-bar', '');
-            bar.className = 'sticky bottom-0 -mx-6 -mb-6 mt-6 px-6 py-3 bg-white border-t border-gray-300 flex items-center justify-between gap-3 rounded-b-2xl';
+            bar.className = 'sticky -bottom-6 -mx-6 -mb-6 mt-6 px-6 py-3 bg-white border-t border-gray-300 flex items-center justify-between gap-3 rounded-b-2xl';
             bar.innerHTML = '<span data-done-status class="text-sm font-semibold text-green-700"></span>' +
                 '<button type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-6 py-2 rounded-lg text-sm font-semibold">Done</button>';
             bar.querySelector('button').onclick = () => hideModal(id);

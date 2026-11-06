@@ -735,3 +735,21 @@ test('the site-wide limiter steps aside for the kiosk, which has its own limits'
     assert.match(k, /router\.use\(badLinkLimiter\)/);
     assert.match(k, /router\.use\(tabletLimiter\)/);
 });
+
+test('the scan-out panel opens ABOVE the Modules panel it is launched from', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'admin/index.html'), 'utf8');
+    const z = id => {
+        const tag = html.match(new RegExp('<div id="' + id + '"[^>]*>'))[0];
+        const inline = tag.match(/style="[^"]*z-index:\s*(\d+)/);
+        if (inline) return Number(inline[1]);
+        const cls = tag.match(/\bz-(\d+)\b/);
+        return cls ? Number(cls[1]) : 0;
+    };
+    assert.ok(z('scanout-modal') > z('modules-modal'), 'scan-out panel must be in front of the Modules panel');
+});
+
+test('the Done bar on every company panel sits flush with the bottom, not 24px above it', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'admin/index.html'), 'utf8');
+    assert.match(html, /'sticky -bottom-6 -mx-6 -mb-6 mt-6/);
+    assert.ok(!/'sticky bottom-0 -mx-6 -mb-6/.test(html));
+});

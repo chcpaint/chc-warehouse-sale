@@ -28,7 +28,8 @@ test('the inline admin script parses', () => {
 test('a toast helper and Done bars exist, and the Done bar is pinned to the bottom of the panel', () => {
     assert.match(html, /function adminToast\(/);
     assert.match(html, /function addDoneBars\(/);
-    assert.match(html, /sticky bottom-0/);
+    // Pinned to the bottom edge of the panel (-bottom-6 cancels the panel's p-6 so it sits flush).
+    assert.match(html, /sticky -bottom-6/);
 });
 
 test('every company panel gets a Done bar', () => {
