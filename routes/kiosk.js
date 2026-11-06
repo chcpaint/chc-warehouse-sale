@@ -12,6 +12,18 @@
  *     GET  /resolve    what did that scan hit: a badge, a product, or nothing
  *     POST /scan-out   post a confirmed basket as `consume` movements
  *
+ * and, only where a company has switched on stock ordering, two more behind the
+ * company's order passcode:
+ *
+ *     POST /order/unlock    passcode -> a 30-minute order session (scoped token)
+ *     POST /order/passcode  change the passcode (needs the current one)
+ *
+ * The order session is a narrow token (see SCOPED_ROUTES in middleware/auth.js):
+ * it can look up an item, read the order-form settings and place an order for
+ * this tablet's location, and nothing else. The order itself goes through the
+ * store's own order route, so PO rules, tax, fees and branch emails are exactly
+ * the store's.
+ *
  * It cannot place an order, read prices, list stock levels, see other people,
  * or reach the storefront or admin APIs: those require a company or admin JWT,
  * which a kiosk never holds. A leaked kiosk link is therefore worth "someone can
@@ -21,6 +33,7 @@
  */
 
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { supabaseAdmin } = require('../utils/supabase');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
@@ -36,7 +49,13 @@ const {
     validKioskToken,
     normalizeBadgeCode,
     looksLikeBadge,
-    scanOutOptions
+    scanOutOptions,
+    passcodeProblem,
+    hashPasscode,
+    verifyPasscode,
+    ORDER_MAX_FAILS,
+    ORDER_LOCK_MS,
+    ORDER_TOKEN_SECONDS
 } = require('../utils/scan-out');
 
 const router = express.Router();
@@ -131,7 +150,7 @@ async function requireKiosk(req, res, next) {
 
         const { data: company } = await supabaseAdmin
             .from('companies')
-            .select('id, name, is_active, settings')
+            .select('id, name, slug, is_active, settings, distributor_id')
             .eq('id', device.company_id)
             .maybeSingle();
 
@@ -156,7 +175,7 @@ async function requireKiosk(req, res, next) {
 
         req.kiosk = {
             device,
-            company: { id: company.id, name: company.name },
+            company: { id: company.id, name: company.name, slug: company.slug, distributor_id: company.distributor_id, settings: company.settings },
             location: { id: location.id, name: location.name },
             options: scanOutOptions(company.settings),
             inventory: inventorySettings(company.settings)
@@ -195,15 +214,201 @@ async function findBadge(companyId, code) {
 // ============================================================
 // GET /session
 // ============================================================
-router.get('/session', (req, res) => {
+router.get('/session', async (req, res) => {
     const k = req.kiosk;
     res.json({
         company: k.company.name,
         location: k.location.name,
         device: k.device.name,
         require_badge: k.options.require_badge,
-        idle_seconds: k.options.idle_seconds
+        idle_seconds: k.options.idle_seconds,
+        // Whether to show the green "Place Stock Order" bar at all.
+        ordering: (await orderingState(k)).available
     });
+});
+
+// ============================================================
+// STOCK ORDERING (behind the company's order passcode)
+// ============================================================
+
+/**
+ * Can this tablet offer ordering right now, and if not, why not?
+ *
+ * Ordering is the store's own order flow, which a company that tracks who
+ * orders (People & activity) restricts to signed-in individuals — so a kiosk
+ * cannot order for those companies. Everything is read defensively: before
+ * migration 054 is applied the table is simply missing, and the tablet must
+ * carry on scanning out.
+ */
+async function orderingState(k) {
+    try {
+        if (!k.options.order_enabled) return { available: false, reason: 'off' };
+        if (moduleEnabled(k.company.settings, 'activity')) return { available: false, reason: 'individual_logins' };
+        const { data, error } = await supabaseAdmin
+            .from('kiosk_order_access').select('company_id').eq('company_id', k.company.id).maybeSingle();
+        if (error || !data) return { available: false, reason: 'no_passcode' };
+        return { available: true };
+    } catch (_) {
+        return { available: false, reason: 'error' };
+    }
+}
+
+/** This tablet's lockout state. A missing column (054 not applied) reads as "not locked, no counter". */
+async function lockState(deviceId) {
+    const { data } = await supabaseAdmin
+        .from('kiosk_devices').select('order_fail_count, order_locked_until').eq('id', deviceId).maybeSingle();
+    const until = data && data.order_locked_until ? new Date(data.order_locked_until).getTime() : 0;
+    return { fails: Number(data?.order_fail_count || 0), lockedMs: Math.max(0, until - Date.now()) };
+}
+
+function lockedReply(res, lockedMs) {
+    const mins = Math.max(1, Math.ceil(lockedMs / 60000));
+    return res.status(429).json({
+        error: `Too many wrong passcodes. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`,
+        locked_seconds: Math.ceil(lockedMs / 1000)
+    });
+}
+
+/**
+ * Check a passcode against the company's, counting wrong tries against THIS
+ * tablet. Returns { ok: true } or sends the response itself and returns { ok: false }.
+ */
+async function checkPasscode(req, res, passcode) {
+    const k = req.kiosk;
+
+    const state = await orderingState(k);
+    if (!state.available) {
+        res.status(403).json({
+            error: state.reason === 'individual_logins'
+                ? 'This company\u2019s orders are placed by signed-in people, so the tablet cannot order.'
+                : 'Ordering from this tablet is not set up. Ask your manager.',
+            code: state.reason
+        });
+        return { ok: false };
+    }
+
+    const lock = await lockState(k.device.id);
+    if (lock.lockedMs > 0) { lockedReply(res, lock.lockedMs); return { ok: false }; }
+
+    const code = String(passcode === undefined || passcode === null ? '' : passcode).trim();
+    if (!/^\d{1,12}$/.test(code)) {
+        res.status(400).json({ error: 'Enter the passcode using numbers.' });
+        return { ok: false };
+    }
+
+    const { data: access } = await supabaseAdmin
+        .from('kiosk_order_access').select('passcode_hash').eq('company_id', k.company.id).maybeSingle();
+    const good = access && await verifyPasscode(code, access.passcode_hash);
+
+    if (!good) {
+        const fails = lock.fails + 1;
+        const locking = fails >= ORDER_MAX_FAILS;
+        await supabaseAdmin.from('kiosk_devices').update({
+            order_fail_count: locking ? 0 : fails,
+            order_locked_until: locking ? new Date(Date.now() + ORDER_LOCK_MS).toISOString() : null
+        }).eq('id', k.device.id);
+        if (locking) { lockedReply(res, ORDER_LOCK_MS); return { ok: false }; }
+        res.status(401).json({
+            error: 'That passcode is not right.',
+            attempts_left: ORDER_MAX_FAILS - fails
+        });
+        return { ok: false };
+    }
+
+    if (lock.fails) {
+        await supabaseAdmin.from('kiosk_devices')
+            .update({ order_fail_count: 0, order_locked_until: null }).eq('id', k.device.id);
+    }
+    return { ok: true };
+}
+
+/**
+ * POST /order/unlock   Body: { passcode }
+ *
+ * A right passcode returns an order session: a short-lived token that is valid
+ * for the store's lookup / order-form / order endpoints for THIS tablet's
+ * location only, plus what the order screen needs to draw itself.
+ */
+router.post('/order/unlock', async (req, res) => {
+    try {
+        const k = req.kiosk;
+        const check = await checkPasscode(req, res, req.body && req.body.passcode);
+        if (!check.ok) return;
+
+        // Who can be named on an order from this location.
+        let orderers = [];
+        try {
+            const { data: loc } = await supabaseAdmin
+                .from('company_locations').select('orderer_names')
+                .eq('id', k.location.id).eq('company_id', k.company.id).maybeSingle();
+            orderers = Array.isArray(loc && loc.orderer_names)
+                ? loc.orderer_names.map(n => text(n, 80)).filter(Boolean) : [];
+        } catch (_) { /* column not present: no fixed list */ }
+
+        const claims = {
+            type: 'company',
+            scope: 'kiosk_order',
+            company_id: k.company.id,
+            slug: k.company.slug,
+            company_name: k.company.name,
+            location_id: k.location.id,
+            device_id: k.device.id
+        };
+        if (k.company.distributor_id) claims.distributor_id = k.company.distributor_id;
+
+        const token = jwt.sign(claims, process.env.JWT_SECRET, { expiresIn: ORDER_TOKEN_SECONDS });
+
+        res.json({
+            token,
+            expires_in: ORDER_TOKEN_SECONDS,
+            slug: k.company.slug,
+            location: { id: k.location.id, name: k.location.name },
+            device: k.device.name,
+            orderer_names: orderers,
+            contact: { name: k.options.order_contact_name, email: k.options.order_contact_email },
+            hide_pricing: moduleEnabled(k.company.settings, 'hide_pricing')
+        });
+    } catch (err) {
+        console.error('Kiosk unlock error:', err);
+        res.status(500).json({ error: 'Could not check the passcode. Try again.' });
+    }
+});
+
+/**
+ * POST /order/passcode   Body: { current, next }
+ *
+ * Whoever holds the passcode can change it, with no individual login involved.
+ * Changing it needs the current one, so a person at an unlocked screen who has
+ * never been told the passcode cannot lock the managers out.
+ */
+router.post('/order/passcode', async (req, res) => {
+    try {
+        const k = req.kiosk;
+        const next = String(req.body && req.body.next !== undefined ? req.body.next : '').trim();
+
+        const problem = passcodeProblem(next);
+        if (problem) return res.status(400).json({ error: problem });
+
+        const check = await checkPasscode(req, res, req.body && req.body.current);
+        if (!check.ok) return;
+
+        if (String(req.body.current).trim() === next) {
+            return res.status(400).json({ error: 'The new passcode must be different from the current one.' });
+        }
+
+        const { error } = await supabaseAdmin.from('kiosk_order_access').upsert({
+            company_id: k.company.id,
+            passcode_hash: await hashPasscode(next),
+            changed_at: new Date().toISOString(),
+            changed_by: `Tablet: ${k.device.name}`
+        }, { onConflict: 'company_id' });
+        if (error) throw error;
+
+        res.json({ message: 'The passcode was changed. Give the new one to the people who place orders.' });
+    } catch (err) {
+        console.error('Kiosk passcode change error:', err);
+        res.status(500).json({ error: 'Could not change the passcode. Try again.' });
+    }
 });
 
 // ============================================================

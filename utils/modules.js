@@ -123,7 +123,11 @@ const MODULES = {
             // against the tablet only, with no name recorded.
             require_badge: true,
             // Seconds of inactivity before an unconfirmed session is cleared.
-            idle_seconds: 60
+            idle_seconds: 60,
+            // Stock ordering from the tablet behind a passcode (migration 054).
+            order_enabled: false,
+            order_contact_name: '',
+            order_contact_email: ''
         }
     },
 

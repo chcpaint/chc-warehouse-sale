@@ -25,7 +25,11 @@ const {
     newKioskToken,
     hashKioskToken,
     scanOutOptions,
-    cleanTrade
+    cleanTrade,
+    cleanLine,
+    cleanEmail,
+    passcodeProblem,
+    hashPasscode
 } = require('../utils/scan-out');
 
 const router = express.Router({ mergeParams: true });
@@ -87,7 +91,7 @@ router.get('/', async (req, res) => {
         const company = await loadCompany(companyId);
         if (!company) return res.status(404).json({ error: 'Company not found.' });
 
-        const [{ data: locations }, { data: devices }, { data: badges }] = await Promise.all([
+        const [{ data: locations }, { data: devices }, { data: badges }, access] = await Promise.all([
             supabaseAdmin.from('company_locations').select('id, name, city, is_active')
                 .eq('company_id', companyId).eq('is_active', true).order('name'),
             supabaseAdmin.from('kiosk_devices')
@@ -95,7 +99,8 @@ router.get('/', async (req, res) => {
                 .eq('company_id', companyId).order('created_at', { ascending: false }),
             supabaseAdmin.from('kiosk_badges')
                 .select('id, name, trade, badge_code, is_active')
-                .eq('company_id', companyId).order('name')
+                .eq('company_id', companyId).order('name'),
+            orderAccessRow(companyId)
         ]);
 
         const locName = Object.fromEntries((locations || []).map(l => [l.id, l.name]));
@@ -105,6 +110,7 @@ router.get('/', async (req, res) => {
             module_enabled: moduleEnabled(company.settings, 'scan_out'),
             inventory_enabled: moduleEnabled(company.settings, 'inventory'),
             options: scanOutOptions(company.settings),
+            ordering: orderingOut(company.settings, access),
             trades: TRADES,
             locations: locations || [],
             devices: (devices || []).map(d => ({
@@ -169,6 +175,135 @@ router.put('/settings', async (req, res) => {
     } catch (err) {
         console.error('Scan-out settings error:', err);
         res.status(500).json({ error: 'Failed to save that setting.' });
+    }
+});
+
+// ============================================================
+// STOCK ORDERING — switch, default contact, and the order passcode
+//
+// The passcode is never readable: only whether one is set, when it last
+// changed and by whom. Setting one here replaces whatever was there, which is
+// also how a lost passcode is recovered.
+// ============================================================
+
+/** The passcode row (without its hash), or null. A missing table (054 not applied yet) reads as "none". */
+async function orderAccessRow(companyId) {
+    try {
+        const { data } = await supabaseAdmin
+            .from('kiosk_order_access').select('company_id, changed_at, changed_by')
+            .eq('company_id', companyId).maybeSingle();
+        return data || null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function orderingOut(settings, access) {
+    const o = scanOutOptions(settings);
+    const individual = moduleEnabled(settings, 'activity');
+    return {
+        enabled: o.order_enabled,
+        contact_name: o.order_contact_name,
+        contact_email: o.order_contact_email,
+        passcode_set: !!access,
+        passcode_changed_at: access ? access.changed_at : null,
+        passcode_changed_by: access ? access.changed_by : null,
+        available: !individual,
+        unavailable_reason: individual
+            ? 'This company places orders as signed-in individuals (People & activity), so a shared tablet cannot order for it.'
+            : null,
+        ready: o.order_enabled && !individual && !!access
+    };
+}
+
+router.put('/ordering', async (req, res) => {
+    try {
+        const company = await loadCompany(req.params.companyId);
+        if (!company) return res.status(404).json({ error: 'Company not found.' });
+
+        const patch = {};
+        const body = req.body || {};
+        if (body.enabled !== undefined) {
+            if (typeof body.enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be true or false.' });
+            if (body.enabled && moduleEnabled(company.settings, 'activity')) {
+                return res.status(400).json({ error: 'This company places orders as signed-in individuals, so a shared tablet cannot order for it.' });
+            }
+            patch.order_enabled = body.enabled;
+        }
+        if (body.contact_name !== undefined) patch.order_contact_name = cleanLine(body.contact_name, 80);
+        if (body.contact_email !== undefined) {
+            const raw = String(body.contact_email || '').trim();
+            const email = cleanEmail(raw);
+            if (raw && !email) return res.status(400).json({ error: 'Enter a valid email address, or leave it empty.' });
+            patch.order_contact_email = email;
+        }
+        if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to change.' });
+
+        const settings = withModule(company.settings, 'scan_out', patch);
+        const { error } = await supabaseAdmin
+            .from('companies').update({ settings, updated_at: new Date().toISOString() }).eq('id', company.id);
+        if (error) throw error;
+
+        await logAction(req.admin.id, 'scan_out_ordering_settings', 'company', company.id, patch, req.ip);
+
+        const ordering = orderingOut(settings, await orderAccessRow(company.id));
+        res.json({
+            message: patch.order_enabled === true
+                ? (ordering.passcode_set ? 'Updated \u2014 stock ordering is ON for the tablets.' : 'Updated \u2014 stock ordering is ON. Set a passcode and the green order bar will appear.')
+                : patch.order_enabled === false ? 'Updated \u2014 stock ordering is OFF.' : 'Updated \u2014 the order contact was saved.',
+            ordering
+        });
+    } catch (err) {
+        console.error('Scan-out ordering settings error:', err);
+        res.status(500).json({ error: 'Failed to save that setting.' });
+    }
+});
+
+router.put('/order-passcode', async (req, res) => {
+    try {
+        const companyId = req.params.companyId;
+        const company = await loadCompany(companyId);
+        if (!company) return res.status(404).json({ error: 'Company not found.' });
+
+        const passcode = String(req.body && req.body.passcode !== undefined ? req.body.passcode : '').trim();
+        const problem = passcodeProblem(passcode);
+        if (problem) return res.status(400).json({ error: problem });
+
+        const { error } = await supabaseAdmin.from('kiosk_order_access').upsert({
+            company_id: companyId,
+            passcode_hash: await hashPasscode(passcode),
+            changed_at: new Date().toISOString(),
+            changed_by: `CHC console`
+        }, { onConflict: 'company_id' });
+        if (error) throw error;
+
+        // A fresh passcode is also the way back in after a lockout.
+        await supabaseAdmin.from('kiosk_devices')
+            .update({ order_fail_count: 0, order_locked_until: null }).eq('company_id', companyId);
+
+        // The passcode itself is never logged.
+        await logAction(req.admin.id, 'kiosk_order_passcode_set', 'company', companyId, {}, req.ip);
+
+        res.json({
+            message: 'Updated \u2014 the order passcode was saved. Give it only to the people who place orders.',
+            ordering: orderingOut(company.settings, await orderAccessRow(companyId))
+        });
+    } catch (err) {
+        console.error('Kiosk order passcode error:', err);
+        res.status(500).json({ error: 'Failed to save the passcode.' });
+    }
+});
+
+router.delete('/order-passcode', async (req, res) => {
+    try {
+        const companyId = req.params.companyId;
+        const { error } = await supabaseAdmin.from('kiosk_order_access').delete().eq('company_id', companyId);
+        if (error) throw error;
+        await logAction(req.admin.id, 'kiosk_order_passcode_removed', 'company', companyId, {}, req.ip);
+        res.json({ message: 'Updated \u2014 the passcode was removed, so tablets can no longer place orders.' });
+    } catch (err) {
+        console.error('Kiosk order passcode remove error:', err);
+        res.status(500).json({ error: 'Failed to remove the passcode.' });
     }
 });
 

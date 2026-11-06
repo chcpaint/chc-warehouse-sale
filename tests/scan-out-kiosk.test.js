@@ -263,7 +263,7 @@ test('the session tells the tablet its name and options, and nothing secret', as
     assert.equal(r.status, 200);
     assert.deepEqual(r.body, {
         company: 'Assured Collision', location: 'Burlington', device: 'Paint room tablet',
-        require_badge: true, idle_seconds: 45
+        require_badge: true, idle_seconds: 45, ordering: false
     });
     assert.ok(!JSON.stringify(r.body).includes(TOKEN));
 });
@@ -690,7 +690,10 @@ test('the kiosk page sends its secret as a header, stores nothing, and loads not
     assert.match(html, /X-Kiosk-Token/);
     assert.ok(!/localStorage|sessionStorage|indexedDB|document\.cookie/.test(html), 'no browser storage');
     assert.ok(!/<script[^>]+src=|<link[^>]+href=["']https?:/i.test(html), 'no external scripts or styles');
-    assert.ok(!/Authorization|company-login|access_code/i.test(html), 'it has no sign-in of any kind');
+    assert.ok(!/company-login|access_code|\/api\/auth|admin-login/i.test(html), 'it has no sign-in of any kind');
+    // The one Authorization header is the narrow order session, sent only to the store's order endpoints.
+    assert.equal((html.match(/Authorization/g) || []).length, 1);
+    assert.match(html, /'Authorization': 'Bearer ' \+ \(orderCtx \? orderCtx\.token : ''\)/);
     assert.match(html, /noindex/);
 });
 
@@ -721,7 +724,7 @@ test('the kiosk touches no sign-in code', () => {
     }
     // The only settings key the console writes is scan_out.
     const admin = fs.readFileSync(path.join(ROOT, 'routes/scan-out-admin.js'), 'utf8');
-    assert.equal([...admin.matchAll(/withModule\(company\.settings, '([a-z_]+)'/g)].map(m => m[1]).join(','), 'scan_out');
+    assert.deepEqual([...new Set([...admin.matchAll(/withModule\(company\.settings, '([a-z_]+)'/g)].map(m => m[1]))], ['scan_out']);
 });
 
 test('the site-wide limiter steps aside for the kiosk, which has its own limits', () => {

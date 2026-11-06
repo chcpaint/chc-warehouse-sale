@@ -11,6 +11,51 @@ const { orderInScope, companyInScope, isHeadOffice } = require('../utils/order-s
  *                           the Customer-users module on). req.companyUser is
  *                           set so an order can be attributed to the person.
  */
+/**
+ * Narrow session tokens.
+ *
+ * A normal company token (the shared access code, or an individual login) opens
+ * the whole storefront. A token with a `scope` is deliberately smaller: it is
+ * minted by one purpose-built route and may call only the handful of store
+ * endpoints that purpose needs. Default-deny: a scope this file does not know,
+ * or a route not on its list (including anything mounted with router.use, which
+ * has no req.route), is refused.
+ *
+ * `kiosk_order` is the scan-out kiosk's stock-order session (routes/kiosk.js):
+ * it can look up an item, read the three order-form settings, and place an
+ * order for ITS OWN tablet's location. It cannot read orders, reports, prices
+ * lists, inventory, users or anything else.
+ */
+const SCOPED_ROUTES = {
+    kiosk_order: [
+        ['GET',  '/:slug/products/lookup'],
+        ['GET',  '/:slug/po/config'],
+        ['GET',  '/:slug/tax/config'],
+        ['GET',  '/:slug/delivery-fee/config'],
+        ['POST', '/:slug/orders']
+    ]
+};
+
+function scopedTokenAllows(decoded, req) {
+    const allowed = SCOPED_ROUTES[decoded.scope];
+    if (!allowed) return false;
+    const routePath = req.route && req.route.path;
+    if (!routePath || !allowed.some(([m, p]) => m === req.method && p === routePath)) return false;
+    // The token belongs to one company's store.
+    if (req.params && req.params.slug !== undefined && req.params.slug !== decoded.slug) return false;
+
+    if (decoded.scope === 'kiosk_order') {
+        // The tablet's location is fixed by its token, whatever the request says.
+        if (!decoded.location_id) return false;
+        if (req.method === 'GET') {
+            req.query = { ...(req.query || {}), location_id: decoded.location_id };
+        } else if (req.body && typeof req.body === 'object') {
+            req.body.location_id = decoded.location_id;
+        }
+    }
+    return true;
+}
+
 function requireCompanyAuth(req, res, next) {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
@@ -22,6 +67,11 @@ function requireCompanyAuth(req, res, next) {
 
         if (decoded.type !== 'company' && decoded.type !== 'company_user') {
             return res.status(403).json({ error: 'Invalid token type.' });
+        }
+
+        // A scoped token only ever works on the routes its scope lists.
+        if (decoded.scope !== undefined && (decoded.type !== 'company' || !scopedTokenAllows(decoded, req))) {
+            return res.status(403).json({ error: 'This session cannot do that.' });
         }
 
         // Defense in depth: a company (or its user) belongs to exactly one

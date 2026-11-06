@@ -82,8 +82,11 @@ const KNOWN_COLUMNS = {
     ]),
     kiosk_devices: new Set([
         'id', 'company_id', 'location_id', 'name', 'token_hash', 'token_hint',
-        'is_active', 'last_seen_at', 'created_at', 'revoked_at'
+        'is_active', 'last_seen_at', 'created_at', 'revoked_at',
+        // Migration 054: order-passcode lockout.
+        'order_fail_count', 'order_locked_until'
     ]),
+    kiosk_order_access: new Set(['company_id', 'passcode_hash', 'changed_at', 'changed_by']),
     kiosk_badges: new Set([
         'id', 'company_id', 'name', 'trade', 'badge_code', 'is_active', 'created_at', 'updated_at'
     ]),
@@ -469,7 +472,7 @@ function createFakeSupabase(seed = {}) {
         product_barcodes: [], inventory_levels: [], stock_movements: [],
         replenishment_orders: [], replenishment_order_lines: [], inventory_uploads: [],
         inventory_count_sessions: [], inventory_count_lines: [], inventory_transfers: [],
-        inventory_drivers: [], kiosk_devices: [], kiosk_badges: [],
+        inventory_drivers: [], kiosk_devices: [], kiosk_badges: [], kiosk_order_access: [],
         inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
         repair_kits: [], kit_items: [], company_kit_access: [],
         kit_product_map: [], kit_consumptions: [], kit_submissions: [], kit_submission_counters: [], order_receipts: [],

@@ -108,8 +108,53 @@
   .sheet button.pick small { display: block; color: var(--muted); font-size: .9rem; }
   .sheet button.pick:active { background: #e2e8f0; }
 
+  /* Stock ordering */
+  .orderbar {
+    flex: 0 0 auto; display: none; width: 100%; min-height: 84px; margin: 0 0 18px; border: 0; border-radius: 18px;
+    background: var(--ok); color: #fff; font-size: 1.9rem; font-weight: 800; letter-spacing: .01em; cursor: pointer;
+  }
+  .orderbar:active { filter: brightness(.9); }
+  .strip { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; background: var(--card); border: 3px solid var(--line); border-radius: 16px; padding: 10px 16px; }
+  .strip .ttl { font-size: 1.35rem; font-weight: 700; }
+  .strip .sub { color: var(--muted); font-size: 1rem; }
+  .strip .sp { margin-left: auto; }
+  .strip button, button.link { height: 52px; padding: 0 18px; border-radius: 14px; border: 3px solid var(--line); background: #fff; font-size: 1rem; font-weight: 600; cursor: pointer; color: var(--ink); }
+  .price { color: var(--muted); font-size: .95rem; margin-top: 2px; }
+  .lineamt { min-width: 92px; text-align: right; font-weight: 700; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+  .summary { flex: 0 0 auto; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 2px 6px; color: var(--muted); font-size: .95rem; }
+  .summary b { color: var(--ink); font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+  .oform { flex: 0 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; }
+  .oform label { display: block; font-size: .85rem; font-weight: 700; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .oform input, .oform select { width: 100%; height: 52px; font-size: 1.1rem; padding: 0 12px; border: 3px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); -webkit-user-select: text; user-select: text; }
+  .oform input.bad, .oform select.bad { border-color: var(--err); background: var(--err-bg); }
+  .oform .fixed { height: 52px; display: flex; align-items: center; font-size: 1.05rem; font-weight: 600; word-break: break-all; }
+  .oform .hint { font-size: .85rem; color: var(--muted); margin-top: 3px; }
+
+  .keypad { display: grid; grid-template-columns: repeat(3, 110px); gap: 12px; margin-top: 8px; }
+  .keypad button { height: 84px; border-radius: 18px; border: 3px solid var(--line); background: #fff; font-size: 2.1rem; font-weight: 700; color: var(--ink); cursor: pointer; }
+  .keypad button:active { background: #e2e8f0; }
+  .keypad button.fn { font-size: 1.15rem; color: var(--muted); }
+  .dots { font-size: 2.4rem; letter-spacing: .3em; min-height: 3rem; color: var(--brand); font-weight: 800; }
+  .passmsg { min-height: 1.6em; color: var(--err); font-weight: 700; font-size: 1.2rem; }
+  .passrow { display: flex; gap: 14px; margin-top: 6px; }
+  .passrow button { height: 72px; min-width: 200px; border-radius: 16px; border: 3px solid var(--line); background: #fff; font-size: 1.3rem; font-weight: 700; cursor: pointer; color: var(--ink); }
+  .passrow button.go { background: var(--ok); border-color: var(--ok); color: #fff; }
+
+  .sheet .field { margin-bottom: 12px; }
+  .sheet .field label { display: block; font-size: .9rem; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+  .sheet .field input { width: 100%; height: 56px; font-size: 1.3rem; padding: 0 14px; border: 3px solid var(--line); border-radius: 12px; -webkit-user-select: text; user-select: text; }
+  .sheet .btns { display: flex; gap: 12px; margin-top: 8px; }
+  .sheet .btns button { flex: 1 1 0; height: 68px; border-radius: 16px; border: 3px solid var(--line); background: #fff; font-size: 1.25rem; font-weight: 700; cursor: pointer; color: var(--ink); }
+  .sheet .btns button.go { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .sheet .msg { min-height: 1.4em; margin: 0 0 8px; font-weight: 700; }
+  .sheet .msg.err { color: var(--err); } .sheet .msg.ok { color: var(--ok); }
+  .sheet.center { text-align: center; }
+  .sheet.center h2 { font-size: 2rem; }
+
   @media (max-width: 700px) {
     body { font-size: 17px; }
+    .orderbar { font-size: 1.5rem; min-height: 72px; }
+    .keypad { grid-template-columns: repeat(3, 88px); }
     .hero h1 { font-size: 2rem; }
     button.big { min-height: 68px; font-size: 1.3rem; }
   }
@@ -163,6 +208,58 @@
     </div>
   </section>
 
+  <!-- Order passcode -->
+  <section class="screen" id="s-pass">
+    <div class="hero">
+      <h1>Enter the order passcode</h1>
+      <p>Only people who place stock orders have this passcode.</p>
+      <div class="dots" id="pass-dots" aria-live="polite"></div>
+      <div class="passmsg" id="pass-msg" role="alert"></div>
+      <div class="keypad" id="keypad">
+        <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button>
+        <button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button>
+        <button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button>
+        <button type="button" data-k="clear" class="fn">Clear</button><button type="button" data-k="0">0</button><button type="button" data-k="back" class="fn" aria-label="Delete last digit">&#9003;</button>
+      </div>
+      <div class="passrow">
+        <button type="button" id="pass-cancel">Back to Scan-Out</button>
+        <button type="button" id="pass-go" class="go">Unlock</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stock order -->
+  <section class="screen" id="s-order">
+    <div class="strip">
+      <span class="ttl">Stock order</span>
+      <span class="sub" id="o-loc"></span>
+      <span class="sub" id="o-return"></span>
+      <span class="sp"></span>
+      <button type="button" id="o-chg">Change passcode</button>
+      <button type="button" id="o-back">Back to Scan-Out</button>
+    </div>
+    <div class="list" id="o-list" aria-live="polite"></div>
+    <div class="summary"><span id="o-note"></span><span>Items subtotal <b id="o-sub">$0.00</b></span></div>
+    <div class="oform" id="o-form">
+      <div id="o-name-wrap"><label for="o-name-sel" id="o-name-lbl">Ordered by</label>
+        <select id="o-name-sel" style="display:none"></select>
+        <input id="o-name" type="text" maxlength="80" autocomplete="off">
+      </div>
+      <div id="o-email-wrap"><label for="o-email">Send confirmation to</label>
+        <input id="o-email" type="email" maxlength="200" autocomplete="off" inputmode="email">
+        <div class="fixed" id="o-email-fixed" style="display:none"></div>
+      </div>
+      <div id="o-po-wrap"><label for="o-po" id="o-po-lbl">PO number</label>
+        <input id="o-po" type="text" maxlength="40" autocomplete="off">
+        <div class="hint" id="o-po-hint"></div>
+      </div>
+      <div><label for="o-notes">Notes (optional)</label><input id="o-notes" type="text" maxlength="300" autocomplete="off"></div>
+    </div>
+    <div class="bar">
+      <button class="big go" id="o-send" type="button" disabled>Send Order</button>
+    </div>
+  </section>
+
   <!-- Finished -->
   <section class="screen" id="s-done">
     <div class="hero ok">
@@ -177,6 +274,7 @@
     <input id="scan" type="text" inputmode="none" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Scan or type a code">
     <button type="button" id="btn-kb">Keyboard</button>
   </div>
+  <button type="button" class="orderbar" id="btn-order">Place Stock Order</button>
 </main>
 
 <!-- More than one item shares a barcode -->
@@ -186,6 +284,48 @@
     <p>More than one item uses this barcode. Tap the one in your hand.</p>
     <div id="m-choose-list"></div>
     <button type="button" class="pick" id="m-choose-cancel">Cancel</button>
+  </div>
+</div>
+
+<!-- Order sent -->
+<div class="modal" id="m-return" role="dialog" aria-modal="true" aria-labelledby="m-return-h">
+  <div class="sheet center">
+    <h2 id="m-return-h">Order sent</h2>
+    <p id="m-return-text"></p>
+    <p style="font-size:1.5rem;color:#0f172a;font-weight:800;margin:10px 0 18px">Return to Scan Out Kiosk?</p>
+    <div class="btns">
+      <button type="button" id="m-return-no">Not yet</button>
+      <button type="button" class="go" id="m-return-yes">Yes</button>
+    </div>
+    <p style="margin:14px 0 0;font-size:.95rem" id="m-return-count"></p>
+  </div>
+</div>
+
+<!-- Leave the order without sending -->
+<div class="modal" id="m-leave" role="dialog" aria-modal="true" aria-labelledby="m-leave-h">
+  <div class="sheet center">
+    <h2 id="m-leave-h">Leave without sending?</h2>
+    <p>The items you scanned for this order will be cleared.</p>
+    <div class="btns">
+      <button type="button" id="m-leave-no">Keep ordering</button>
+      <button type="button" class="go" id="m-leave-yes">Yes, leave</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change the order passcode -->
+<div class="modal" id="m-chg" role="dialog" aria-modal="true" aria-labelledby="m-chg-h">
+  <div class="sheet">
+    <h2 id="m-chg-h">Change the order passcode</h2>
+    <p>Use 6 to 12 numbers. Give the new passcode only to the people who place orders.</p>
+    <div class="field"><label for="chg-cur">Current passcode</label><input id="chg-cur" type="password" inputmode="numeric" autocomplete="off" maxlength="12"></div>
+    <div class="field"><label for="chg-new">New passcode</label><input id="chg-new" type="password" inputmode="numeric" autocomplete="off" maxlength="12"></div>
+    <div class="field"><label for="chg-new2">New passcode again</label><input id="chg-new2" type="password" inputmode="numeric" autocomplete="off" maxlength="12"></div>
+    <p class="msg" id="chg-msg" role="alert"></p>
+    <div class="btns">
+      <button type="button" id="chg-cancel">Close</button>
+      <button type="button" class="go" id="chg-save">Change passcode</button>
+    </div>
   </div>
 </div>
 
@@ -271,12 +411,14 @@
   // ---------------------------------------------------------------
   function show(name) {
     state = name;
-    ['load', 'fatal', 'idle', 'scan', 'done'].forEach(function (n) {
+    ['load', 'fatal', 'idle', 'scan', 'done', 'pass', 'order'].forEach(function (n) {
       $('s-' + n).classList.toggle('on', n === name);
     });
-    // The scan box is for scanning, not for the start-up or error screens.
-    $('scanrow').style.display = (name === 'idle' || name === 'scan') ? 'flex' : 'none';
-    if (name === 'idle' || name === 'scan') focusScan();
+    // The scan box is for scanning, not for the start-up, error or passcode screens.
+    $('scanrow').style.display = (name === 'idle' || name === 'scan' || name === 'order') ? 'flex' : 'none';
+    document.querySelector('label[for=scan]').textContent = name === 'order' ? 'Scan an item to order' : 'Scan or type a code';
+    updateOrderBar();
+    if (name === 'idle' || name === 'scan' || name === 'order') focusScan();
   }
 
   function fatal(title, text) {
@@ -297,7 +439,8 @@
   function focusScan() {
     var a = document.activeElement;
     if (keyboardMode) return;
-    if (a && a !== document.body && a.tagName === 'INPUT' && a.id !== 'scan') return; // someone is editing a quantity
+    if (a && a !== document.body && (a.tagName === 'INPUT' || a.tagName === 'SELECT') && a.id !== 'scan') return; // someone is editing a field
+    if (document.querySelector('.modal.on') && state !== 'idle' && state !== 'scan') return;
     $('scan').focus({ preventScroll: true });
   }
 
@@ -310,6 +453,7 @@
       ? items.length + (items.length === 1 ? ' item' : ' items') + ' · ' + (Math.round(total * 100) / 100) + ' total'
       : '';
     $('btn-confirm').disabled = busy || items.length === 0;
+    updateOrderBar();
 
     var list = $('list');
     if (!items.length) {
@@ -356,6 +500,7 @@
   // An unconfirmed session is cleared after a quiet spell, so the next person
   // never inherits the last person's basket. The last 15 seconds are announced.
   function idleTick() {
+    if (orderTick()) return;
     if (state !== 'scan' || busy) return;
     var hasWork = items.length > 0 || (cfg.require_badge && badge);
     if (!hasWork) return;
@@ -382,6 +527,8 @@
     if (code === lastScan.code && now - lastScan.at < 700) return;
     lastScan = { code: code, at: now };
     touch(); clearNotice();
+    if (state === 'order') { orderScan(code); return; }
+    if (state === 'pass') return;
 
     busy = true;
     api('/resolve?code=' + encodeURIComponent(code)).then(function (r) {
@@ -483,6 +630,305 @@
   }
 
   // ---------------------------------------------------------------
+  // Stock ordering
+  //
+  // A green bar opens a passcode screen. A right passcode returns a short-lived
+  // order session; the order itself is placed through the store's own order
+  // endpoint, so PO rules, tax, fees and branch emails are the store's.
+  // ---------------------------------------------------------------
+  var ordering = false;            // ordering is set up for this company (from /session)
+  var orderCtx = null;             // { token, slug, location, orderer_names, contact, hide_pricing, po, expiresAt }
+  var cart = [];                   // { product_id, name, sku, price, price_on_request, quantity }
+  var passBuf = '';
+  var returnAt = 0;                // when to go back to scan-out after an order was sent
+  var orderSent = false;
+  var ORDER_IDLE_SECONDS = 300;    // an unattended order screen locks itself
+  var RETURN_SECONDS = 60;
+
+  function money(n) { return '$' + (Math.round(Number(n) * 100) / 100).toFixed(2); }
+
+  function updateOrderBar() {
+    var show = ordering && (state === 'idle' || (state === 'scan' && !items.length));
+    $('btn-order').style.display = show ? 'block' : 'none';
+  }
+
+  function storeApi(path, opts) {
+    opts = opts || {};
+    var headers = { 'Authorization': 'Bearer ' + (orderCtx ? orderCtx.token : '') };
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    return fetch('/api/store/' + encodeURIComponent(orderCtx.slug) + path, {
+      method: opts.method || 'GET', headers: headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer'
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; });
+    });
+  }
+
+  // ----- passcode screen -----
+  function openPass() {
+    // Entering the order screen ends any scan-out in progress.
+    badge = null; items = []; sessionId = null; busy = false;
+    passBuf = ''; $('pass-msg').textContent = '';
+    renderPass(); show('pass'); touch();
+  }
+
+  function renderPass() {
+    $('pass-dots').textContent = passBuf.length ? new Array(passBuf.length + 1).join('\u25cf') : '\u00a0';
+  }
+
+  function passKey(k) {
+    if (busy) return;
+    touch(); $('pass-msg').textContent = '';
+    if (k === 'back') passBuf = passBuf.slice(0, -1);
+    else if (k === 'clear') passBuf = '';
+    else if (/^\d$/.test(k) && passBuf.length < 12) passBuf += k;
+    renderPass();
+  }
+
+  function submitPass() {
+    if (busy || !passBuf) return;
+    busy = true; touch();
+    var code = passBuf;
+    api('/order/unlock', { method: 'POST', body: { passcode: code } }).then(function (r) {
+      busy = false;
+      if (r.status === 200) {
+        orderCtx = r.data;
+        orderCtx.expiresAt = Date.now() + (Number(r.data.expires_in) || 1800) * 1000 - 30000;
+        orderCtx.po = { mode: 'manual', required: false, optional_below: null };
+        return storeApi('/po/config').then(function (p) {
+          if (p.status === 200 && p.data) orderCtx.po = p.data;
+        }).catch(function () {}).then(enterOrder);
+      }
+      passBuf = ''; renderPass(); beep('bad');
+      if (r.status === 401 || r.status === 429 || r.status === 400) { $('pass-msg').textContent = r.data.error || 'That passcode is not right.'; return; }
+      if (r.status === 403 && r.data.code) { ordering = false; resetToStart(); return notify('err', r.data.error, 8000); }
+      $('pass-msg').textContent = r.data.error || 'Could not check the passcode.';
+    }).catch(function () {
+      busy = false; beep('bad'); $('pass-msg').textContent = 'Can\u2019t reach the server. Check the Wi-Fi.';
+    });
+  }
+
+  // ----- order screen -----
+  function enterOrder() {
+    var c = orderCtx;
+    $('o-loc').textContent = c.location.name;
+    var sel = $('o-name-sel'), nm = $('o-name');
+    if (c.orderer_names && c.orderer_names.length) {
+      sel.innerHTML = '<option value="">Choose who is ordering\u2026</option>' + c.orderer_names.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('');
+      sel.style.display = 'block'; nm.style.display = 'none';
+    } else {
+      sel.style.display = 'none'; nm.style.display = 'block';
+      if (!nm.value) nm.value = (c.contact && c.contact.name) || '';
+    }
+    var hasEmail = !!(c.contact && c.contact.email);
+    $('o-email').style.display = hasEmail ? 'none' : 'block';
+    $('o-email-fixed').style.display = hasEmail ? 'flex' : 'none';
+    $('o-email-fixed').textContent = hasEmail ? c.contact.email : '';
+    if (hasEmail) $('o-email').value = c.contact.email;
+
+    var po = c.po || {};
+    var showPo = po.mode === 'manual';
+    $('o-po-wrap').style.display = (showPo || po.mode === 'generated') ? 'block' : 'none';
+    $('o-po').style.display = showPo ? 'block' : 'none';
+    $('o-po-hint').textContent = po.mode === 'generated' ? 'A PO number is issued for you when the order is sent.' : '';
+    $('o-po-lbl').style.display = showPo ? 'block' : 'none';
+    ['o-name-sel', 'o-name', 'o-email', 'o-po'].forEach(function (id) { $(id).classList.remove('bad'); });
+    orderSent = false; returnAt = 0; $('o-return').textContent = '';
+    show('order'); renderOrder(); touch();
+  }
+
+  function cartSubtotal() {
+    var t = 0, unpriced = false;
+    cart.forEach(function (l) {
+      if (l.price_on_request || !(Number(l.price) > 0)) unpriced = true; else t += Number(l.price) * l.quantity;
+    });
+    return { total: t, unpriced: unpriced };
+  }
+
+  function poRequired(sub) {
+    var po = orderCtx && orderCtx.po; if (!po || po.mode !== 'manual') return false;
+    if (po.required === false) return false;
+    var below = Number(po.optional_below);
+    return !(below > 0 && sub.total < below && !sub.unpriced);
+  }
+
+  function renderOrder() {
+    if (state !== 'order') return;
+    var hide = orderCtx && orderCtx.hide_pricing;
+    var list = $('o-list');
+    if (!cart.length) {
+      list.innerHTML = '<div class="empty">Scan each item you need to order.</div>';
+    } else {
+      list.innerHTML = cart.map(function (l, i) {
+        var amt = hide ? '' : (l.price_on_request || !(Number(l.price) > 0) ? '<div class="lineamt" style="font-size:.9rem;font-weight:600;color:#475569">Price from branch</div>'
+          : '<div class="lineamt">' + money(Number(l.price) * l.quantity) + '</div>');
+        return '<div class="row' + (l.flash ? ' flash' : '') + '" data-i="' + i + '">' +
+          '<div class="info"><div class="nm">' + esc(l.name) + '</div><div class="sk">' + esc(l.sku || '') + '</div>' +
+          (!hide && Number(l.price) > 0 && !l.price_on_request ? '<div class="price">' + money(l.price) + ' each</div>' : '') + '</div>' +
+          '<div class="stepper"><button type="button" data-act="dec" aria-label="One less">\u2212</button>' +
+          '<input type="number" inputmode="numeric" min="1" max="9999" step="1" value="' + esc(l.quantity) + '" data-act="qty" aria-label="Quantity">' +
+          '<button type="button" data-act="inc" aria-label="One more">+</button></div>' + amt +
+          '<button type="button" class="rm" data-act="rm" aria-label="Remove ' + esc(l.name) + '">\u2715</button></div>';
+      }).join('');
+      cart.forEach(function (l) { l.flash = false; });
+    }
+    var sub = cartSubtotal();
+    $('o-sub').textContent = hide ? '' : money(sub.total);
+    $('o-note').textContent = hide ? '' : 'Before tax, fees and any promotions' + (sub.unpriced ? '; some items are priced by your branch' : '');
+    $('o-send').disabled = busy || !cart.length;
+    var po = orderCtx && orderCtx.po;
+    if (po && po.mode === 'manual') {
+      var req = poRequired(sub);
+      $('o-po-lbl').textContent = req ? 'PO number (required)' : 'PO number (optional)';
+      $('o-po-hint').textContent = (!req && Number(po.optional_below) > 0) ? 'Orders under ' + money(po.optional_below) + ' before tax do not need a PO.' : '';
+    }
+  }
+
+  function addOrderItem(p) {
+    var ex = cart.filter(function (l) { return l.product_id === p.id; })[0];
+    beep('ok');
+    if (ex) { ex.quantity = Math.min(9999, ex.quantity + 1); ex.flash = true; }
+    else cart.unshift({ product_id: p.id, name: p.name, sku: p.sku, price: p.price, price_on_request: !!p.price_on_request, quantity: 1, flash: true });
+  }
+
+  function orderExpired() {
+    beep('bad');
+    if (cart.length) { passBuf = ''; $('pass-msg').textContent = 'The order session timed out. Enter the passcode to carry on.'; renderPass(); orderCtx = null; show('pass'); }
+    else leaveOrder('The order screen timed out and locked.');
+  }
+
+  function orderScan(code) {
+    if (busy) return;
+    busy = true;
+    storeApi('/products/lookup?code=' + encodeURIComponent(code)).then(function (r) {
+      busy = false;
+      if (r.status === 401 || r.status === 403) return orderExpired();
+      if (r.status === 300 && r.data.candidates) {
+        $('m-choose-list').innerHTML = r.data.candidates.map(function (p, i) {
+          return '<button type="button" class="pick" data-i="' + i + '">' + esc(p.name) + '<small>' + esc(p.sku || '') + (p.brand ? ' \u00b7 ' + esc(p.brand) : '') + '</small></button>';
+        }).join('');
+        $('m-choose').chooseData = { products: r.data.candidates, code: code, order: true };
+        $('m-choose').classList.add('on');
+        return;
+      }
+      if (r.status >= 400) { beep('bad'); return notify('err', r.data.error || 'Nothing matches that code.', 6000); }
+      addOrderItem(r.data.product);
+    }).catch(function () {
+      busy = false; beep('bad'); notify('err', 'Can\u2019t reach the server. Check the Wi-Fi and scan again.', 8000);
+    }).then(function () { renderOrder(); focusScan(); });
+  }
+
+  function sendOrder() {
+    if (busy || !cart.length) return;
+    var c = orderCtx, sub = cartSubtotal();
+    var name = ($('o-name-sel').style.display !== 'none' ? $('o-name-sel').value : $('o-name').value).trim();
+    var email = (c.contact && c.contact.email) ? c.contact.email : $('o-email').value.trim();
+    var po = $('o-po').value.trim();
+
+    ['o-name-sel', 'o-name', 'o-email', 'o-po'].forEach(function (id) { $(id).classList.remove('bad'); });
+    var problem = null;
+    if (!name) { problem = 'Enter who is ordering.'; $($('o-name-sel').style.display !== 'none' ? 'o-name-sel' : 'o-name').classList.add('bad'); }
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { problem = 'Enter an email address for the confirmation.'; $('o-email').classList.add('bad'); }
+    else if ($('o-po').style.display !== 'none' && !po && poRequired(sub)) { problem = 'A PO number is required for this order.'; $('o-po').classList.add('bad'); }
+    if (problem) { beep('bad'); return notify('err', problem, 7000); }
+
+    var userNotes = $('o-notes').value.trim();
+    busy = true; touch(); clearNotice(); renderOrder();
+    storeApi('/orders', {
+      method: 'POST',
+      body: {
+        contact_name: name, contact_email: email, po_number: po || undefined,
+        location_id: c.location.id,
+        items: cart.map(function (l) { return { product_id: l.product_id, quantity: l.quantity }; }),
+        notes: 'Placed from the stock-room tablet (' + (c.device || 'kiosk') + ').' + (userNotes ? ' ' + userNotes : '')
+      }
+    }).then(function (r) {
+      busy = false;
+      if (r.status === 201 && r.data.order) return orderSentOk(r.data.order);
+      if (r.status === 401) return orderExpired();
+      beep('bad');
+      if (r.data && r.data.po_required) $('o-po').classList.add('bad');
+      notify('err', (r.data && r.data.error) || 'The order could not be sent. Your items are still here.');
+    }).catch(function () {
+      busy = false; beep('bad');
+      // The request may or may not have reached CHC. Do not resend blindly.
+      notify('err', 'We could not confirm the order was sent. Check with your CHC branch before sending it again. Your items are still here.');
+    }).then(function () { renderOrder(); });
+  }
+
+  function orderSentOk(order) {
+    beep('done');
+    var hide = orderCtx && orderCtx.hide_pricing;
+    $('m-return-text').textContent = 'Order ' + (order.order_number || '') + ' was sent' +
+      (!hide && Number(order.total) > 0 ? ' \u2014 total ' + money(order.total) : '') + '.' +
+      (order.po_number ? ' PO ' + order.po_number + '.' : '');
+    cart = []; orderSent = true;
+    $('o-po').value = ''; $('o-notes').value = '';
+    returnAt = Date.now() + RETURN_SECONDS * 1000;
+    $('m-return').classList.add('on');
+    renderOrder();
+  }
+
+  function leaveOrder(message) {
+    orderCtx = null; cart = []; returnAt = 0; orderSent = false; passBuf = '';
+    ['m-return', 'm-leave', 'm-chg', 'm-choose'].forEach(function (id) { $(id).classList.remove('on'); });
+    $('o-name').value = ''; $('o-po').value = ''; $('o-notes').value = ''; $('o-email').value = '';
+    resetToStart();
+    if (message) notify('info', message, 8000);
+  }
+
+  // Runs every second. Returns true when an ordering state handled the tick.
+  function orderTick() {
+    if (state === 'pass') {
+      if (Date.now() - lastActivity > 60000 && !busy) leaveOrder();
+      return true;
+    }
+    if (state !== 'order') return false;
+    if (returnAt) {
+      var left = Math.ceil((returnAt - Date.now()) / 1000);
+      if (left <= 0) {
+        // 60 seconds after sending, the tablet goes back to scanning out on its own,
+        // unless someone has started a new order in the meantime.
+        if (cart.length) returnAt = Date.now() + RETURN_SECONDS * 1000;
+        else return leaveOrder(), true;
+      } else {
+        $('o-return').textContent = 'Returning to scan-out in ' + left + ' s';
+        if ($('m-return').classList.contains('on')) $('m-return-count').textContent = 'Returning automatically in ' + left + ' seconds.';
+      }
+    }
+    if (busy) return true;
+    var idle = ORDER_IDLE_SECONDS - Math.floor((Date.now() - lastActivity) / 1000);
+    if (idle <= 0) { beep('bad'); leaveOrder('The order screen locked because nothing happened for 5 minutes. Scanned items were cleared.'); }
+    else if (idle <= 15) notify('warn', 'Still there? Locking in ' + idle + ' seconds. Tap here to keep going.');
+    else if ($('notice').classList.contains('warn')) clearNotice();
+    if (orderCtx && cart.length === 0 && !orderSent && Date.now() > orderCtx.expiresAt) leaveOrder('The order screen timed out and locked.');
+    return true;
+  }
+
+  // ----- change the passcode (needs the current one) -----
+  function openChg() {
+    ['chg-cur', 'chg-new', 'chg-new2'].forEach(function (id) { $(id).value = ''; });
+    $('chg-msg').textContent = ''; $('chg-msg').className = 'msg';
+    $('m-chg').classList.add('on'); $('chg-cur').focus();
+  }
+  function saveChg() {
+    var cur = $('chg-cur').value.trim(), nw = $('chg-new').value.trim(), nw2 = $('chg-new2').value.trim();
+    function msg(t, ok) { $('chg-msg').textContent = t; $('chg-msg').className = 'msg ' + (ok ? 'ok' : 'err'); }
+    if (!cur || !nw) return msg('Enter the current and the new passcode.');
+    if (nw !== nw2) return msg('The two new passcodes do not match.');
+    if (busy) return;
+    busy = true; touch();
+    api('/order/passcode', { method: 'POST', body: { current: cur, next: nw } }).then(function (r) {
+      busy = false;
+      if (r.status === 200) {
+        msg(r.data.message || 'The passcode was changed.', true); beep('done');
+        setTimeout(function () { $('m-chg').classList.remove('on'); focusScan(); }, 2500);
+      } else { beep('bad'); msg((r.data && r.data.error) || 'Could not change the passcode.'); }
+    }).catch(function () { busy = false; msg('Can\u2019t reach the server. Check the Wi-Fi.'); });
+  }
+
+  // ---------------------------------------------------------------
   // Wiring
   // ---------------------------------------------------------------
   $('scan').addEventListener('keydown', function (e) {
@@ -493,7 +939,7 @@
     }
   });
   $('scan').addEventListener('blur', function () {
-    setTimeout(function () { if (state === 'idle' || state === 'scan') focusScan(); }, 150);
+    setTimeout(function () { if (state === 'idle' || state === 'scan' || state === 'order') focusScan(); }, 150);
   });
   $('btn-kb').addEventListener('click', function () {
     keyboardMode = !keyboardMode;
@@ -533,12 +979,59 @@
     var b = e.target.closest('button[data-i]'); if (!b) return;
     var d = $('m-choose').chooseData; if (!d) return;
     $('m-choose').classList.remove('on');
-    addProduct(d.products[Number(b.dataset.i)], d.code);
-    render(); focusScan();
+    if (d.order) { addOrderItem(d.products[Number(b.dataset.i)]); renderOrder(); }
+    else { addProduct(d.products[Number(b.dataset.i)], d.code); render(); }
+    focusScan();
   });
   $('m-choose-cancel').addEventListener('click', function () { $('m-choose').classList.remove('on'); focusScan(); });
 
   $('notice').addEventListener('click', function () { touch(); clearNotice(); focusScan(); });
+
+  // Stock ordering
+  $('btn-order').addEventListener('click', function () { if (!busy) openPass(); });
+  $('keypad').addEventListener('click', function (e) { var b = e.target.closest('button[data-k]'); if (b) passKey(b.dataset.k); });
+  $('pass-go').addEventListener('click', submitPass);
+  $('pass-cancel').addEventListener('click', function () { if (!busy) leaveOrder(); });
+  document.addEventListener('keydown', function (e) {
+    if (state !== 'pass' || $('m-chg').classList.contains('on')) return;
+    if (/^\d$/.test(e.key)) { e.preventDefault(); passKey(e.key); }
+    else if (e.key === 'Backspace') { e.preventDefault(); passKey('back'); }
+    else if (e.key === 'Enter') { e.preventDefault(); submitPass(); }
+    else if (e.key === 'Escape') { e.preventDefault(); if (!busy) leaveOrder(); }
+  });
+  $('o-send').addEventListener('click', sendOrder);
+  $('o-chg').addEventListener('click', openChg);
+  $('chg-cancel').addEventListener('click', function () { $('m-chg').classList.remove('on'); focusScan(); });
+  $('chg-save').addEventListener('click', saveChg);
+  $('o-back').addEventListener('click', function () {
+    if (busy) return;
+    if (cart.length) $('m-leave').classList.add('on'); else leaveOrder();
+  });
+  $('m-leave-no').addEventListener('click', function () { $('m-leave').classList.remove('on'); focusScan(); });
+  $('m-leave-yes').addEventListener('click', function () { leaveOrder(); });
+  $('m-return-yes').addEventListener('click', function () { leaveOrder(); });
+  $('m-return-no').addEventListener('click', function () { $('m-return').classList.remove('on'); focusScan(); });
+  $('o-list').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-act]'), row = e.target.closest('.row');
+    if (!btn || !row) return;
+    var l = cart[Number(row.dataset.i)]; if (!l) return;
+    touch();
+    var act = btn.dataset.act;
+    if (act === 'inc') l.quantity = Math.min(9999, l.quantity + 1);
+    else if (act === 'dec') { if (l.quantity > 1) l.quantity -= 1; }
+    else if (act === 'rm') cart.splice(Number(row.dataset.i), 1);
+    else return;
+    renderOrder(); focusScan();
+  });
+  $('o-list').addEventListener('change', function (e) {
+    if (e.target.dataset.act !== 'qty') return;
+    var row = e.target.closest('.row'), l = cart[Number(row.dataset.i)];
+    var v = parseInt(e.target.value, 10);
+    if (l && v >= 1 && v <= 9999) l.quantity = v;
+    renderOrder(); focusScan();
+  });
+  $('o-form').addEventListener('input', touch);
+  $('o-form').addEventListener('change', touch);
   ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, touch, true); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) focusScan(); });
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -561,6 +1054,7 @@
         return fatal('This kiosk can’t be used', (r.data && r.data.error) || 'Ask your manager for a new link.');
       }
       cfg = { require_badge: r.data.require_badge !== false, idle_seconds: Number(r.data.idle_seconds) || 60 };
+      ordering = r.data.ordering === true;
       $('hdr-co').textContent = r.data.company;
       $('hdr-loc').textContent = r.data.location;
       document.title = 'Scan-out — ' + r.data.location;
@@ -574,6 +1068,7 @@
           if (s.status === 200) {
             var nr = s.data.require_badge !== false;
             cfg.idle_seconds = Number(s.data.idle_seconds) || 60;
+            ordering = s.data.ordering === true; updateOrderBar();
             if (nr !== cfg.require_badge) { cfg.require_badge = nr; resetToStart(); }
           }
         }).catch(function () {});
