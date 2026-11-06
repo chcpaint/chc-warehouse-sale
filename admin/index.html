@@ -3014,6 +3014,61 @@
 
     function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
     function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+    // ------------------------------------------------------------
+    // Save confirmation. A change that saved says so, on screen, where the
+    // operator is looking: a green "Updated" message at the top of the window
+    // (it does not scroll away with a long panel), and the same words beside the
+    // Done button pinned to the bottom of every company panel. Nothing here
+    // changes what is saved or when.
+    // ------------------------------------------------------------
+    let adminToastTimer = null;
+    function adminToast(message, kind) {
+        const bad = kind === 'error';
+        let el = document.getElementById('admin-toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'admin-toast';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            el.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10000;max-width:92vw;cursor:pointer';
+            el.onclick = () => { el.style.display = 'none'; };
+            document.body.appendChild(el);
+        }
+        el.className = 'rounded-xl shadow-2xl px-5 py-3 text-sm font-semibold flex items-center gap-2 text-white ' + (bad ? 'bg-red-600' : 'bg-green-600');
+        el.innerHTML = '<i class="fas fa-' + (bad ? 'triangle-exclamation' : 'circle-check') + '"></i><span></span>';
+        el.lastChild.textContent = message || 'Updated';
+        el.style.display = 'flex';
+        clearTimeout(adminToastTimer);
+        adminToastTimer = setTimeout(() => { el.style.display = 'none'; }, 3500);
+        if (!bad) {
+            document.querySelectorAll('[data-done-status]').forEach(n => {
+                n.textContent = '\u2713 ' + (message || 'Updated');
+            });
+        }
+    }
+
+    // A Done button pinned to the bottom of each company panel, so a long panel
+    // can be closed without scrolling back up to the small X.
+    function addDoneBars(ids) {
+        ids.forEach(id => {
+            const modal = document.getElementById(id);
+            const panel = modal && modal.firstElementChild;
+            if (!panel || panel.querySelector('[data-done-bar]')) return;
+            const bar = document.createElement('div');
+            bar.setAttribute('data-done-bar', '');
+            bar.className = 'sticky bottom-0 -mx-6 -mb-6 mt-6 px-6 py-3 bg-white border-t border-gray-300 flex items-center justify-between gap-3 rounded-b-2xl';
+            bar.innerHTML = '<span data-done-status class="text-sm font-semibold text-green-700"></span>' +
+                '<button type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-6 py-2 rounded-lg text-sm font-semibold">Done</button>';
+            bar.querySelector('button').onclick = () => hideModal(id);
+            panel.appendChild(bar);
+        });
+    }
+    (function initDoneBars() {
+        const run = () => addDoneBars(['modules-modal', 'fees-modal', 'kits-modal', 'locations-modal',
+            'email-recipients-modal', 'company-users-modal', 'branches-modal']);
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+    })();
     function esc(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
     const statusColors = {
@@ -4258,6 +4313,7 @@
             }
             if (!resp.ok) { alert(data.error || 'Failed to change that module.'); return; }
 
+            adminToast('Updated \u2014 ' + String(name).replace(/_/g, ' ') + ' is now ' + (enable ? 'ON' : 'OFF'));
             await loadModules();
             loadCompanies();
         } catch (err) {
@@ -4380,6 +4436,7 @@
         const resp = await adminFetch(`/companies/${feesCompanyId}/fees-rebates${path}`, { method, body: body ? JSON.stringify(body) : undefined });
         const d = await resp.json().catch(() => ({}));
         if (!resp.ok) { alert(d.error || 'That did not save.'); return null; }
+        if (method && String(method).toUpperCase() !== 'GET') adminToast('Updated \u2014 saved');
         return d;
     }
 
@@ -4387,6 +4444,7 @@
         const resp = await adminFetch(`/companies/${feesCompanyId}/delivery-fee`, { method: 'PUT', body: JSON.stringify({ enabled }) });
         const d = await resp.json().catch(() => ({}));
         if (!resp.ok) { alert(d.error || 'That did not save.'); return; }
+        adminToast('Updated \u2014 delivery fee ' + (enabled ? 'ON' : 'OFF'));
         await feesLoad();
     }
 
@@ -4617,6 +4675,7 @@
             });
             const data = await resp.json();
             if (!resp.ok) { alert(data.error || 'Failed to change kit access.'); return; }
+            adminToast('Updated \u2014 kit access ' + (enable ? 'ON' : 'OFF'));
             loadKitsAdmin();
         } catch (err) {
             alert('Failed to change kit access.');
@@ -4793,6 +4852,7 @@
             });
             const data = await resp.json();
             if (!resp.ok) { alert(data.error || 'Failed to save that mapping.'); return false; }
+            adminToast('Updated \u2014 mapping saved');
             return true;
         } catch (err) {
             alert('Failed to save that mapping.');
@@ -5582,8 +5642,8 @@
             });
             const data = await resp.json();
             if (!resp.ok) { alert(data.error || 'Failed to save purchase order settings.'); return; }
-            if (mode === 'generated') alert(data.message);
-            else flashPoSaveNote(data.message || 'Saved.');
+            adminToast(data.message || 'Updated \u2014 purchase order settings saved');
+            if (mode !== 'generated') flashPoSaveNote(data.message || 'Saved.');
             await loadPoSettings();
         } catch (err) {
             alert('Failed to save purchase order settings.');
@@ -5928,6 +5988,7 @@
             });
             const data = await resp.json();
             if (!resp.ok) { alert(data.error || 'Failed to save tax settings.'); return; }
+            adminToast('Updated \u2014 tax settings saved');
             await loadTaxSettings();
         } catch (err) {
             alert('Failed to save tax settings.');
@@ -5944,7 +6005,7 @@
                 body: JSON.stringify({ email_config: { manager_emails: list } })
             });
             if (resp.ok) {
-                alert(list.length ? `Saved ${list.length} manager email(s).` : 'Manager emails cleared.');
+                adminToast(list.length ? `Updated \u2014 ${list.length} manager email(s) saved` : 'Updated \u2014 manager emails cleared');
                 loadCompanies();
             } else {
                 const d = await resp.json();
@@ -6007,7 +6068,7 @@
             const resp = await adminFetch(`/companies/${erCompanyId}`, { method: 'PUT', body: JSON.stringify({ contact_email: contact || null, email_config: { manager_emails: managers } }) });
             const d = await resp.json();
             if (!resp.ok) { alert(d.error || 'Failed to save.'); return; }
-            alert('Company recipients saved.');
+            adminToast('Updated \u2014 company recipients saved');
             loadCompanies();
         } catch (e) { alert('Failed to save company recipients.'); }
     }
@@ -6023,7 +6084,7 @@
                 if (resp.ok) ok++; else fail++;
             } catch (e) { fail++; }
         }
-        alert(`Saved ${ok} location(s)` + (fail ? `, ${fail} failed.` : '.'));
+        if (fail) alert(`Saved ${ok} location(s), ${fail} failed.`); else adminToast(`Updated \u2014 ${ok} location(s) saved`);
     }
 
     async function editNotificationEmail(companyId, currentEmail) {
@@ -6039,7 +6100,7 @@
                 body: JSON.stringify({ contact_email: newEmail || null })
             });
             if (resp.ok) {
-                alert('Company contact email updated.');
+                adminToast('Updated \u2014 company contact email saved');
                 loadCompanies();
             } else {
                 const d = await resp.json();
@@ -6086,6 +6147,7 @@
             const data = await resp.json();
             if (!resp.ok) { note.textContent = data.error || 'Failed to reset the access code.'; note.className = 'text-xs text-red-500 mt-3'; return; }
 
+            adminToast('Updated \u2014 access code changed');
             note.textContent = `Done — the new code is now "${code}". Share it with the customer.`;
             note.className = 'text-xs text-green-600 mt-3';
         } catch (err) {
@@ -6184,6 +6246,7 @@
             });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
 
+            adminToast('Updated \u2014 location added');
             // Clear inputs
             ['loc-name', 'loc-city', 'loc-address', 'loc-contact', 'loc-phone', 'loc-branch'].forEach(id => document.getElementById(id).value = '');
             loadLocations();
@@ -6214,7 +6277,7 @@
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error);
 
-            alert(`${data.count} locations added.`);
+            adminToast(`Updated \u2014 ${data.count} locations added`);
             document.getElementById('loc-bulk').value = '';
             loadLocations();
         } catch (err) { alert('Failed to add locations: ' + err.message); }
@@ -6261,6 +6324,7 @@
             });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
             hideModal('edit-location-modal');
+            adminToast('Updated \u2014 location saved');
             loadLocations();
         } catch (err) { alert('Failed to save changes: ' + err.message); }
     }
@@ -6281,6 +6345,7 @@
                 body: JSON.stringify({ supplier_branch_id: branchId || null })
             });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
+            adminToast('Updated \u2014 branch saved');
         } catch (err) { alert('Failed to assign branch: ' + err.message); loadLocations(); }
     }
 
@@ -6323,7 +6388,7 @@
             const resp = await adminFetch(`/branches/${id}`, { method: 'PUT', body: JSON.stringify({ emails }) });
             if (!resp.ok) { const d = await resp.json(); throw new Error(d.error); }
             await loadBranches(); renderBranches();
-            alert('Saved.');
+            adminToast('Updated \u2014 saved');
         } catch (err) { alert('Failed to save: ' + err.message); }
     }
     async function deleteBranch(id, name) {
@@ -7984,6 +8049,8 @@
             if (!resp.ok) {
                 alert(d.error || 'Failed to update the delivery fee setting.');
                 checkbox.checked = !enabled;
+            } else {
+                adminToast('Updated \u2014 delivery fee ' + (enabled ? 'ON' : 'OFF'));
             }
         } catch (err) {
             alert('Failed to update the delivery fee setting.');
@@ -8754,6 +8821,7 @@
             const d = await resp.json();
             if (!resp.ok) { alert(d.error || 'Failed to save access.'); return; }
             hideModal('admin-access-modal');
+            adminToast('Updated \u2014 access saved');
             loadAdminUsers();
         } catch (err) { alert('Failed to save access.'); }
     }
@@ -8763,6 +8831,7 @@
             const resp = await adminFetch(`/users/${id}`, { method: 'PUT', body: JSON.stringify({ is_branch_manager: makeManager }) });
             const d = await resp.json();
             if (!resp.ok) { alert(d.error || 'Failed to update.'); return; }
+            adminToast('Updated \u2014 branch manager ' + (makeManager ? 'ON' : 'OFF'));
             loadAdminUsers();
         } catch (err) { alert('Failed to update.'); }
     }
@@ -8801,7 +8870,7 @@
         try {
             const resp = await adminFetch(`/users/${id}`, { method: 'PUT', body: JSON.stringify({ is_active: active }) });
             const d = await resp.json();
-            if (resp.ok) loadAdminUsers(); else alert(d.error || 'Failed.');
+            if (resp.ok) { adminToast('Updated \u2014 account ' + (active ? 'activated' : 'deactivated')); loadAdminUsers(); } else alert(d.error || 'Failed.');
         } catch (err) { alert('Failed to update account.'); }
     }
 
@@ -8827,6 +8896,7 @@
             const d = await resp.json();
             if (!resp.ok) { alert(d.error || 'Failed to save.'); return; }
             hideModal('admin-edit-modal');
+            adminToast('Updated \u2014 account saved');
             loadAdminUsers();
         } catch (err) { alert('Failed to save.'); }
     }
@@ -8928,7 +8998,7 @@
                 })
             });
             const d = await resp.json();
-            if (resp.ok) { document.getElementById('cu-name').value=''; document.getElementById('cu-email').value=''; loadCompanyUsers(); }
+            if (resp.ok) { document.getElementById('cu-name').value=''; document.getElementById('cu-email').value=''; adminToast('Updated \u2014 user added'); loadCompanyUsers(); }
             else alert(d.error || 'Failed.');
         } catch (err) { alert('Failed to invite user.'); }
     }
@@ -8957,7 +9027,7 @@
         try {
             const resp = await adminFetch(`/companies/${cuCompanyId}/users/${id}`, { method: 'PUT', body: JSON.stringify({ is_active: active }) });
             const d = await resp.json();
-            if (resp.ok) loadCompanyUsers(); else alert(d.error || 'Failed.');
+            if (resp.ok) { adminToast('Updated \u2014 user ' + (active ? 'activated' : 'deactivated')); loadCompanyUsers(); } else alert(d.error || 'Failed.');
         } catch (err) { alert('Failed to update user.'); }
     }
 
@@ -8983,6 +9053,7 @@
             const d = await resp.json();
             if (!resp.ok) { alert(d.error || 'Failed to save.'); return; }
             hideModal('company-user-edit-modal');
+            adminToast('Updated \u2014 user saved');
             loadCompanyUsers();
         } catch (err) { alert('Failed to save.'); }
     }
