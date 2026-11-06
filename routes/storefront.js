@@ -633,9 +633,16 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             });
         }
 
-        const poDecision = resolveOrderPo(poCompany?.settings, po_number);
-        if (!poDecision.ok) {
-            return res.status(400).json({ error: poDecision.error });
+        // With a "no PO under $X" threshold the answer depends on the order's value,
+        // which is only known once the lines are priced below, so the decision waits for
+        // that. Without one it is made here, exactly as it always was.
+        const poThreshold = poSettings(poCompany?.settings).optional_below;
+        let poDecision = null;
+        if (poThreshold === null) {
+            poDecision = resolveOrderPo(poCompany?.settings, po_number);
+            if (!poDecision.ok) {
+                return res.status(400).json({ error: poDecision.error });
+            }
         }
 
         if (!isValidUUID(companyId)) {
@@ -780,6 +787,18 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         // a separate count would be a second source of truth able to disagree
         // with the lines beneath it. Derived where it is needed instead.
         const quotedItems = verifiedItems.filter(i => i.price_on_request);
+
+        // The PO rule for a company with a "no PO under $X" threshold. Server side, so it
+        // cannot be skipped from the browser: the value is the priced subtotal before tax
+        // and fees, worked out from the database's prices, never the cart's figures.
+        if (!poDecision) {
+            poDecision = resolveOrderPo(poCompany?.settings, po_number, {
+                subtotal, hasUnpricedLines: quotedItems.length > 0
+            });
+            if (!poDecision.ok) {
+                return res.status(400).json({ error: poDecision.error, ...(poDecision.po_required ? { po_required: true } : {}) });
+            }
+        }
 
         // Tax is computed on the priced subtotal only — a price-on-request line
         // has no price yet, so it cannot be taxed yet either. poCompany.settings
@@ -1347,6 +1366,7 @@ router.get('/:slug/po/config', requireCompanyAuth, async (req, res) => {
             mode: settings.mode,
             required: settings.required,
             issued_by_chc: settings.issued_by_chc,
+            optional_below: settings.optional_below,
             configured: settings.issued_by_chc ? Boolean(example) : true,
             next_example: example
         });

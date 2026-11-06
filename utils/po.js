@@ -180,6 +180,19 @@ function exampleFor(prefix, padWidth = DEFAULT_PAD, checkDigit = true) {
 const PO_MODES = ['off', 'manual', 'generated'];
 const DEFAULT_PO_MODE = 'manual';
 
+/**
+ * The "no PO needed on a small order" threshold, in dollars before tax.
+ * Only a positive number counts; anything else (missing, 0, text) means the
+ * feature is off and every order needs a PO exactly as it always has.
+ */
+function optionalBelowFrom(raw) {
+    if (raw === undefined || raw === null || raw === '' || typeof raw === 'boolean') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
+const toCents = (n) => Math.round(Number(n) * 100);
+
 /** The PO block of a company's settings, with defaults filled in. */
 function poSettings(companySettings) {
     const raw = (companySettings && typeof companySettings === 'object' && companySettings.purchase_orders) || {};
@@ -187,6 +200,9 @@ function poSettings(companySettings) {
     return {
         mode,
         required: mode !== 'off',
+        // Dollars, before tax. Below this a 'manual' company needs no PO; at or
+        // above it the PO is required as usual. null = every order needs one.
+        optional_below: mode === 'manual' ? optionalBelowFrom(raw.optional_below) : null,
         // True only when CHC issues the number, which is also the only case
         // where the shop must not be able to edit it.
         issued_by_chc: mode === 'generated'
@@ -202,8 +218,8 @@ function poSettings(companySettings) {
  * @returns {{ok:true, action:'none'|'manual'|'allocate', po_number?:string}
  *          |{ok:false, error:string}}
  */
-function resolveOrderPo(companySettings, submitted) {
-    const { mode } = poSettings(companySettings);
+function resolveOrderPo(companySettings, submitted, order = {}) {
+    const { mode, optional_below: optionalBelow } = poSettings(companySettings);
     const typed = normalizePo(submitted);
 
     if (mode === 'off') {
@@ -218,7 +234,24 @@ function resolveOrderPo(companySettings, submitted) {
     }
 
     if (!typed) {
-        return { ok: false, error: 'A purchase order number is required.' };
+        // A small order needs no PO when the company has set a threshold. It is
+        // the PRICED subtotal before tax and fees that is compared, and only
+        // when every line is priced: a price-on-request line has no price yet,
+        // so the real value of the order is unknown and the PO stays required.
+        // Exactly at the threshold is NOT small - "under $500" means below it.
+        if (optionalBelow !== null
+            && order && order.subtotal !== undefined && order.subtotal !== null
+            && !order.hasUnpricedLines
+            && toCents(order.subtotal) < toCents(optionalBelow)) {
+            return { ok: true, action: 'none', po_waived: true };
+        }
+        return {
+            ok: false,
+            error: optionalBelow !== null
+                ? `A purchase order number is required for orders of $${optionalBelow.toFixed(2)} or more before tax.`
+                : 'A purchase order number is required.',
+            ...(optionalBelow !== null ? { po_required: true } : {})
+        };
     }
     if (typed.length > 60) {
         return { ok: false, error: 'That purchase order number is too long.' };
@@ -238,5 +271,6 @@ module.exports = {
     PREFIX_PATTERN,
     MIN_PAD, MAX_PAD, DEFAULT_PAD,
     PO_MODES, DEFAULT_PO_MODE,
+    optionalBelowFrom,
     poSettings, resolveOrderPo
 };
