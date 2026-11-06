@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scan-out</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0f2f6b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+  :root {
+    --ink: #0f172a; --muted: #475569; --bg: #e8eef6; --card: #ffffff; --line: #94a3b8;
+    --brand: #0f2f6b; --brand-2: #1d4ed8; --ok: #15803d; --ok-bg: #dcfce7;
+    --err: #b91c1c; --err-bg: #fee2e2; --warn: #92400e; --warn-bg: #fef3c7;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 20px; display: flex; flex-direction: column; overflow: hidden;
+    -webkit-user-select: none; user-select: none; overscroll-behavior: none;
+  }
+  header {
+    background: var(--brand); color: #fff; padding: 14px 24px;
+    display: flex; align-items: baseline; gap: 16px; flex: 0 0 auto;
+  }
+  header .co { font-weight: 700; font-size: 1.1rem; }
+  header .loc { opacity: .85; font-size: .95rem; }
+  header .clock { margin-left: auto; font-variant-numeric: tabular-nums; opacity: .9; }
+
+  main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 20px 24px 0; gap: 16px; }
+  .screen { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 16px; }
+  .screen.on { display: flex; }
+
+  .hero {
+    flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; gap: 14px; background: var(--card); border: 3px solid var(--line); border-radius: 20px; padding: 24px;
+  }
+  .hero h1 { margin: 0; font-size: 2.6rem; line-height: 1.1; }
+  .hero p { margin: 0; font-size: 1.25rem; color: var(--muted); max-width: 30em; }
+  .hero svg { width: 120px; height: 120px; }
+  .hero.ok { background: var(--ok-bg); border-color: var(--ok); }
+  .hero.ok h1 { color: var(--ok); }
+  .hero.bad { background: var(--err-bg); border-color: var(--err); }
+  .hero.bad h1 { color: var(--err); }
+
+  .who {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 14px; background: var(--card);
+    border: 3px solid var(--line); border-radius: 16px; padding: 12px 20px;
+  }
+  .who .name { font-size: 1.5rem; font-weight: 700; }
+  .who .trade { color: var(--muted); font-size: 1rem; text-transform: capitalize; }
+  .who .spacer { margin-left: auto; color: var(--muted); font-size: 1rem; }
+
+  .list {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; background: var(--card);
+    border: 3px solid var(--line); border-radius: 16px; padding: 6px 12px;
+    -webkit-user-select: none; user-select: none;
+  }
+  .empty { height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); font-size: 1.4rem; padding: 20px; }
+  .row { display: flex; align-items: center; gap: 14px; padding: 12px 4px; border-bottom: 2px solid #e2e8f0; }
+  .row:last-child { border-bottom: 0; }
+  .row.flash { animation: flash 0.7s ease-out; }
+  .row.failed { background: var(--err-bg); border-radius: 10px; }
+  @keyframes flash { from { background: #bfdbfe; } to { background: transparent; } }
+  .row .info { flex: 1 1 auto; min-width: 0; }
+  .row .nm { font-weight: 600; font-size: 1.15rem; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .row .sk { color: var(--muted); font-size: .95rem; margin-top: 2px; }
+  .row .er { color: var(--err); font-weight: 600; font-size: .95rem; margin-top: 2px; }
+  .stepper { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+  .stepper button { width: 56px; height: 56px; border-radius: 14px; border: 3px solid var(--line); background: #fff; font-size: 2rem; line-height: 1; font-weight: 700; color: var(--ink); cursor: pointer; }
+  .stepper button:active { background: #e2e8f0; }
+  .stepper input { width: 84px; height: 56px; text-align: center; font-size: 1.5rem; font-weight: 700; border: 3px solid var(--line); border-radius: 14px; background: #fff; color: var(--ink); -webkit-user-select: text; user-select: text; }
+  .rm { width: 56px; height: 56px; border-radius: 14px; border: 3px solid var(--line); background: #fff; font-size: 1.6rem; color: var(--err); cursor: pointer; flex: 0 0 auto; }
+
+  .bar { flex: 0 0 auto; display: flex; gap: 14px; }
+  button.big {
+    flex: 1 1 0; min-height: 80px; border-radius: 18px; border: 0; font-size: 1.6rem; font-weight: 700; cursor: pointer; color: #fff;
+  }
+  button.big.go { background: var(--ok); flex: 2 1 0; }
+  button.big.go:disabled { background: #94a3b8; cursor: not-allowed; }
+  button.big.alt { background: #fff; color: var(--ink); border: 3px solid var(--line); }
+  button.big:active:not(:disabled) { filter: brightness(.9); }
+
+  .scanrow { flex: 0 0 auto; display: flex; gap: 12px; align-items: center; padding-bottom: 18px; }
+  .scanrow label { color: var(--muted); font-size: 1rem; white-space: nowrap; }
+  .scanrow input {
+    flex: 1 1 auto; min-width: 0; height: 56px; font-size: 1.3rem; padding: 0 16px; border: 3px solid var(--brand-2); border-radius: 14px;
+    background: #fff; color: var(--ink); -webkit-user-select: text; user-select: text;
+  }
+  .scanrow button { height: 56px; padding: 0 18px; border-radius: 14px; border: 3px solid var(--line); background: #fff; font-size: 1rem; font-weight: 600; cursor: pointer; color: var(--ink); }
+
+  .notice { flex: 0 0 auto; display: none; border-radius: 14px; padding: 12px 18px; font-size: 1.15rem; font-weight: 600; }
+  .notice.on { display: block; }
+  .notice.err { background: var(--err-bg); color: var(--err); border: 3px solid var(--err); }
+  .notice.warn { background: var(--warn-bg); color: var(--warn); border: 3px solid #d97706; cursor: pointer; }
+  .notice.info { background: #dbeafe; color: #1e3a8a; border: 3px solid var(--brand-2); }
+
+  .modal { position: fixed; inset: 0; background: rgba(15,23,42,.6); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
+  .modal.on { display: flex; }
+  .sheet { background: #fff; border-radius: 20px; padding: 24px; width: min(640px, 100%); max-height: 90vh; overflow-y: auto; }
+  .sheet h2 { margin: 0 0 6px; font-size: 1.6rem; }
+  .sheet p { margin: 0 0 14px; color: var(--muted); }
+  .sheet button.pick { display: block; width: 100%; text-align: left; margin-bottom: 10px; padding: 14px 16px; border-radius: 14px; border: 3px solid var(--line); background: #fff; font-size: 1.15rem; color: var(--ink); cursor: pointer; }
+  .sheet button.pick small { display: block; color: var(--muted); font-size: .9rem; }
+  .sheet button.pick:active { background: #e2e8f0; }
+
+  @media (max-width: 700px) {
+    body { font-size: 17px; }
+    .hero h1 { font-size: 2rem; }
+    button.big { min-height: 68px; font-size: 1.3rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { .row.flash { animation: none; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="co" id="hdr-co">Scan-out</span>
+  <span class="loc" id="hdr-loc"></span>
+  <span class="clock" id="hdr-clock"></span>
+</header>
+
+<main>
+  <div class="notice" id="notice" role="alert" aria-live="assertive"></div>
+
+  <!-- Start-up and fatal states -->
+  <section class="screen on" id="s-load">
+    <div class="hero"><h1>Starting&hellip;</h1></div>
+  </section>
+
+  <section class="screen" id="s-fatal">
+    <div class="hero bad">
+      <h1 id="fatal-title">This kiosk can&rsquo;t be used</h1>
+      <p id="fatal-text"></p>
+    </div>
+  </section>
+
+  <!-- Waiting for someone to scan their ID badge -->
+  <section class="screen" id="s-idle">
+    <div class="hero">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#0f2f6b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.5-1.6 1.7-2.4 3-2.4s2.5.8 3 2.4"/><path d="M15 10h3M15 13h3"/>
+      </svg>
+      <h1>Scan your ID badge</h1>
+      <p>Hold your badge under the scanner to start. Then scan each item you are taking.</p>
+    </div>
+  </section>
+
+  <!-- Scanning items -->
+  <section class="screen" id="s-scan">
+    <div class="who" id="who">
+      <span class="name" id="who-name"></span>
+      <span class="trade" id="who-trade"></span>
+      <span class="spacer" id="who-count"></span>
+    </div>
+    <div class="list" id="list" aria-live="polite"></div>
+    <div class="bar">
+      <button class="big alt" id="btn-cancel" type="button">Cancel</button>
+      <button class="big go" id="btn-confirm" type="button" disabled>Confirm &amp; Done</button>
+    </div>
+  </section>
+
+  <!-- Finished -->
+  <section class="screen" id="s-done">
+    <div class="hero ok">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M7.5 12.5l3 3 6-7"/></svg>
+      <h1 id="done-title">Done. Thank you.</h1>
+      <p id="done-text"></p>
+    </div>
+  </section>
+
+  <div class="scanrow" id="scanrow">
+    <label for="scan">Scan or type a code</label>
+    <input id="scan" type="text" inputmode="none" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Scan or type a code">
+    <button type="button" id="btn-kb">Keyboard</button>
+  </div>
+</main>
+
+<!-- More than one item shares a barcode -->
+<div class="modal" id="m-choose" role="dialog" aria-modal="true" aria-labelledby="m-choose-h">
+  <div class="sheet">
+    <h2 id="m-choose-h">Which one are you taking?</h2>
+    <p>More than one item uses this barcode. Tap the one in your hand.</p>
+    <div id="m-choose-list"></div>
+    <button type="button" class="pick" id="m-choose-cancel">Cancel</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------
+  // The tablet's secret is the last part of its address. It is read once,
+  // sent as a header, and never written anywhere else.
+  // ---------------------------------------------------------------
+  var TOKEN = decodeURIComponent((location.pathname.split('/').filter(Boolean)[1]) || '');
+
+  var $ = function (id) { return document.getElementById(id); };
+  var cfg = { require_badge: true, idle_seconds: 60 };
+  var state = 'load';           // load | fatal | idle | scan | done
+  var badge = null;             // { id, name, trade }
+  var items = [];               // { product_id, name, sku, quantity, scanned_barcode, error }
+  var sessionId = null;
+  var busy = false;
+  var keyboardMode = false;
+  var lastScan = { code: '', at: 0 };
+  var lastActivity = Date.now();
+  var idleTimer = null;
+  var doneTimer = null;
+  var noticeTimer = null;
+  var audioCtx = null;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function newSessionId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    var b = new Uint8Array(16); (window.crypto || window.msCrypto).getRandomValues(b);
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    var h = Array.prototype.map.call(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  }
+
+  // ---------------------------------------------------------------
+  // Sound: a short tone for good, a low double tone for a problem.
+  // ---------------------------------------------------------------
+  function beep(kind) {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      var notes = kind === 'bad' ? [[220, 0, .16], [180, .18, .22]] : kind === 'done' ? [[660, 0, .1], [880, .12, .18]] : [[880, 0, .09]];
+      notes.forEach(function (n) {
+        var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.type = 'sine'; o.frequency.value = n[0];
+        g.gain.setValueAtTime(0.0001, audioCtx.currentTime + n[1]);
+        g.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + n[1] + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + n[1] + n[2]);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(audioCtx.currentTime + n[1]); o.stop(audioCtx.currentTime + n[1] + n[2] + 0.02);
+      });
+    } catch (e) { /* sound is a courtesy; never block a scan on it */ }
+  }
+
+  // ---------------------------------------------------------------
+  // Network
+  // ---------------------------------------------------------------
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = { 'X-Kiosk-Token': TOKEN };
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    return fetch('/api/kiosk' + path, {
+      method: opts.method || 'GET',
+      headers: headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      cache: 'no-store',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer'
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; });
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // Screens
+  // ---------------------------------------------------------------
+  function show(name) {
+    state = name;
+    ['load', 'fatal', 'idle', 'scan', 'done'].forEach(function (n) {
+      $('s-' + n).classList.toggle('on', n === name);
+    });
+    // The scan box is for scanning, not for the start-up or error screens.
+    $('scanrow').style.display = (name === 'idle' || name === 'scan') ? 'flex' : 'none';
+    if (name === 'idle' || name === 'scan') focusScan();
+  }
+
+  function fatal(title, text) {
+    show('fatal');
+    $('fatal-title').textContent = title;
+    $('fatal-text').textContent = text || '';
+  }
+
+  function notify(kind, text, ms) {
+    var n = $('notice');
+    n.className = 'notice on ' + kind;
+    n.textContent = text;
+    clearTimeout(noticeTimer);
+    if (ms) noticeTimer = setTimeout(clearNotice, ms);
+  }
+  function clearNotice() { $('notice').className = 'notice'; $('notice').textContent = ''; }
+
+  function focusScan() {
+    var a = document.activeElement;
+    if (keyboardMode) return;
+    if (a && a !== document.body && a.tagName === 'INPUT' && a.id !== 'scan') return; // someone is editing a quantity
+    $('scan').focus({ preventScroll: true });
+  }
+
+  function render() {
+    if (state !== 'scan') return;
+    $('who-name').textContent = badge ? badge.name : 'Scan-out';
+    $('who-trade').textContent = badge && badge.trade ? badge.trade : '';
+    var total = items.reduce(function (n, i) { return n + Number(i.quantity || 0); }, 0);
+    $('who-count').textContent = items.length
+      ? items.length + (items.length === 1 ? ' item' : ' items') + ' · ' + (Math.round(total * 100) / 100) + ' total'
+      : '';
+    $('btn-confirm').disabled = busy || items.length === 0;
+
+    var list = $('list');
+    if (!items.length) {
+      list.innerHTML = '<div class="empty">Scan the first item you are taking.</div>';
+      return;
+    }
+    list.innerHTML = items.map(function (it, idx) {
+      return '<div class="row' + (it.error ? ' failed' : '') + (it.flash ? ' flash' : '') + '" data-i="' + idx + '">' +
+        '<div class="info"><div class="nm">' + esc(it.name) + '</div>' +
+        '<div class="sk">' + esc(it.sku || '') + '</div>' +
+        (it.error ? '<div class="er">' + esc(it.error) + '</div>' : '') + '</div>' +
+        '<div class="stepper">' +
+          '<button type="button" data-act="dec" aria-label="One less">−</button>' +
+          '<input type="number" inputmode="decimal" min="0.01" step="any" value="' + esc(it.quantity) + '" data-act="qty" aria-label="Quantity">' +
+          '<button type="button" data-act="inc" aria-label="One more">+</button>' +
+        '</div>' +
+        '<button type="button" class="rm" data-act="rm" aria-label="Remove ' + esc(it.name) + '">✕</button>' +
+      '</div>';
+    }).join('');
+    items.forEach(function (it) { it.flash = false; });
+  }
+
+  // ---------------------------------------------------------------
+  // Session lifecycle
+  // ---------------------------------------------------------------
+  function resetToStart() {
+    badge = null; items = []; sessionId = null; busy = false;
+    clearNotice();
+    if (cfg.require_badge) show('idle');
+    else beginSession(null);
+  }
+
+  function beginSession(b) {
+    badge = b || null;
+    items = [];
+    sessionId = newSessionId();
+    lastActivity = Date.now();
+    show('scan');
+    render();
+  }
+
+  function touch() { lastActivity = Date.now(); }
+
+  // An unconfirmed session is cleared after a quiet spell, so the next person
+  // never inherits the last person's basket. The last 15 seconds are announced.
+  function idleTick() {
+    if (state !== 'scan' || busy) return;
+    var hasWork = items.length > 0 || (cfg.require_badge && badge);
+    if (!hasWork) return;
+    var left = cfg.idle_seconds - Math.floor((Date.now() - lastActivity) / 1000);
+    if (left <= 0) {
+      beep('bad');
+      resetToStart();
+      notify('info', 'The session was cleared because nothing was confirmed.', 8000);
+    } else if (left <= 15) {
+      notify('warn', 'Still there? Clearing in ' + left + ' seconds. Tap here to keep going.');
+    } else if ($('notice').classList.contains('warn')) {
+      clearNotice();
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Scans
+  // ---------------------------------------------------------------
+  function onScan(raw) {
+    var code = String(raw || '').trim();
+    if (!code || busy) return;
+    var now = Date.now();
+    // Scanners sometimes read one label twice in a burst. Treat that as one scan.
+    if (code === lastScan.code && now - lastScan.at < 700) return;
+    lastScan = { code: code, at: now };
+    touch(); clearNotice();
+
+    busy = true;
+    api('/resolve?code=' + encodeURIComponent(code)).then(function (r) {
+      busy = false;
+      if (r.status === 401 || r.status === 403) return fatal('This kiosk can’t be used', r.data.error);
+      if (r.status === 404) { beep('bad'); return notify('err', r.data.error || 'Not recognised.', 6000); }
+      if (r.status >= 400) { beep('bad'); return notify('err', r.data.error || 'Could not look that up.', 6000); }
+
+      var d = r.data;
+      if (d.kind === 'badge') { d.badge.code = code; return onBadge(d.badge); }
+      if (d.kind === 'product') return addProduct(d.product, d.code || code);
+      if (d.kind === 'choose') return choose(d.products, d.code || code);
+      beep('bad'); notify('err', 'Not recognised.', 6000);
+    }).catch(function () {
+      busy = false; beep('bad');
+      notify('err', 'Can’t reach the server. Check the Wi-Fi and scan again.', 8000);
+    }).then(function () { render(); focusScan(); });
+  }
+
+  function onBadge(b) {
+    if (state === 'idle') { beep('ok'); return beginSession(b); }
+    if (state === 'scan') {
+      // Scanning your own badge again means "I'm finished".
+      if (badge && badge.id === b.id) return confirmSession();
+      if (!badge) { beep('ok'); badge = b; return; }          // ID is optional here, but recorded when given
+      beep('bad');
+      notify('err', 'That is a different badge. Confirm or cancel ' + badge.name + '’s items first.', 8000);
+    }
+  }
+
+  function addProduct(p, code) {
+    if (state === 'idle') { beep('bad'); return notify('err', 'Scan your ID badge first.', 5000); }
+    if (state !== 'scan') return;
+    beep('ok');
+    var ex = items.filter(function (i) { return i.product_id === p.id; })[0];
+    if (ex) { ex.quantity = Math.round((Number(ex.quantity) + 1) * 10000) / 10000; ex.flash = true; ex.error = null; }
+    else items.unshift({ product_id: p.id, name: p.name, sku: p.sku, quantity: 1, scanned_barcode: code, flash: true, error: null });
+  }
+
+  function choose(products, code) {
+    $('m-choose-list').innerHTML = products.map(function (p, i) {
+      return '<button type="button" class="pick" data-i="' + i + '">' + esc(p.name) + '<small>' + esc(p.sku || '') + (p.brand ? ' · ' + esc(p.brand) : '') + '</small></button>';
+    }).join('');
+    $('m-choose').classList.add('on');
+    $('m-choose').chooseData = { products: products, code: code };
+  }
+
+  // ---------------------------------------------------------------
+  // Confirm
+  // ---------------------------------------------------------------
+  function confirmSession() {
+    if (busy || state !== 'scan' || !items.length) return;
+    busy = true; touch(); clearNotice();
+    $('btn-confirm').disabled = true;
+
+    api('/scan-out', {
+      method: 'POST',
+      body: {
+        session_id: sessionId,
+        badge_code: badge ? badge.code : undefined,
+        items: items.map(function (i) { return { product_id: i.product_id, quantity: Number(i.quantity), scanned_barcode: i.scanned_barcode }; })
+      }
+    }).then(function (r) {
+      busy = false;
+      if (r.status === 401 || r.status === 403) return fatal('This kiosk can’t be used', r.data.error);
+
+      var results = r.data && r.data.results;
+      if (r.status === 201 || (r.data && r.data.ok)) return finish(r.data);
+
+      if (results && results.length) {
+        // Keep only what did not go through, with the reason against each line.
+        var errBy = {};
+        results.forEach(function (x) { if (!x.ok) errBy[x.product_id] = x.error || 'Could not be recorded.'; });
+        var postedCount = results.filter(function (x) { return x.ok; }).length;
+        items = items.filter(function (i) { return errBy[i.product_id]; });
+        items.forEach(function (i) { i.error = errBy[i.product_id]; });
+        beep('bad');
+        notify('err', (postedCount ? postedCount + ' item' + (postedCount === 1 ? ' was' : 's were') + ' scanned out. ' : '') +
+          'Fix or remove the items marked in red, then confirm again.');
+        return;
+      }
+      beep('bad');
+      notify('err', (r.data && r.data.error) || 'Could not record that. Your items are still here.');
+    }).catch(function () {
+      busy = false; beep('bad');
+      notify('err', 'Can’t reach the server. Your items are still here — tap Confirm again when the Wi-Fi is back.');
+    }).then(function () { render(); focusScan(); });
+  }
+
+  function finish(data) {
+    beep('done');
+    var count = (data.results || []).length;
+    $('done-title').textContent = data.person ? 'Thank you, ' + data.person.split(' ')[0] + '.' : 'Done. Thank you.';
+    $('done-text').textContent = count + (count === 1 ? ' item' : ' items') + ' scanned out.';
+    items = []; badge = null; sessionId = null;
+    show('done');
+    clearTimeout(doneTimer);
+    doneTimer = setTimeout(resetToStart, 4000);
+  }
+
+  // ---------------------------------------------------------------
+  // Wiring
+  // ---------------------------------------------------------------
+  $('scan').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var v = this.value; this.value = '';
+      onScan(v);
+    }
+  });
+  $('scan').addEventListener('blur', function () {
+    setTimeout(function () { if (state === 'idle' || state === 'scan') focusScan(); }, 150);
+  });
+  $('btn-kb').addEventListener('click', function () {
+    keyboardMode = !keyboardMode;
+    $('scan').setAttribute('inputmode', keyboardMode ? 'text' : 'none');
+    this.textContent = keyboardMode ? 'Scanner' : 'Keyboard';
+    $('scan').blur(); $('scan').focus();
+    if (!keyboardMode) focusScan();
+  });
+  $('btn-confirm').addEventListener('click', confirmSession);
+  $('btn-cancel').addEventListener('click', function () { if (!busy) { touch(); resetToStart(); } });
+
+  $('list').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-act]');
+    var row = e.target.closest('.row');
+    if (!btn || !row) return;
+    var it = items[Number(row.dataset.i)];
+    if (!it) return;
+    touch();
+    var act = btn.dataset.act;
+    if (act === 'inc') it.quantity = Math.round((Number(it.quantity) + 1) * 10000) / 10000;
+    else if (act === 'dec') { var q = Math.round((Number(it.quantity) - 1) * 10000) / 10000; if (q > 0) it.quantity = q; }
+    else if (act === 'rm') items.splice(Number(row.dataset.i), 1);
+    else return;
+    it.error = null;
+    render(); focusScan();
+  });
+  $('list').addEventListener('change', function (e) {
+    if (e.target.dataset.act !== 'qty') return;
+    var row = e.target.closest('.row'); var it = items[Number(row.dataset.i)];
+    var v = parseFloat(e.target.value);
+    if (it && Number.isFinite(v) && v > 0 && v <= 1000) { it.quantity = Math.round(v * 10000) / 10000; it.error = null; }
+    render(); focusScan();
+  });
+  $('list').addEventListener('input', touch);
+
+  $('m-choose-list').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-i]'); if (!b) return;
+    var d = $('m-choose').chooseData; if (!d) return;
+    $('m-choose').classList.remove('on');
+    addProduct(d.products[Number(b.dataset.i)], d.code);
+    render(); focusScan();
+  });
+  $('m-choose-cancel').addEventListener('click', function () { $('m-choose').classList.remove('on'); focusScan(); });
+
+  $('notice').addEventListener('click', function () { touch(); clearNotice(); focusScan(); });
+  ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, touch, true); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) focusScan(); });
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  function tickClock() {
+    $('hdr-clock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  // ---------------------------------------------------------------
+  // Start
+  // ---------------------------------------------------------------
+  function start() {
+    tickClock(); setInterval(tickClock, 15000);
+    setInterval(idleTick, 1000);
+
+    if (!TOKEN) return fatal('This kiosk link is not complete', 'Open the full link your manager gave you.');
+
+    api('/session').then(function (r) {
+      if (r.status !== 200) {
+        return fatal('This kiosk can’t be used', (r.data && r.data.error) || 'Ask your manager for a new link.');
+      }
+      cfg = { require_badge: r.data.require_badge !== false, idle_seconds: Number(r.data.idle_seconds) || 60 };
+      $('hdr-co').textContent = r.data.company;
+      $('hdr-loc').textContent = r.data.location;
+      document.title = 'Scan-out — ' + r.data.location;
+      resetToStart();
+
+      // Notice a link that is switched off, or an ID setting that was changed, while idle.
+      setInterval(function () {
+        if (state !== 'idle' && !(state === 'scan' && !items.length && !badge)) return;
+        api('/session').then(function (s) {
+          if (s.status === 401 || s.status === 403) return fatal('This kiosk can’t be used', s.data.error);
+          if (s.status === 200) {
+            var nr = s.data.require_badge !== false;
+            cfg.idle_seconds = Number(s.data.idle_seconds) || 60;
+            if (nr !== cfg.require_badge) { cfg.require_badge = nr; resetToStart(); }
+          }
+        }).catch(function () {});
+      }, 5 * 60 * 1000);
+    }).catch(function () {
+      fatal('Can’t reach the server', 'Check the tablet’s Wi-Fi, then reload this page.');
+    });
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

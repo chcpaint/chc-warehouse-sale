@@ -76,6 +76,9 @@ async function resolveLocation(companyId, locationId) {
 // ============================================================
 router.use('/labels', require('./inventory-labels'));
 
+// Scan-out kiosk: tablet links, ID badge roster and printing.
+router.use('/scan-out', require('./scan-out-admin'));
+
 // ============================================================
 // REPAIR KITS — access, mapping and company-owned kits
 // ============================================================

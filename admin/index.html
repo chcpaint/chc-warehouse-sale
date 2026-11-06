@@ -1688,6 +1688,109 @@
     </div>
 
     <!-- Modules Modal -->
+    <!-- ============================================================
+         SCAN-OUT KIOSK (per company): tablets, ID badges, the ID-scan switch
+         ============================================================ -->
+    <div id="scanout-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-barcode text-blue-500 mr-2"></i> Scan-out kiosk — <span id="so-company-name"></span></h3>
+                <button onclick="hideModal('scanout-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">
+                A tablet at the stock room or cage. People scan an ID badge, scan what they take, and confirm.
+                No login, and nothing else in the console is reachable from it.
+            </p>
+
+            <div id="so-off" class="hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm mb-4"></div>
+
+            <!-- ID badge on/off -->
+            <div class="bg-gray-50 rounded-lg p-4 mb-5">
+                <label class="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" id="so-require-badge" onchange="soSaveOptions('require')" class="mt-1 w-4 h-4 rounded border-gray-300 text-blue-600">
+                    <span>
+                        <span class="font-semibold text-gray-800 block">Ask people to scan their ID badge first</span>
+                        <span id="so-require-hint" class="text-sm text-gray-500"></span>
+                    </span>
+                </label>
+                <div class="mt-3 flex flex-wrap items-end gap-3">
+                    <div>
+                        <label for="so-idle" class="block text-xs font-semibold text-gray-600 mb-1">Clear an unconfirmed session after (seconds)</label>
+                        <input type="number" id="so-idle" min="20" max="600" step="5" class="px-3 py-2 border rounded-lg text-sm w-32">
+                    </div>
+                    <button onclick="soSaveOptions('idle')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Save</button>
+                </div>
+            </div>
+
+            <!-- Tablets -->
+            <h4 class="font-bold text-gray-800 mb-1"><i class="fas fa-tablet-screen-button text-blue-500 mr-2"></i>Tablets</h4>
+            <p class="text-sm text-gray-500 mb-3">Each tablet opens its own private link. Anyone holding the link can scan items out at that location, so keep it on the tablet. Switch a tablet off here and its link stops working at once.</p>
+            <div id="so-link-box" class="hidden mb-3 border-2 border-green-500 bg-green-50 rounded-lg p-3">
+                <p class="text-sm font-semibold text-green-800 mb-1" id="so-link-title">Copy this link now</p>
+                <p class="text-xs text-green-800 mb-2">Open it on the tablet and bookmark it. For safety it is not shown again.</p>
+                <div class="flex gap-2">
+                    <input id="so-link" readonly class="flex-1 px-3 py-2 border rounded-lg text-xs font-mono bg-white" onclick="this.select()">
+                    <button onclick="soCopyLink()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Copy</button>
+                </div>
+            </div>
+            <div id="so-devices" class="space-y-2 mb-3"></div>
+            <div class="flex flex-wrap items-end gap-3 mb-6">
+                <div>
+                    <label for="so-dev-name" class="block text-xs font-semibold text-gray-600 mb-1">Tablet name</label>
+                    <input id="so-dev-name" maxlength="60" placeholder="Paint room tablet" class="px-3 py-2 border rounded-lg text-sm w-56">
+                </div>
+                <div>
+                    <label for="so-dev-loc" class="block text-xs font-semibold text-gray-600 mb-1">Location</label>
+                    <select id="so-dev-loc" class="px-3 py-2 border rounded-lg text-sm w-56"></select>
+                </div>
+                <button onclick="soAddDevice()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Add tablet</button>
+            </div>
+
+            <!-- Roster -->
+            <h4 class="font-bold text-gray-800 mb-1"><i class="fas fa-id-badge text-blue-500 mr-2"></i>People and ID badges</h4>
+            <p class="text-sm text-gray-500 mb-3">These people can scan out. They have no email, no password and no access to anything but the kiosk.</p>
+            <div class="flex flex-wrap items-end gap-3 mb-2">
+                <div>
+                    <label for="so-b-name" class="block text-xs font-semibold text-gray-600 mb-1">Name</label>
+                    <input id="so-b-name" maxlength="80" placeholder="Alex Painter" class="px-3 py-2 border rounded-lg text-sm w-56" onkeydown="if(event.key==='Enter')soAddBadge()">
+                </div>
+                <div>
+                    <label for="so-b-trade" class="block text-xs font-semibold text-gray-600 mb-1">Trade (optional)</label>
+                    <select id="so-b-trade" class="px-3 py-2 border rounded-lg text-sm w-40"></select>
+                </div>
+                <button onclick="soAddBadge()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Add person</button>
+                <button onclick="document.getElementById('so-bulk').classList.toggle('hidden')" class="text-sm text-blue-600 hover:text-blue-800 underline px-2 py-2">Add several at once</button>
+            </div>
+            <div id="so-bulk" class="hidden mb-3">
+                <label for="so-bulk-text" class="block text-xs font-semibold text-gray-600 mb-1">One person per line. Optionally add a comma and a trade (painter, bodyman, prep, detailer, cage, other).</label>
+                <textarea id="so-bulk-text" rows="5" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Alex Painter, painter&#10;Sam Bodyman, bodyman"></textarea>
+                <button onclick="soAddBulk()" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Add these people</button>
+            </div>
+            <div class="flex items-center justify-between mt-3 mb-2">
+                <label class="text-sm text-gray-600 flex items-center gap-2"><input type="checkbox" id="so-select-all" onchange="soSelectAll(this.checked)"> Select all</label>
+                <div class="space-x-2">
+                    <button onclick="soPrint(true)" class="text-sm border border-gray-300 hover:bg-gray-50 px-3 py-1.5 rounded-lg"><i class="fas fa-print mr-1"></i>Print selected</button>
+                    <button onclick="soPrint(false)" class="text-sm border border-gray-300 hover:bg-gray-50 px-3 py-1.5 rounded-lg"><i class="fas fa-print mr-1"></i>Print all</button>
+                </div>
+            </div>
+            <div class="border rounded-lg overflow-hidden mb-6">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-xs text-gray-500 uppercase"><tr><th class="px-3 py-2 w-8"></th><th class="px-3 py-2">Name</th><th class="px-3 py-2">Trade</th><th class="px-3 py-2">Badge code</th><th class="px-3 py-2 text-right">Actions</th></tr></thead>
+                    <tbody id="so-badges"></tbody>
+                </table>
+            </div>
+
+            <!-- Recent -->
+            <h4 class="font-bold text-gray-800 mb-1"><i class="fas fa-clock-rotate-left text-blue-500 mr-2"></i>Recent scan-outs</h4>
+            <div class="border rounded-lg overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-xs text-gray-500 uppercase"><tr><th class="px-3 py-2">When</th><th class="px-3 py-2">Who</th><th class="px-3 py-2">Item</th><th class="px-3 py-2 text-right">Qty</th></tr></thead>
+                    <tbody id="so-activity"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div id="modules-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
             <div class="flex justify-between items-center mb-2">
@@ -1701,6 +1804,14 @@
             </p>
             <div id="modules-list" class="space-y-3">
                 <p class="text-center text-gray-400 py-4">Loading...</p>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between gap-4 border rounded-lg px-4 py-3 bg-gray-50">
+                <div>
+                    <p class="font-semibold text-gray-800"><i class="fas fa-barcode text-blue-500 mr-2"></i>Set up the scan-out kiosk</p>
+                    <p class="text-sm text-gray-500">Tablets, the people with ID badges, and the "scan an ID first" switch. Needs the Scan-out kiosk module on.</p>
+                </div>
+                <button onclick="openScanOutModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">Open</button>
             </div>
 
             <div class="mt-5 pt-5 border-t">
@@ -3090,7 +3201,7 @@
     }
     (function initDoneBars() {
         const run = () => addDoneBars(['modules-modal', 'fees-modal', 'kits-modal', 'locations-modal',
-            'email-recipients-modal', 'company-users-modal', 'branches-modal']);
+            'email-recipients-modal', 'company-users-modal', 'branches-modal', 'scanout-modal']);
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
     })();
     function esc(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
@@ -4342,6 +4453,217 @@
             loadCompanies();
         } catch (err) {
             alert('Failed to change that module.');
+        }
+    }
+
+
+    // ============================================================
+    // SCAN-OUT KIOSK (per company)
+    //
+    // The tablet itself lives at /kiosk/<secret> (public/kiosk.html). This panel
+    // sets it up: the "scan an ID badge first" switch, one private link per
+    // tablet, the roster of people, and the printable badges. Whether the kiosk
+    // is ON for the company is the ordinary Modules switch.
+    // ============================================================
+    let soCompanyId = null;
+    let soData = null;
+
+    const soBase = () => `/companies/${soCompanyId}/inventory/scan-out`;
+
+    async function openScanOutModal() {
+        soCompanyId = modulesCompanyId;
+        document.getElementById('so-company-name').textContent = modulesCompanyName || '';
+        document.getElementById('so-link-box').classList.add('hidden');
+        showModal('scanout-modal');
+        await soLoad();
+    }
+
+    async function soLoad() {
+        try {
+            const resp = await adminFetch(soBase());
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || 'Failed to load.');
+            soData = d;
+            soRender();
+            soLoadActivity();
+        } catch (err) {
+            adminToast(err.message || 'Failed to load.', 'error');
+        }
+    }
+
+    function soRender() {
+        const d = soData;
+        const off = document.getElementById('so-off');
+        off.classList.toggle('hidden', d.module_enabled);
+        off.textContent = !d.inventory_enabled
+            ? 'Scan-out needs refinishAI Inventory turned on first. Turn it on under Modules, then come back here.'
+            : 'The Scan-out kiosk module is off for this company, so its tablets will not work yet. Turn it on in the Modules list, then come back here.';
+
+        document.getElementById('so-require-badge').checked = !!d.options.require_badge;
+        document.getElementById('so-idle').value = d.options.idle_seconds;
+        document.getElementById('so-require-hint').textContent = d.options.require_badge
+            ? 'On: each person scans their badge first, and every scan-out is recorded against their name.'
+            : 'Off: items are scanned out without recording who took them. Only the tablet is recorded.';
+
+        document.getElementById('so-dev-loc').innerHTML = (d.locations || [])
+            .map(l => `<option value="${escA(l.id)}">${escA(l.name)}</option>`).join('');
+        document.getElementById('so-b-trade').innerHTML = '<option value="">—</option>' +
+            (d.trades || []).map(t => `<option value="${escA(t)}">${escA(t.charAt(0).toUpperCase() + t.slice(1))}</option>`).join('');
+
+        const devHost = document.getElementById('so-devices');
+        devHost.innerHTML = (d.devices || []).length ? d.devices.map(v => `
+            <div class="flex items-center gap-3 border rounded-lg px-3 py-2 ${v.is_active ? 'bg-white' : 'bg-gray-50 opacity-70'}">
+                <div class="flex-1">
+                    <p class="font-semibold text-gray-800">${escA(v.name)} ${v.is_active ? '' : '<span class="ml-2 text-xs bg-gray-200 text-gray-600 rounded px-2 py-0.5">Off</span>'}</p>
+                    <p class="text-xs text-gray-500">${escA(v.location_name || 'Unknown location')} · link ends …${escA(v.token_hint || '')} · ${v.last_seen_at ? 'last used ' + escA(new Date(v.last_seen_at).toLocaleString()) : 'not used yet'}</p>
+                </div>
+                <button onclick="soRelink('${escA(v.id)}')" class="text-sm text-blue-600 hover:text-blue-800">${v.is_active ? 'New link' : 'Switch on with a new link'}</button>
+                ${v.is_active ? `<button onclick="soRevoke('${escA(v.id)}')" class="text-sm text-red-600 hover:text-red-800">Switch off</button>` : ''}
+            </div>`).join('') : '<p class="text-sm text-gray-400">No tablets yet.</p>';
+
+        const rows = (d.badges || []).map(b => `
+            <tr class="border-t ${b.is_active ? '' : 'bg-gray-50 text-gray-400'}">
+                <td class="px-3 py-2"><input type="checkbox" class="so-pick" value="${escA(b.id)}" ${b.is_active ? '' : 'disabled'}></td>
+                <td class="px-3 py-2 font-medium">${escA(b.name)}${b.is_active ? '' : ' <span class="text-xs bg-gray-200 text-gray-600 rounded px-2 py-0.5">Off</span>'}</td>
+                <td class="px-3 py-2">${escA(b.trade || '—')}</td>
+                <td class="px-3 py-2 font-mono text-xs">${escA(b.badge_code)}</td>
+                <td class="px-3 py-2 text-right space-x-3 whitespace-nowrap">
+                    <button onclick="soReissue('${escA(b.id)}')" class="text-blue-600 hover:text-blue-800" title="Lost card: new code, the old card stops working">New badge</button>
+                    ${b.is_active
+                        ? `<button onclick="soBadgeActive('${escA(b.id)}', false)" class="text-red-600 hover:text-red-800">Remove</button>`
+                        : `<button onclick="soBadgeActive('${escA(b.id)}', true)" class="text-green-700 hover:text-green-900">Restore</button>`}
+                </td>
+            </tr>`).join('');
+        document.getElementById('so-badges').innerHTML = rows ||
+            '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">No people yet.</td></tr>';
+        document.getElementById('so-select-all').checked = false;
+    }
+
+    async function soLoadActivity() {
+        const host = document.getElementById('so-activity');
+        try {
+            const resp = await adminFetch(soBase() + '/activity?limit=25');
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || 'Failed');
+            host.innerHTML = (d.activity || []).map(a => `
+                <tr class="border-t"><td class="px-3 py-2 whitespace-nowrap text-gray-500">${escA(new Date(a.at).toLocaleString())}</td>
+                <td class="px-3 py-2">${escA(a.who || '—')}</td>
+                <td class="px-3 py-2">${escA(a.item || '')} <span class="text-xs text-gray-400">${escA(a.sku || '')}</span></td>
+                <td class="px-3 py-2 text-right">${escA(a.quantity)}</td></tr>`).join('') ||
+                '<tr><td colspan="4" class="px-3 py-4 text-center text-gray-400">Nothing scanned out yet.</td></tr>';
+        } catch (err) {
+            host.innerHTML = `<tr><td colspan="4" class="px-3 py-4 text-center text-red-600">${escA(err.message)}</td></tr>`;
+        }
+    }
+
+    // One helper for every write: say what happened, then refresh the panel.
+    async function soCall(path, method, body, onOk) {
+        try {
+            const resp = await adminFetch(soBase() + path, { method, body: body ? JSON.stringify(body) : undefined });
+            const d = await resp.json();
+            if (!resp.ok) { adminToast(d.error || 'That did not save.', 'error'); return null; }
+            adminToast(d.message || 'Updated');
+            if (onOk) onOk(d);
+            await soLoad();
+            return d;
+        } catch (err) {
+            adminToast('That did not save.', 'error');
+            return null;
+        }
+    }
+
+    async function soSaveOptions(which) {
+        if (which === 'require') {
+            const on = document.getElementById('so-require-badge').checked;
+            if (!on && !confirm('Turn the ID badge scan OFF?\n\nItems will be scanned out without recording who took them.')) {
+                document.getElementById('so-require-badge').checked = true;
+                return;
+            }
+            const r = await soCall('/settings', 'PUT', { require_badge: on });
+            if (!r) document.getElementById('so-require-badge').checked = !on;
+        } else {
+            await soCall('/settings', 'PUT', { idle_seconds: Number(document.getElementById('so-idle').value) });
+        }
+    }
+
+    function soShowLink(d, title) {
+        document.getElementById('so-link-title').textContent = title;
+        document.getElementById('so-link').value = d.link;
+        document.getElementById('so-link-box').classList.remove('hidden');
+        document.getElementById('so-link-box').scrollIntoView({ block: 'center' });
+    }
+
+    function soCopyLink() {
+        const el = document.getElementById('so-link');
+        el.select();
+        const done = () => adminToast('Updated — link copied.');
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(el.value).then(done, () => { document.execCommand('copy'); done(); });
+        else { document.execCommand('copy'); done(); }
+    }
+
+    async function soAddDevice() {
+        const name = document.getElementById('so-dev-name').value.trim();
+        const location_id = document.getElementById('so-dev-loc').value;
+        const d = await soCall('/devices', 'POST', { name, location_id }, r => soShowLink(r, `Link for ${r.device.name} — copy it now`));
+        if (d) document.getElementById('so-dev-name').value = '';
+    }
+
+    async function soRelink(id) {
+        if (!confirm('Make a new link for this tablet?\n\nThe old link stops working straight away, so the tablet needs the new one.')) return;
+        await soCall(`/devices/${id}/regenerate`, 'POST', null, r => soShowLink(r, 'New link — copy it now'));
+    }
+
+    async function soRevoke(id) {
+        if (!confirm('Switch this tablet off? Its link stops working straight away. History is kept.')) return;
+        await soCall(`/devices/${id}`, 'DELETE');
+    }
+
+    async function soAddBadge() {
+        const name = document.getElementById('so-b-name').value.trim();
+        const trade = document.getElementById('so-b-trade').value;
+        const d = await soCall('/badges', 'POST', { name, trade });
+        if (d) document.getElementById('so-b-name').value = '';
+    }
+
+    async function soAddBulk() {
+        const names = document.getElementById('so-bulk-text').value;
+        const d = await soCall('/badges/bulk', 'POST', { names });
+        if (d) { document.getElementById('so-bulk-text').value = ''; document.getElementById('so-bulk').classList.add('hidden'); }
+    }
+
+    async function soReissue(id) {
+        if (!confirm('Make a new badge for this person?\n\nThe old card stops working straight away. Print the new one.')) return;
+        await soCall(`/badges/${id}/reissue`, 'POST');
+    }
+
+    async function soBadgeActive(id, active) {
+        if (!active && !confirm('Remove this person? Their badge stops working. Past scan-outs keep their name.')) return;
+        await soCall(`/badges/${id}`, 'PUT', { is_active: active });
+    }
+
+    function soSelectAll(on) {
+        document.querySelectorAll('#so-badges .so-pick:not(:disabled)').forEach(c => { c.checked = on; });
+    }
+
+    // Opens the badge sheet in a new tab. The sheet needs the admin sign-in, which a
+    // plain link cannot carry, so it is fetched here and written into the new tab.
+    async function soPrint(selectedOnly) {
+        let ids = '';
+        if (selectedOnly) {
+            const picked = [...document.querySelectorAll('#so-badges .so-pick:checked')].map(c => c.value);
+            if (!picked.length) { adminToast('Tick the people to print first.', 'error'); return; }
+            ids = '?ids=' + picked.join(',');
+        }
+        const w = window.open('', '_blank');
+        if (!w) { adminToast('Allow pop-ups for this page, then try again.', 'error'); return; }
+        w.document.write('<p style="font-family:system-ui;padding:2rem">Preparing badges…</p>');
+        try {
+            const resp = await adminFetch(soBase() + '/badges/sheet' + ids);
+            const html = await resp.text();
+            w.document.open(); w.document.write(html); w.document.close();
+        } catch (err) {
+            w.close();
+            adminToast('Could not build the badge sheet.', 'error');
         }
     }
 

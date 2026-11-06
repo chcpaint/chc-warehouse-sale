@@ -109,6 +109,10 @@ const apiLimiter = rateLimit({
     // See utils/rate-limit.js.
     limit: rlMax,
     keyGenerator: rlKey,
+    // The scan-out kiosk has no signed-in person for this limiter to key on, so it
+    // would put a whole shop floor in one anonymous per-IP bucket. routes/kiosk.js
+    // applies its own limits instead (per tablet, plus strict on bad links).
+    skip: (req) => req.originalUrl.startsWith('/api/kiosk/'),
     message: { error: 'Too many requests. Please try again later.' },
     standardHeaders: true,
     legacyHeaders: false
@@ -155,6 +159,7 @@ app.use('/api/', resolveDistributor);
 app.use('/api/auth', authRoutes);
 app.use('/api/store', require('./routes/shopsafe-launch'));
 app.use('/api/store', storefrontRoutes);
+app.use('/api/kiosk', require('./routes/kiosk'));
 app.use('/api/admin', adminRoutes);
 
 // Health check
@@ -196,6 +201,18 @@ app.get('/store/:slug/manifest.webmanifest', (req, res) => {
         theme_color: '#1e40af',
         icons: [{ src: '/assets/refinishai-icon.png', sizes: '512x512', type: 'image/png', purpose: 'any' }]
     });
+});
+
+// Scan-out kiosk page. The secret in the URL is read by the page and sent as a
+// header; it is never logged here, never cached, and never sent on to another
+// site (no external links on the page, and Referrer-Policy says so anyway).
+app.get(['/kiosk', '/kiosk/:token'], (req, res) => {
+    res.set({
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+        'X-Robots-Tag': 'noindex, nofollow'
+    });
+    res.sendFile(path.join(__dirname, 'public', 'kiosk.html'));
 });
 
 // Company storefront (slug-based routing)

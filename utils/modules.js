@@ -111,6 +111,22 @@ const MODULES = {
         }
     },
 
+    scan_out: {
+        name: 'scan_out',
+        label: 'Scan-out kiosk',
+        blurb: 'A tablet at the stock room or cage where painters and bodymen scan their ID badge, then scan out what they take. No login, and no access to the rest of the console.',
+        requires: ['inventory'],
+        released: true,
+        defaults: {
+            enabled: false,
+            // Ask people to scan an ID badge first. Off = items are scanned out
+            // against the tablet only, with no name recorded.
+            require_badge: true,
+            // Seconds of inactivity before an unconfirmed session is cleared.
+            idle_seconds: 60
+        }
+    },
+
     kit_submissions: {
         name: 'kit_submissions',
         label: 'Insurance kit submissions',

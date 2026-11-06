@@ -196,7 +196,7 @@ test('module status reports what is blocking a toggle', () => {
 });
 
 test('dependents are discoverable so a toggle can warn before it breaks them', () => {
-    assert.deepEqual(modules.dependentsOf('inventory'), ['kits', 'insurance']);
+    assert.deepEqual(modules.dependentsOf('inventory'), ['kits', 'scan_out', 'insurance']);
     assert.deepEqual(modules.dependentsOf('kits'), ['insurance']);
 });
 

@@ -1198,4 +1198,8 @@ router.post('/replenishment/refresh', async (req, res) => {
     }
 });
 
+// Handed to the scan-out kiosk (routes/kiosk.js) so a kiosk scan-out reorders
+// exactly as a phone scan does. Both are tenancy-aware: each takes a company id.
+router.helpers = { levelsFor, resolveLocation, maybeDraftReplenishment };
+
 module.exports = router;
