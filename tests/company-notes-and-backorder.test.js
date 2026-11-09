@@ -376,6 +376,7 @@ test('a customer sends a message; it saves and emails the servicing branch', asy
     assert.equal(sentEmails.contact.length, 1);
     assert.ok(!sentEmails.contact[0].fromStaff);
     assert.ok(sentEmails.contact[0].to.includes('markham@chc.example'));
+    assert.ok(sentEmails.contact[0].to.includes('info@chcpaint.com'), 'the general inbox is always copied');
 });
 
 test('a blank or oversized customer message is refused', async () => {
@@ -395,14 +396,15 @@ test('a location_id that does not belong to this company is refused', async () =
     assert.match(res.body.error, /not on this account/);
 });
 
-test('a message with no location still saves and still reaches CHC (no branch email attempted)', async () => {
+test('a message with no location still saves and still reaches CHC\'s general inbox', async () => {
     reset();
     const res = await request(storeApp())
         .post('/api/store/assured/contact-notes')
         .send({ text: 'General question, not tied to a location.' });
     assert.equal(res.status, 201);
     assert.equal(fake.db.company_notes[0].location_id, null);
-    assert.equal(sentEmails.contact.length, 0, 'no servicing branch to resolve without a location');
+    assert.equal(sentEmails.contact.length, 1);
+    assert.deepEqual(sentEmails.contact[0].to, ['info@chcpaint.com'], 'no servicing branch, so only the general inbox');
 });
 
 // ==================================================================

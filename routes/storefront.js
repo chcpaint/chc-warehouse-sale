@@ -10,7 +10,10 @@ const { resolveFees, loadFeeRules, groupIdForUser, publicRulesFor, feeLinesOf } 
 const { rebateReportFor } = require('../utils/rebates');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
-const { resolveOrderRecipients } = require('../utils/recipients');
+const { resolveOrderRecipients, validEmails } = require('../utils/recipients');
+
+// Where every "Contact CHC" message is emailed (comma-separated list allowed).
+const CONTACT_NOTES_INBOX = validEmails(String(process.env.CONTACT_NOTES_TO || 'info@chcpaint.com').split(','));
 const { hidePricingEnabled, stripOrderPricing } = require('../utils/pricing-visibility');
 const { labelFor } = require('../utils/order-status');
 const { resolveOrderingUser } = require('../utils/people-activity');
@@ -1306,18 +1309,26 @@ router.post('/:slug/contact-notes', requireCompanyAuth, async (req, res) => {
             .single();
         if (error) throw error;
 
+        // Every contact message goes to the CHC general inbox (info@chcpaint.com
+        // unless CONTACT_NOTES_TO says otherwise), so it lands somewhere a person
+        // is watching even when the shop's location has no servicing branch
+        // set up. The servicing branch, when there is one, is copied as before.
+        // Email trouble never blocks the save above.
+        let staffTo = [];
+        let replyTo;
         try {
-            const { staffTo, replyTo } = await resolveOrderRecipients({
+            ({ staffTo, replyTo } = await resolveOrderRecipients({
                 company_id: req.company.id, location_id: locationId, contact_email: authorEmail
-            });
-            if (staffTo.length) {
-                sendContactNote({
-                    to: staffTo, replyTo,
-                    companyName: req.company.name,
-                    author, text
-                }).catch(e => console.error('Contact note email failed (non-blocking):', e.message));
-            }
+            }));
         } catch (e) { console.error('Contact note recipients error (non-blocking):', e.message); }
+        const recipients = validEmails([...CONTACT_NOTES_INBOX, ...staffTo]);
+        if (recipients.length) {
+            sendContactNote({
+                to: recipients, replyTo,
+                companyName: req.company.name,
+                author, text
+            }).catch(e => console.error('Contact note email failed (non-blocking):', e.message));
+        }
 
         res.status(201).json({ note });
     } catch (err) {
