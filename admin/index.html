@@ -1175,6 +1175,7 @@
                         <button id="rep-tab-orders" role="tab" onclick="repShowTab('orders')" class="px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700">Orders &amp; dollars</button>
                         <button id="rep-tab-adopt" role="tab" onclick="repShowTab('adopt')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Weekly adoption</button>
                         <button id="rep-tab-rebate" role="tab" onclick="repShowTab('rebate')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Rebates</button>
+                        <button id="rep-tab-brand" role="tab" onclick="repShowTab('brand')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Monthly brand</button>
                     </div>
                     <div id="rep-orders-pane">
                     <div class="flex flex-wrap gap-3 items-end mb-4">
@@ -1289,6 +1290,11 @@
                         </table></div></div>
                     </div>
 
+                    <div id="rep-brand-pane" class="hidden">
+                        <p class="text-xs text-gray-500 mb-1">Monthly sales of one brand for a customer: units, dollars and an item-by-item breakdown, with the year to date. Built automatically on the 1st of every month (about 6 a.m. Toronto time) for the month that just ended, and kept so a past month never changes.</p>
+                        <p class="text-xs text-gray-400 mb-4">A sale is counted when it ships (orders Out for Delivery or Closed), on the day it shipped. Partial shipments count what actually went out. Dollars are before tax and fees. Each Excel file has Summary, Items, By location, Orders and Year to date tabs.</p>
+                        <div id="brand-report-list"></div>
+                    </div>
                     <div id="rep-adopt-pane" class="hidden">
                         <div class="flex flex-wrap gap-3 items-end mb-3">
                             <div>
@@ -2847,18 +2853,115 @@
     // WEEKLY ADOPTION (Reports > Weekly adoption)
     // ============================================================
     function repShowTab(which) {
-        const adopt = which === 'adopt';
-        const rebate = which === 'rebate';
-        document.getElementById('rep-orders-pane').classList.toggle('hidden', adopt || rebate);
-        document.getElementById('rep-adopt-pane').classList.toggle('hidden', !adopt);
-        document.getElementById('rep-rebate-pane').classList.toggle('hidden', !rebate);
+        const panes = { orders: 'rep-orders-pane', adopt: 'rep-adopt-pane', rebate: 'rep-rebate-pane', brand: 'rep-brand-pane' };
         const on = 'px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700';
         const off = 'px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700';
-        document.getElementById('rep-tab-orders').className = (adopt || rebate) ? off : on;
-        document.getElementById('rep-tab-adopt').className = adopt ? on : off;
-        document.getElementById('rep-tab-rebate').className = rebate ? on : off;
-        if (adopt) adoptLoad();
-        if (rebate) rebateReportLoad();
+        Object.entries(panes).forEach(([k, id]) => {
+            document.getElementById(id).classList.toggle('hidden', k !== which);
+            document.getElementById('rep-tab-' + k).className = k === which ? on : off;
+        });
+        if (which === 'adopt') adoptLoad();
+        if (which === 'rebate') rebateReportLoad();
+        if (which === 'brand') brandReportsLoad();
+    }
+
+    // ============================================================
+    // MONTHLY BRAND REPORTS (Reports > Monthly brand)
+    // ============================================================
+    let brandReportData = null;
+    const brandMoney = n => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    async function brandReportsLoad() {
+        const box = document.getElementById('brand-report-list');
+        box.innerHTML = '<div class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></div>';
+        try {
+            const resp = await adminFetch('/brand-reports');
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || 'Failed to load.');
+            brandReportData = d;
+            if (!d.reports.length) {
+                box.innerHTML = '<div class="bg-white rounded-xl border p-6 text-sm text-gray-500">' + (d.not_installed
+                    ? 'The monthly reports have not been switched on in the database yet (migration 056).'
+                    : 'No monthly brand report is set up yet.') + '</div>';
+                return;
+            }
+            const year = String(d.current_period).slice(0, 4);
+            box.innerHTML = d.reports.map((r, idx) => {
+                const ytdRows = r.months.filter(m => String(m.period).startsWith(year));
+                const ytdQty = ytdRows.reduce((s, m) => s + Number(m.qty), 0);
+                const ytdAmt = ytdRows.reduce((s, m) => s + Number(m.amount), 0);
+                const latest = r.months[0];
+                const btn = 'px-2.5 py-1 rounded-md text-xs font-semibold border ';
+                return `
+                <div class="bg-white rounded-xl shadow-sm border mb-5 overflow-hidden">
+                    <div class="px-4 py-3 border-b flex flex-wrap items-center gap-3">
+                        <div>
+                            <p class="font-bold text-gray-800">${escA(r.company_name)} &mdash; ${escA(r.brand)} sales</p>
+                            <p class="text-xs text-gray-400">${ytdRows.length ? 'Saved months this year: ' + ytdRows.length + ' &middot; ' + Number(ytdQty).toLocaleString('en-CA') + ' units &middot; ' + brandMoney(ytdAmt) : 'No month saved for ' + year + ' yet'}</p>
+                        </div>
+                        <div class="ml-auto flex flex-wrap gap-2">
+                            <span class="text-xs text-gray-500 self-center">${escA(d.current_label)} so far:</span>
+                            <button onclick="brandDownload(${idx}, '${d.current_period}', 'xlsx')" class="${btn}border-green-600 text-green-700 hover:bg-green-50"><i class="fas fa-file-excel mr-1"></i>Excel</button>
+                            <button onclick="brandDownload(${idx}, '${d.current_period}', 'pdf')" class="${btn}border-red-600 text-red-700 hover:bg-red-50"><i class="fas fa-file-pdf mr-1"></i>PDF</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto"><table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                            <th class="text-left px-4 py-2">Month</th><th class="text-right px-4 py-2">Orders</th><th class="text-right px-4 py-2">Units</th>
+                            <th class="text-right px-4 py-2">Dollars</th><th class="text-left px-4 py-2">Saved</th><th class="text-right px-4 py-2">Download</th>
+                        </tr></thead>
+                        <tbody>${r.months.length ? r.months.map(m => `
+                            <tr class="border-b hover:bg-gray-50">
+                                <td class="px-4 py-2 font-medium">${escA(m.label)}</td>
+                                <td class="px-4 py-2 text-right">${Number(m.orders)}</td>
+                                <td class="px-4 py-2 text-right">${Number(m.qty).toLocaleString('en-CA')}</td>
+                                <td class="px-4 py-2 text-right font-semibold">${brandMoney(m.amount)}</td>
+                                <td class="px-4 py-2 text-xs text-gray-500">${escA(String(m.generated_at || '').slice(0, 10))}${m.source === 'scheduled' ? ' (automatic)' : m.source === 'manual' ? ' (rebuilt)' : ''}</td>
+                                <td class="px-4 py-2 text-right whitespace-nowrap">
+                                    <button onclick="brandDownload(${idx}, '${m.period}', 'xlsx')" class="${btn}border-green-600 text-green-700 hover:bg-green-50"><i class="fas fa-file-excel mr-1"></i>Excel</button>
+                                    <button onclick="brandDownload(${idx}, '${m.period}', 'pdf')" class="${btn}border-red-600 text-red-700 hover:bg-red-50"><i class="fas fa-file-pdf mr-1"></i>PDF</button>
+                                    ${d.can_generate ? `<button onclick="brandRebuild(${idx}, '${m.period}')" title="Rebuild this month from the orders" class="${btn}border-gray-300 text-gray-600 hover:bg-gray-50"><i class="fas fa-rotate mr-1"></i>Rebuild</button>` : ''}
+                                </td>
+                            </tr>`).join('') : `<tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No month has been saved yet. The first one is built on the 1st${d.can_generate ? ', or build ' + escA(R_label(d.previous_period)) + ' now.' : '.'}</td></tr>`}</tbody>
+                    </table></div>
+                    <div class="px-4 py-3 bg-gray-50 border-t flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                        <span>The year to date is the last tab of every file${latest ? ' &mdash; the ' + escA(latest.label) + ' file rolls up January to ' + escA(latest.label.split(' ')[0]) : ''}.</span>
+                        ${d.can_generate && !r.months.some(m => m.period === d.previous_period) ? `<button onclick="brandRebuild(${idx}, '${d.previous_period}', true)" class="ml-auto px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg font-semibold">Build ${escA(R_label(d.previous_period))} now</button>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (e) {
+            box.innerHTML = `<div class="bg-white rounded-xl border p-6 text-sm text-red-500">${escA(e.message || 'Could not load the monthly reports.')}</div>`;
+        }
+    }
+    function R_label(period) {
+        const names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const [y, m] = String(period).split('-').map(Number);
+        return (names[m - 1] || period) + ' ' + y;
+    }
+    async function brandDownload(idx, period, format) {
+        const r = brandReportData && brandReportData.reports[idx];
+        if (!r) return;
+        try {
+            const resp = await adminFetchRaw(`/brand-reports/${encodeURIComponent(r.company_id)}/${encodeURIComponent(r.brand)}/download?period=${encodeURIComponent(period)}&format=${encodeURIComponent(format)}`);
+            if (!resp.ok) { let msg = 'Could not build that file.'; try { msg = (await resp.json()).error || msg; } catch (_) {} throw new Error(msg); }
+            const blob = await resp.blob();
+            const cd = resp.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename="([^"]+)"/);
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = m ? m[1] : `brand-sales-${period}.${format}`;
+            document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+        } catch (e) { alert(e.message || 'Could not build that file.'); }
+    }
+    async function brandRebuild(idx, period, firstTime) {
+        const r = brandReportData && brandReportData.reports[idx];
+        if (!r) return;
+        if (!firstTime && !confirm(`Rebuild ${R_label(period)} for ${r.company_name} from the orders? The saved month is replaced with a fresh count.`)) return;
+        try {
+            const resp = await adminFetch(`/brand-reports/${encodeURIComponent(r.company_id)}/${encodeURIComponent(r.brand)}/generate`, { method: 'POST', body: JSON.stringify({ period }) });
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || 'Could not build that month.');
+            brandReportsLoad();
+        } catch (e) { alert(e.message || 'Could not build that month.'); }
     }
 
     let rebateReportData = null;

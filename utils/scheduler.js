@@ -261,6 +261,49 @@ async function adoptionDigestJob() {
     }
 }
 
+/**
+ * Make the monthly brand sales reports (Assured's 3M report, to start), on the
+ * 1st of each month.
+ *
+ * The 1st at 6 a.m. Toronto time is the earliest it runs; the month just ended
+ * is then complete. It is also the catch-up: if the app was down on the 1st it
+ * runs whenever it is next up, because the work is "is last month stored yet?"
+ * rather than "is it exactly the 1st?". When everything is stored, a tick costs
+ * two small reads and claims nothing. When something is missing, one instance
+ * per hour wins the claim, so a failure is retried hourly, not every tick.
+ */
+const BRAND_REPORT_HOUR = 6;
+
+function brandReportDue(day, hour) {
+    // The 1st before 6 a.m. is still "the month just ending".
+    return !(day === 1 && hour < BRAND_REPORT_HOUR);
+}
+
+async function monthlyBrandReportJob() {
+    const { date, hour } = localNow(DEFAULT_TZ);
+    const day = Number(date.slice(8, 10));
+    if (!brandReportDue(day, hour)) return { skipped: 'not_due' };
+
+    const data = require('./brand-report-data');
+    const { previousPeriod } = require('./brand-sales-report');
+    const prev = previousPeriod();
+    const { pending } = await data.findPending(prev);
+    if (!pending.length) return { skipped: 'complete' };
+
+    const runKey = `brand_reports:${prev}:${date}:${hour}`;
+    if (!await claim('brand_reports', runKey, { period: prev, pending: pending.length })) return { skipped: 'already_claimed' };
+
+    try {
+        const result = await data.runMonthlyBrandReports();
+        await finish('brand_reports', runKey, result);
+        return result;
+    } catch (err) {
+        console.error('Scheduler: monthly brand reports failed, will retry next hour:', err.message);
+        await finish('brand_reports', runKey, { error: err.message });
+        return { failed: true, error: err.message };
+    }
+}
+
 /** Where the emails should point people back to. */
 function publicBase() {
     return (process.env.PUBLIC_BASE_URL || 'https://chcsale.com').replace(/\/+$/, '');
@@ -268,7 +311,8 @@ function publicBase() {
 
 const JOBS = {
     low_stock_digest: lowStockDigestJob,
-    adoption_digest: adoptionDigestJob
+    adoption_digest: adoptionDigestJob,
+    brand_reports: monthlyBrandReportJob
 };
 
 // ============================================================
@@ -340,6 +384,6 @@ function status() {
 
 module.exports = {
     start, stop, status, tick,
-    localNow, claim, lowStockDigestJob, adoptionDigestJob, digestDue,
+    localNow, claim, lowStockDigestJob, adoptionDigestJob, monthlyBrandReportJob, brandReportDue, BRAND_REPORT_HOUR, digestDue,
     TICK_MS, ADOPTION_DIGEST_HOUR, DEFAULT_DIGEST_HOUR, DEFAULT_TZ, DIGEST_CATCHUP_HOURS
 };

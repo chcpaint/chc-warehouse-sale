@@ -176,6 +176,11 @@ router.use('/dashboard', require('./admin-dashboard'));
 // and who ordered it. Read-only; not on the order-desk allow-list.
 router.use('/adoption', require('./admin-adoption'));
 
+// Monthly brand sales reports (Assured's 3M report, to start): built on the 1st
+// of each month, downloadable as Excel or PDF with the year to date. Read-only
+// against orders; see routes/brand-reports-admin.js.
+router.use('/brand-reports', require('./brand-reports-admin'));
+
 // The master table — maintaining item_library rather than only reading it.
 // Super-admin only, enforced inside that router. Mounted before the
 // company-scoped routes so /master is never read as a company id.

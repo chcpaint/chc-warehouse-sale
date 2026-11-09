@@ -114,6 +114,12 @@ const KNOWN_COLUMNS = {
         'movement_id', 'actor_label', 'actor_type', 'created_at'
     ]),
     scheduler_runs: new Set(['id', 'job', 'run_key', 'detail', 'result', 'started_at', 'finished_at']),
+    // Migration 056: monthly brand sales reports.
+    brand_report_subscriptions: new Set(['id', 'company_id', 'brand', 'is_enabled', 'created_at']),
+    monthly_brand_reports: new Set([
+        'id', 'company_id', 'brand', 'period', 'basis', 'source', 'generated_at', 'generated_by',
+        'order_count', 'total_qty', 'total_amount', 'data', 'created_at'
+    ]),
     products: new Set([
         'id', 'company_id', 'brand', 'name', 'sku', 'description', 'category', 'price',
         'previous_price', 'case_qty', 'unit', 'image_url', 'metadata', 'sort_order',
@@ -482,6 +488,7 @@ function createFakeSupabase(seed = {}) {
         kit_product_map: [], kit_consumptions: [], kit_submissions: [], kit_submission_counters: [], order_receipts: [],
         kit_item_alternatives: [], product_crossover_reference: [],
         scheduler_runs: [], inventory_status: [], company_po_sequences: [],
+        brand_report_subscriptions: [], monthly_brand_reports: [],
         // Added by migration 041: multi-branch / multi-company staff assignment.
         admin_users: [], admin_user_branches: [], admin_user_companies: [],
         // Added by migration 043: the shared storefront cart.
