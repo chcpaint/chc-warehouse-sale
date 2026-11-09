@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const csv = require('csv-parser');
 const XLSX = require('xlsx');
+const { applyBrandFilter, brandOptions: lineBrandOptions, lineDefinitions } = require('../utils/product-lines');
 const { parseCSV, parseExcel, normalizeProductRow } = require('../utils/price-sheet');
 const { ROLES: SHEET_ROLES } = require('../utils/sheet-detect');
 const { buildIndex: buildCatalogIndex, classify: classifyCatalogRow } = require('../utils/catalog-review');
@@ -966,7 +967,9 @@ router.get('/companies/:companyId/products', requireCompanyAccess, async (req, r
             .order('name');
 
         if (!includeInactive) query = query.eq('is_active', true);
-        if (brand) query = query.eq('brand', brand);
+        // EHP / OneChoice / Shopline are product lines filed under another brand (PPG):
+        // choosing one shows every item in the line, as it does on the storefront.
+        if (brand) query = applyBrandFilter(query, brand);
         if (category) query = query.eq('category', category);
         if (search) query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
 
@@ -1164,23 +1167,28 @@ router.get('/companies/:companyId/products/filters', requireCompanyAccess, async
     try {
         const companyId = req.params.companyId;
 
-        const { data: brandData } = await supabaseAdmin
-            .from('products')
-            .select('brand')
-            .eq('company_id', companyId)
-            .order('brand');
+        // Read the whole catalogue a page at a time: one select stops at the database's
+        // 1,000-row cap, which silently dropped brands once a catalogue grew. The name
+        // and part number come too, because a product line (EHP, OneChoice, Shopline)
+        // is recognised from them, not only from the brand.
+        const rows = [];
+        for (let from = 0; ; from += 1000) {
+            const { data, error } = await supabaseAdmin
+                .from('products')
+                .select('brand, category, name, sku')
+                .eq('company_id', companyId)
+                .order('id')
+                .range(from, from + 999);
+            if (error) throw error;
+            rows.push(...(data || []));
+            if (!data || data.length < 1000) break;
+        }
 
-        const { data: categoryData } = await supabaseAdmin
-            .from('products')
-            .select('category')
-            .eq('company_id', companyId)
-            .not('category', 'is', null)
-            .order('category');
+        const brands = lineBrandOptions(rows);
+        const categories = [...new Set(rows.map(r => r.category).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
 
-        const brands = [...new Set((brandData || []).map(r => r.brand).filter(Boolean))];
-        const categories = [...new Set((categoryData || []).map(r => r.category).filter(Boolean))];
-
-        res.json({ brands, categories });
+        res.json({ brands, categories, lines: lineDefinitions() });
     } catch (err) {
         console.error('Product filters error:', err);
         res.status(500).json({ error: 'Failed to load filters.' });
@@ -1204,7 +1212,7 @@ router.post('/companies/:companyId/products/bulk-delete', requireCompanyAccess, 
                 .eq('company_id', companyId);
 
             if (filters) {
-                if (filters.brand) query = query.eq('brand', filters.brand);
+                if (filters.brand) query = applyBrandFilter(query, filters.brand);
                 if (filters.category) query = query.eq('category', filters.category);
                 if (filters.search) query = query.or(`name.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`);
             }

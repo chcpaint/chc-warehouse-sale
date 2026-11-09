@@ -714,12 +714,14 @@ function createFakeSupabase(seed = {}) {
 
                 let rows = (db.item_library || []).filter(l => {
                     if (args.p_vendors && !args.p_vendors.includes(l.vendor_code)) return false;
+                    // Product lines: the term anywhere in brand, category, name or part number.
+                    const hay = [l.brand, l.category, l.name, l.sku].map(v => String(v || '')).join(' ').toLowerCase();
+                    if (args.p_lines && args.p_lines.length &&
+                        !args.p_lines.some(t => t && hay.includes(String(t).toLowerCase()))) return false;
                     if (raw === '') return true;
                     if (key && norm(l.sku).includes(key)) return true;
                     if (l.barcode === raw) return true;
-                    return words.length > 0 && words.every(w =>
-                        String(l.name || '').toLowerCase().includes(w) ||
-                        String(l.sku || '').toLowerCase().includes(w));
+                    return words.length > 0 && words.every(w => hay.includes(w));
                 });
 
                 rows = rows.map(l => ({

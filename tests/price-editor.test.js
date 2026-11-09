@@ -535,6 +535,25 @@ test('the list takes the sales screen\'s filters: search (incl. brand), brand, c
     assert.equal((await get('search=toner&brand=EHP')).body.total, 2);
 });
 
+test('product lines (filed under PPG) are offered as brands and filter the list and a bulk change', async () => {
+    asRole('super_admin');
+    const co = uid('co-lines'); seedCompany(co, 'Lines');
+    seedProduct(uid('ln-a'), co, { brand: 'PPG', category: 'Hardener', name: 'EHP Hardener', sku: 'ln-A', price: 100 });
+    seedProduct(uid('ln-b'), co, { brand: 'PPG', category: 'Clear', name: 'OneChoice Clear', sku: 'ln-B', price: 100 });
+    seedProduct(uid('ln-c'), co, { brand: 'PPG', category: 'Primer', name: 'Shop Line Primer', sku: 'ln-C', price: 100 });
+    seedProduct(uid('ln-d'), co, { brand: 'PPG', category: 'Base', name: 'Deltron Base', sku: 'ln-D', price: 100 });
+
+    const f = await request(app).get(`/api/admin/pricing/companies/${co}/filters`);
+    assert.deepEqual(f.body.brands, ['EHP', 'OneChoice', 'PPG', 'Shopline']);
+
+    const list = await request(app).get(`/api/admin/pricing/companies/${co}/products?brand=OneChoice`);
+    assert.deepEqual(list.body.products.map(p => p.sku), ['ln-B']);
+
+    const prev = await bulk(co, { percent: 10, scope: { brand: 'Shopline' } });
+    assert.equal(prev.status, 200);
+    assert.equal(prev.body.matched, 1, 'a line scope covers the same items the list shows');
+});
+
 test('bulk preview changes nothing and says what would happen', async () => {
     asRole('super_admin');
     const { co, ids } = seedCatalogue('prev');

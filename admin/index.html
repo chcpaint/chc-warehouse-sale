@@ -7547,6 +7547,9 @@
             const resp = await adminFetch(`/companies/${companyId}/products/filters`);
             const data = await resp.json();
 
+            // Product lines (EHP, OneChoice, Shopline) sit beside the brands; the server sends
+            // the terms that define each so this screen filters the same way it does.
+            productLineDefs = data.lines || [];
             const brandSel = document.getElementById('filter-brand');
             brandSel.innerHTML = '<option value="">All Brands (' + (data.brands || []).length + ')</option>' +
                 (data.brands || []).map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
@@ -7562,6 +7565,16 @@
         filterDebounce = setTimeout(applyProductFilters, 300);
     }
 
+    let productLineDefs = [];
+
+    // Does this product belong to the chosen brand, or to the chosen product line?
+    function productInBrand(p, brand) {
+        const line = productLineDefs.find(l => l.label.toLowerCase() === String(brand).toLowerCase());
+        if (!line) return p.brand === brand;
+        const hay = [p.brand, p.category, p.name, p.sku].map(v => String(v || '').toLowerCase());
+        return line.terms.some(t => hay.some(h => h.includes(t)));
+    }
+
     function applyProductFilters() {
         const brand = document.getElementById('filter-brand').value;
         const category = document.getElementById('filter-category').value;
@@ -7570,7 +7583,7 @@
         productState.currentFilters = { brand, category, search };
 
         productState.filtered = productState.all.filter(p => {
-            if (brand && p.brand !== brand) return false;
+            if (brand && !productInBrand(p, brand)) return false;
             if (category && p.category !== category) return false;
             if (search && !p.name.toLowerCase().includes(search) && !(p.sku || '').toLowerCase().includes(search)) return false;
             return true;
@@ -9815,10 +9828,18 @@
             try {
                 const res = await adminFetch(`/companies/${libCompany()}/library/vendors`);
                 if (res.ok) {
-                    const { vendors } = await res.json();
+                    const data = await res.json();
+                    const { vendors } = data;
                     const sel = document.getElementById('library-vendor');
+                    const { lines = [] } = data;
                     sel.innerHTML = '<option value="">All suppliers</option>' +
-                        vendors.map(v => `<option value="${esc(v.vendor_code)}">${esc(v.brand || v.vendor_code)} (${v.count})</option>`).join('');
+                        (lines.length
+                            ? '<optgroup label="Product lines">' +
+                              lines.map(l => `<option value="line:${esc(l.label)}">${esc(l.label)} (${l.count})</option>`).join('') +
+                              '</optgroup><optgroup label="Suppliers">'
+                            : '') +
+                        vendors.map(v => `<option value="${esc(v.vendor_code)}">${esc(v.brand || v.vendor_code)} (${v.count})</option>`).join('') +
+                        (lines.length ? '</optgroup>' : '');
                     lib.loaded = true;
                 }
             } catch (_) { /* the filter is a convenience; search still works without it */ }
@@ -9869,7 +9890,9 @@
             offset: String(lib.offset)
         });
         const vendor = document.getElementById('library-vendor').value;
-        if (vendor) params.set('vendors', vendor);
+        // "line:EHP" is a product line, anything else a supplier code.
+        if (vendor.startsWith('line:')) params.set('lines', vendor.slice(5));
+        else if (vendor) params.set('vendors', vendor);
         if (document.getElementById('library-only-new').checked) params.set('only_new', '1');
 
         tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Searching…</td></tr>';

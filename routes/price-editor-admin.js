@@ -56,6 +56,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
 const { priceVerdict } = require('../utils/price-rules');
+const { applyBrandFilter, brandOptions: lineBrandOptions } = require('../utils/product-lines');
 
 const router = express.Router();
 
@@ -153,7 +154,9 @@ function parseScope(raw) {
 }
 
 function applyScope(query, scope) {
-    if (scope.brand) query = query.eq('brand', scope.brand);
+    // A product line (EHP, OneChoice, Shopline) is a filter over several fields, a brand an exact match.
+    // Preview and apply both come through here, so they always cover the same items.
+    if (scope.brand) query = applyBrandFilter(query, scope.brand);
     if (scope.category) query = query.eq('category', scope.category);
     if (scope.search) {
         query = query.or(`name.ilike.%${scope.search}%,sku.ilike.%${scope.search}%,brand.ilike.%${scope.search}%`);
@@ -268,20 +271,20 @@ router.get('/companies/:companyId/filters', requirePricingAccess, async (req, re
         const { companyId } = req.params;
         if (!isValidUUID(companyId)) return res.status(400).json({ error: 'Invalid company id.' });
 
-        const brands = new Set(), categories = new Set();
+        const rows = [];
         for (let from = 0; ; from += 1000) {
             const { data, error } = await supabaseAdmin.from('products')
-                .select('brand, category').eq('company_id', companyId)
-                .order('brand').range(from, from + 999);
+                .select('brand, category, name, sku').eq('company_id', companyId)
+                .order('id').range(from, from + 999);
             if (error) throw error;
-            for (const r of data || []) {
-                if (r.brand) brands.add(r.brand);
-                if (r.category) categories.add(r.category);
-            }
+            rows.push(...(data || []));
             if ((data || []).length < 1000) break;
         }
-        const sort = a => [...a].sort((x, y) => String(x).localeCompare(String(y)));
-        res.json({ brands: sort(brands), categories: sort(categories) });
+        const categories = new Set(rows.map(r => r.category).filter(Boolean));
+        const sort = a => [...a].sort((x, y) => String(x).localeCompare(String(y), 'en', { sensitivity: 'base' }));
+        // Real brands plus the product lines (EHP, OneChoice, Shopline) that have items.
+        const brands = lineBrandOptions(rows);
+        res.json({ brands, categories: sort(categories) });
     } catch (err) {
         console.error('Pricing filters error:', err);
         res.status(500).json({ error: 'Failed to load filters.' });

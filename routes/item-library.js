@@ -37,6 +37,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAccess } = require('../middleware/auth');
 const { stripHtml } = require('../utils/sanitize');
+const { LINES, termsForLabels, rowInLine } = require('../utils/product-lines');
 
 const router = express.Router({ mergeParams: true });
 
@@ -81,6 +82,7 @@ function displayName(name) {
  * GET /library
  *   ?q=            free text: full SKU, partial SKU, barcode, or words
  *   ?vendors=MMM,NOR
+ *   ?lines=EHP,OneChoice   product lines (PPG's EHP / OneChoice / Shopline)
  *   ?only_new=1    hide anything this company already sells
  *   ?limit= &offset=
  *
@@ -98,6 +100,10 @@ router.get('/', async (req, res) => {
             .map(v => v.trim().toUpperCase())
             .filter(v => /^[A-Z0-9]{1,10}$/.test(v));
 
+        // Only the known line names are accepted; the search terms come from the
+        // server's own list, never from the request.
+        const lineTerms = termsForLabels(String(req.query.lines || '').split(',').map(s => s.trim()));
+
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
         const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
         const onlyNew = req.query.only_new === '1' || req.query.only_new === 'true';
@@ -108,7 +114,8 @@ router.get('/', async (req, res) => {
             p_vendors: vendors.length ? vendors : null,
             p_only_new: onlyNew,
             p_limit: limit,
-            p_offset: offset
+            p_offset: offset,
+            p_lines: lineTerms.length ? lineTerms : null
         });
         if (error) throw error;
 
@@ -146,23 +153,37 @@ router.get('/', async (req, res) => {
  */
 router.get('/vendors', async (req, res) => {
     try {
-        const { data, error } = await supabaseAdmin
-            .from('item_library')
-            .select('vendor_code, brand')
-            .not('vendor_code', 'is', null);
-        if (error) throw error;
+        // Page through the library: one select stops at the database's 1,000-row cap.
+        const data = [];
+        for (let from = 0; ; from += 1000) {
+            const { data: page, error } = await supabaseAdmin
+                .from('item_library')
+                .select('vendor_code, brand, category, name, sku')
+                .order('id')
+                .range(from, from + 999);
+            if (error) throw error;
+            data.push(...(page || []));
+            if (!page || page.length < 1000) break;
+        }
 
         const byCode = new Map();
-        for (const r of data || []) {
+        for (const r of data) {
+            if (!r.vendor_code) continue;
             const cur = byCode.get(r.vendor_code) || { vendor_code: r.vendor_code, brand: r.brand, count: 0 };
             cur.count += 1;
             if (!cur.brand && r.brand) cur.brand = r.brand;
             byCode.set(r.vendor_code, cur);
         }
 
+        // Product lines that have at least one part in the library, with their counts.
+        const lines = LINES
+            .map(l => ({ label: l.label, count: data.filter(r => rowInLine(r, l)).length }))
+            .filter(l => l.count > 0);
+
         res.json({
             vendors: [...byCode.values()].sort((a, b) => b.count - a.count),
-            total: (data || []).length
+            lines,
+            total: data.filter(r => r.vendor_code).length
         });
     } catch (err) {
         console.error('Item library vendors error:', err);
