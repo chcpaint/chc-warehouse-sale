@@ -1016,8 +1016,16 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
 router.get('/:slug/orders', requireCompanyAuth, async (req, res) => {
     try {
         const historyCols = 'id, order_number, contact_name, contact_email, subtotal, tax, tax_rate, delivery_fee, total, status, is_partial_shipment, backorder_items, notes, notes_log, location, location_id, created_at, items, invoice_filename, invoice_uploaded_at, followup_invoice_due, followup_invoice_items, followup_invoice_filename, followup_invoice_uploaded_at';
-        const readHistory = (cols) => supabaseAdmin.from('orders').select(cols)
-            .eq('company_id', req.company.id).order('created_at', { ascending: false }).limit(50);
+        // A person whose own account is tied to one shop sees only that shop's
+        // orders, so two shops under one company (North Seven / York Mills) keep
+        // their history apart. Shared-access-code sessions and accounts with no
+        // shop are untouched: they still see the whole company, as before.
+        const ownLocation = req.companyUser && req.companyUser.location_id;
+        const readHistory = (cols) => {
+            let q = supabaseAdmin.from('orders').select(cols).eq('company_id', req.company.id);
+            if (ownLocation) q = q.eq('location_id', ownLocation);
+            return q.order('created_at', { ascending: false }).limit(50);
+        };
         // fuel_surcharge / fee_lines arrive with migration 047; until then history reads without them.
         let { data: orders, error } = await readHistory(historyCols + ', fuel_surcharge, fee_lines');
         if (error && /fuel_surcharge|fee_lines/i.test(error.message || '')) {
@@ -1057,8 +1065,10 @@ router.get('/:slug/reports/orders', requireCompanyAuth, async (req, res) => {
             if (!req.companyUser) {
                 return res.status(403).json({ error: 'Reports are available to people with their own account. Please sign in with your account.', code: 'reports_need_account' });
             }
-            if (req.companyUser.location_id) location_id = req.companyUser.location_id;
         }
+        // A person tied to a shop sees that shop and nothing else, whatever they
+        // put in the query string -- with or without the restricted-reports module.
+        if (req.companyUser && req.companyUser.location_id) location_id = req.companyUser.location_id;
 
         let q = supabaseAdmin
             .from('orders')
@@ -1455,8 +1465,8 @@ router.get('/:slug/reports/rebate', requireCompanyAuth, async (req, res) => {
             if (!req.companyUser) {
                 return res.status(403).json({ error: 'Reports are available to people with their own account. Please sign in with your account.', code: 'reports_need_account' });
             }
-            if (req.companyUser.location_id) location_id = req.companyUser.location_id;
         }
+        if (req.companyUser && req.companyUser.location_id) location_id = req.companyUser.location_id;
         if (hidePricingEnabled(settings)) return res.json({ has_rebate: false, rows: [], totals: { eligible_spend: 0, rebate: 0 } });
 
         const report = await rebateReportFor(supabaseAdmin, {

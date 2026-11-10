@@ -747,3 +747,53 @@ test('screen: devices are shown plainly and money in Canadian dollars', () => {
     assert.match(w.money(1234.5), /1,234\.50/);
     assert.equal(w.money(null), '—', 'a hidden figure is a dash, never $0');
 });
+
+// =========================================================================
+// Two shops under one company stay apart (North Seven / York Mills)
+// =========================================================================
+
+test('a person tied to one shop sees only that shop\'s orders in Order History', async () => {
+    seed();
+    await placeOrders();
+    const hist = async (tok) => (await request(app).get('/api/store/northseven/orders').set('Authorization', `Bearer ${tok}`)).body.orders;
+
+    const pat = await hist(await tokenFor('pat@ns.test'));
+    assert.equal(pat.length, 2);
+    assert.ok(pat.every(o => o.location_id === LOC), 'Pat sees North Seven only');
+
+    const sam = await hist(await tokenFor('sam@ns.test'));
+    assert.equal(sam.length, 1);
+    assert.ok(sam.every(o => o.location_id === LOC2), 'Sam sees York Mills only');
+});
+
+test('an owner with no shop, and the shared access code, still see the whole company\'s history', async () => {
+    seed({ activity: false });
+    await placeOrders();
+    const owner = await tokenFor('owner@ns.test');
+    const o = await request(app).get('/api/store/northseven/orders').set('Authorization', `Bearer ${owner}`);
+    assert.equal(o.body.orders.length, 3);
+
+    // A company that still signs in with the shared access code (Assured's way):
+    // there is no person and no shop on the session, so nothing is narrowed.
+    const shared = await request(app).post('/api/auth/company-login').send({ slug: 'northseven', access_code: 'shared' });
+    assert.equal(shared.status, 200, JSON.stringify(shared.body));
+    const s = await request(app).get('/api/store/northseven/orders').set('Authorization', `Bearer ${shared.body.token}`);
+    assert.equal(s.body.orders.length, 3, 'shared-code sessions are unchanged');
+});
+
+test('Reports are locked to the person\'s own shop whatever they ask for, with or without the restricted-reports module', async () => {
+    seed(); // the module is NOT on here
+    await placeOrders();
+    const pat = await tokenFor('pat@ns.test');
+    const ask = (tok, q) => request(app).get(`/api/store/northseven/reports/orders${q}`).set('Authorization', `Bearer ${tok}`);
+
+    const own = await ask(pat, '');
+    assert.equal(own.body.orders.length, 2);
+    const snoop = await ask(pat, `?location_id=${LOC2}`);
+    assert.equal(snoop.body.orders.length, 2, 'asking for York Mills still returns only North Seven');
+    assert.ok(snoop.body.orders.every(o => o.location_id === LOC));
+
+    const owner = await tokenFor('owner@ns.test');
+    assert.equal((await ask(owner, '')).body.orders.length, 3);
+    assert.equal((await ask(owner, `?location_id=${LOC2}`)).body.orders.length, 1, 'an owner can still pick a shop');
+});
