@@ -147,7 +147,7 @@
                 <div class="check"><h3>Browser protections <span class="pill ok">In place</span></h3>
                     <p>Strict security headers and a content security policy limit where code can load from. Search text is cleaned before it reaches the database.</p></div>
                 <div class="check"><h3>Audit trail <span class="pill ok">In place</span></h3>
-                    <p>Changes CHC staff make to customers, prices, users and settings are recorded with who, what and when. Stock movements record who made them.</p></div>
+                    <p>Changes distributor staff make to customers, prices, users and settings are recorded with who, what and when. Stock movements record who made them.</p></div>
                 <div class="check"><h3>Checked on every change <span class="pill ok">In place</span></h3>
                     <p>Each code change runs the full automated test suite and a scan for known vulnerabilities in the software it depends on.</p></div>
                 <div class="check"><h3>Where your data lives <span class="pill ok">In place</span></h3>
@@ -159,7 +159,7 @@
             <div class="checks">
                 <div class="check"><h3>Restore drills <span class="pill wip">In progress</span></h3>
                     <p>A scheduled test that restores a backup into a separate copy, to prove recovery works, and a decision on point-in-time recovery.</p></div>
-                <div class="check"><h3>Two-step sign-in for CHC staff <span class="pill wip">In progress</span></h3>
+                <div class="check"><h3>Two-step sign-in for distributor staff <span class="pill wip">In progress</span></h3>
                     <p>A second step at sign-in for the people who can see every customer.</p></div>
                 <div class="check"><h3>Outside uptime monitoring <span class="pill wip">In progress</span></h3>
                     <p>An outside service that checks the console every minute and alerts us if it stops answering.</p></div>
@@ -198,7 +198,7 @@
     // ---- How to ----
     areasEl.innerHTML = data.areas.map(area => `
         <div class="area" id="area-${esc(area.id)}">
-            <h3>${esc(area.title)}${area.audience === 'chc' ? ' <span class="tag">CHC staff</span>' : ''}</h3>
+            <h3>${esc(area.title)}${area.audience === 'chc' ? ' <span class="tag">Distributor staff</span>' : ''}</h3>
             ${area.items.map((it, i) => `
                 <details data-key="${esc(area.id)}-${i}">
                     <summary>${esc(it.q)}</summary>

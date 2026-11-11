@@ -1,5 +1,5 @@
 /**
- * public/admin-look.js -- the refinishAI new look for the CHC admin console.
+ * public/admin-look.js -- the refinishAI new look for the refinishAI Admin Console.
  *
  * On by default. Each person can go back to the classic look for their own
  * browser with the link at the foot of the menu (remembered in this browser
@@ -35,7 +35,7 @@
             card.querySelector('.nla-login-logo').hidden = !on;
         }
 
-        // Menu: the refinishAI logo top left, "CHC console" under it.
+        // Menu: the refinishAI logo top left, "Admin Console" under it.
         const top = document.querySelector('#admin-sidebar > div');
         if (top && !top.querySelector('.nla-brand')) {
             const b = document.createElement('div');
@@ -43,7 +43,7 @@
             b.innerHTML = '<img src="' + LOCKUP + '" alt="refinishAI" width="186" height="52">';
             const s = document.createElement('span');
             s.className = 'nla-sub';
-            s.textContent = 'CHC console';
+            s.textContent = 'Admin Console';
             top.insertBefore(s, top.firstChild);
             top.insertBefore(b, top.firstChild);
         }

@@ -28,9 +28,9 @@ const AI_FEATURES = [
     {
         key: 'price_screenshot',
         name: 'Price screenshot reading',
-        plain: 'price-screenshot reading, in CHC\'s admin console, used by CHC staff to load supplier price updates',
-        where: 'CHC admin console, catalogue import',
-        who: 'CHC staff only. Never shops or the kiosk.',
+        plain: 'price-screenshot reading, in the refinishAI Admin Console, used by distributor staff to load supplier price updates',
+        where: 'refinishAI Admin Console, catalogue import',
+        who: 'Distributor staff only (CHC today). Never shops or the kiosk.',
         provider: 'Anthropic (Claude)',
         key_setting: 'ANTHROPIC_API_KEY',
         sends: 'A screenshot of a supplier\'s price update.',
