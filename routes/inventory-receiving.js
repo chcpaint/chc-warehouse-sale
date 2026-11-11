@@ -227,6 +227,9 @@ router.post('/orders/:orderId/lines', async (req, res) => {
         if (!order) return res.status(404).json({ error: 'Order not found.' });
         if (order.status === 'cancelled') return res.status(400).json({ error: 'This order was cancelled -- nothing to receive.' });
         if (order.status === 'closed') return res.status(400).json({ error: 'This order is already closed.' });
+        if (!RECEIVABLE_STATUSES.includes(order.status)) {
+            return res.status(400).json({ error: 'This order has not been processed yet \u2014 it cannot be received until CHC has it in progress.' });
+        }
         if (await closureFor(orderId)) {
             return res.status(400).json({ error: 'This delivery was closed short. Nothing more can be received against it.' });
         }

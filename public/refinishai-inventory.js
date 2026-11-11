@@ -2304,7 +2304,7 @@
             m.job_ref || '',
             m.reason || ''
         ]);
-        const csv = [header, ...rows].map(r => r.map(csvCell).join(',')).join('\n');
+        const csv = [header, ...rows].map(r => r.map(RAI.csvCell).join(',')).join('\n');
         const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -2316,8 +2316,9 @@
 
     RAI.csvCell = function (v) {
         const s = String(v === null || v === undefined ? '' : v);
-        // Neutralise spreadsheet formula injection on export.
-        const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+        // Neutralise spreadsheet formula injection on export. Real numbers (a
+        // -3 quantity change) are data, not formulas, so they are left alone.
+        const safe = (typeof v !== 'number' && /^[=+\-@\t\r]/.test(s)) ? `'${s}` : s;
         return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
     }
 

@@ -259,7 +259,7 @@ app.use((err, req, res, next) => {
         }
         return res.status(400).json({ error: err.message });
     }
-    if (err.message && err.message.includes('Invalid file type')) {
+    if (err.message && /^Invalid (file|image|invoice) type/.test(err.message)) {
         return res.status(400).json({ error: err.message });
     }
     next(err);

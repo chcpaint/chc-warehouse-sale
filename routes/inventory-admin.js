@@ -27,6 +27,7 @@ const {
     MOVEMENT_TYPE_NAMES,
     normalizeMasterRow,
     canonicalBarcode,
+    cleanBarcode,
     detectSymbology,
     barcodeVariants,
     movementDelta,
@@ -530,8 +531,11 @@ router.post('/barcodes', async (req, res) => {
             .from('products').select('id, sku, name').eq('id', productId).eq('company_id', companyId).maybeSingle();
         if (!product) return res.status(404).json({ error: 'Product not found for this company.' });
 
+        // Length is judged on what was typed: canonicalBarcode zero-pads short
+        // numeric codes to 13 digits, which would let "12" through.
+        const typedBarcode = cleanBarcode(req.body?.barcode);
         const barcode = canonicalBarcode(req.body?.barcode);
-        if (!barcode || barcode.length < 4) {
+        if (!barcode || typedBarcode.length < 4) {
             return res.status(400).json({ error: 'Enter a barcode of at least 4 characters.' });
         }
         if (barcode.length > 128) return res.status(400).json({ error: 'That barcode is too long.' });
@@ -767,8 +771,19 @@ router.post('/adjust', async (req, res) => {
             .from('inventory_levels').select('on_hand')
             .eq('location_id', location.id).eq('product_id', productId).maybeSingle();
 
-        const delta = movementDelta(movementType, req.body?.quantity, Number(level?.on_hand ?? 0));
+        const currentOnHand = Number(level?.on_hand ?? 0);
+        const delta = movementDelta(movementType, req.body?.quantity, currentOnHand);
         if (!delta.ok) return res.status(400).json({ error: delta.error });
+
+        // Same rule the shop screens follow: a company that has not allowed
+        // negative stock cannot be taken below zero from the CHC side either.
+        const adjustCompany = await loadCompany(companyId);
+        if (!inventorySettings(adjustCompany?.settings).allow_negative && currentOnHand + delta.delta < 0) {
+            return res.status(409).json({
+                error: `Only ${currentOnHand} on hand \u2014 that would take ${product.name} negative.`,
+                on_hand: currentOnHand
+            });
+        }
 
         const { data, error } = await supabaseAdmin
             .from('stock_movements')

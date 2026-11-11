@@ -613,6 +613,14 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             orderer = who.user;
             contact_name = orderer.name;
             contact_email = orderer.email;
+            // A person locked to one shop orders for that shop only. The shared
+            // access code carries no location, so it is untouched by this.
+            if (req.companyUser.location_id) {
+                if (location_id && location_id !== req.companyUser.location_id) {
+                    return res.status(403).json({ error: 'You can only place orders for your own location.' });
+                }
+                location_id = req.companyUser.location_id;
+            }
         }
 
         // Validate required fields
