@@ -79,3 +79,18 @@ test('the store page loads the new look and opens it only through the module che
         for (const part of sel.split(',')) assert.match(part.trim(), /^body\.nl\b/, `unscoped rule: ${part.trim()}`);
     }
 });
+
+test('the admin console loads its new look, and every rule is scoped so classic is untouched', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../admin/index.html'), 'utf8');
+    assert.match(html, /<link rel="stylesheet" href="\/admin-look.css">/);
+    assert.match(html, /<script src="\/admin-look.js"><\/script>/);
+    const css = fs.readFileSync(path.join(__dirname, '../public/admin-look.css'), 'utf8');
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').split('}').map(r => r.trim()).filter(r => r && !r.startsWith('@import'));
+    for (const r of rules) {
+        const sel = r.split('{')[0].trim();
+        if (!sel || sel.startsWith('@media')) continue;
+        for (const part of sel.split(',')) assert.match(part.trim(), /^body\.nla\b/, `unscoped rule: ${part.trim()}`);
+    }
+    const js = fs.readFileSync(path.join(__dirname, '../public/admin-look.js'), 'utf8');
+    assert.ok(!/fetch\(|XMLHttpRequest/.test(js), 'the look makes no requests');
+});
