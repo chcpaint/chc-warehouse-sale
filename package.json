@@ -23,7 +23,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
-    "nodemailer": "^6.9.8",
+    "nodemailer": "^10.4.0",
     "pdfkit": "^0.15.2",
     "stripe": "^17.7.0",
     "xlsx": "^0.18.5"
