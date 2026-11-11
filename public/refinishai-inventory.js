@@ -245,6 +245,9 @@
         "                        <button onclick=\"RAI.loadInvStock()\" class=\"px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700\">",
         "                            <i class=\"fas fa-rotate mr-1\"></i> Refresh",
         "                        </button>",
+        "                        <button onclick=\"RAI.printLabels('shelf')\" id=\"inv-labels-btn\" type=\"button\" class=\"px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white\">",
+        "                            <i class=\"fas fa-print mr-1\"></i> Print shelf labels",
+        "                        </button>",
         "                    </div>",
         "                    <div class=\"bg-white rounded-xl shadow-sm overflow-hidden\">",
         "                        <div class=\"overflow-x-auto\">",
@@ -812,6 +815,8 @@
         const loc = ctx.getLocation();
         if (locEl && loc) locEl.textContent = loc.name;
 
+        RAI.mountDeliveries();
+        RAI.applyFeatureSwitches();
         RAI.setScanMode('consume');
         RAI.showInvView('scan');
         RAI.installWedgeListener();
@@ -820,6 +825,355 @@
 
         RAI.ready = true;
         return true;
+    };
+
+
+    // ============================================================
+    // DELIVERIES -- receive what is on the truck against a CHC order
+    //
+    // Count what arrives line by line. Anything damaged is recorded but never
+    // added to stock. If the rest is not coming today, close the delivery short
+    // and exactly what was outstanding is kept on file. Server side:
+    // routes/inventory-receiving.js.
+    // ============================================================
+    RAI.DELIVERIES_MARKUP = [
+        '<div id="inv-view-receive" class="hidden">',
+        '  <div class="bg-white rounded-xl shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3">',
+        '    <p class="text-sm text-gray-600 flex-1 min-w-[14rem]">Count what arrives against your CHC order. Damaged units are recorded but never added to stock, and anything missing stays on file when you close the delivery.</p>',
+        '    <button type="button" onclick="RAI.loadDeliveries()" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700"><i class="fas fa-rotate mr-1"></i> Refresh</button>',
+        '  </div>',
+        '  <div id="inv-dlv-list"></div>',
+        '  <div id="inv-dlv-detail" class="hidden"></div>',
+        '  <div id="inv-dlv-exceptions" class="mt-4"></div>',
+        '</div>'
+    ].join('\n');
+
+    RAI.mountDeliveries = function () {
+        if (document.getElementById('inv-view-receive')) return;
+        const anchor = document.getElementById('inv-view-replen');
+        if (!anchor) return;
+        const holder = document.createElement('div');
+        holder.innerHTML = RAI.DELIVERIES_MARKUP;
+        anchor.parentNode.insertBefore(holder.firstElementChild, anchor);
+
+        // The tab button sits between Reorder and Kits.
+        const kitsBtn = document.querySelector('.inv-view-btn[data-invview="kits"]');
+        if (kitsBtn && !document.querySelector('.inv-view-btn[data-invview="receive"]')) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'px-3 py-1.5 rounded-lg hover:bg-gray-100 inv-view-btn';
+            b.dataset.invview = 'receive';
+            b.setAttribute('onclick', "RAI.showInvView('receive')");
+            b.innerHTML = '<i class="fas fa-truck-ramp-box mr-1"></i> Deliveries';
+            kitsBtn.parentNode.insertBefore(b, kitsBtn);
+        }
+    };
+
+    /** Parts of Inventory the account has switched off are hidden; absent = on. */
+    RAI.featureOn = function (name) {
+        const f = inv.settings && inv.settings.features;
+        return !(f && f[name] === false);
+    };
+
+    RAI.applyFeatureSwitches = function () {
+        const hide = (view, feature) => {
+            if (RAI.featureOn(feature)) return;
+            document.querySelectorAll(`.inv-view-btn[data-invview="${view}"]`).forEach(b => b.classList.add('hidden'));
+            RAI.VIEWS = RAI.VIEWS.filter(v => v !== view);
+            const el = document.getElementById(`inv-view-${view}`);
+            if (el) el.remove();
+        };
+        hide('receive', 'receiving');
+        hide('count', 'counts');
+        hide('transfer', 'transfers');
+        hide('analytics', 'analytics');
+        const lbl = document.getElementById('inv-labels-btn');
+        if (lbl && !RAI.featureOn('labels')) lbl.classList.add('hidden');
+    };
+
+    RAI.loadDeliveries = async function () {
+        const list = document.getElementById('inv-dlv-list');
+        if (!list) return;
+        list.innerHTML = '<div class="bg-white rounded-xl shadow-sm p-8 text-center text-gray-400">Loading…</div>';
+        document.getElementById('inv-dlv-detail').classList.add('hidden');
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/receiving/orders?location_id=${RAI.invLocationId()}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            inv.deliveries = data.orders || [];
+            if (!inv.deliveries.length) {
+                list.innerHTML = `<div class="bg-white rounded-xl shadow-sm p-10 text-center">
+                    <i class="fas fa-truck text-4xl text-gray-300 mb-3"></i>
+                    <div class="text-gray-600">No deliveries are expected right now.</div>
+                    <div class="text-sm text-gray-400 mt-1">Orders appear here once CHC is processing them.</div></div>`;
+            } else {
+                list.innerHTML = '<div class="bg-white rounded-xl shadow-sm divide-y">' + inv.deliveries.map(o => {
+                    const done = o.fully_received || o.closed_short;
+                    const chip = o.closed_short
+                        ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Closed short</span>'
+                        : o.fully_received
+                            ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">All received</span>'
+                            : `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">${o.received_total} of ${o.ordered_total}</span>`;
+                    return `<div class="px-5 py-3 flex flex-wrap items-center gap-3">
+                        <div class="flex-1 min-w-[10rem]">
+                            <div class="font-semibold text-gray-800">${RAI.esc(o.order_number || 'Order')}</div>
+                            <div class="text-xs text-gray-500">${o.po_number ? 'PO ' + RAI.esc(o.po_number) + ' · ' : ''}${new Date(o.created_at).toLocaleDateString()} · ${o.line_count} line(s)</div>
+                        </div>
+                        ${chip}
+                        <button type="button" onclick="RAI.openDelivery('${RAI.esc(o.id)}')"
+                            class="px-4 py-2 rounded-lg text-sm font-semibold ${done ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-blue-600 text-white hover:bg-blue-700'}">
+                            ${done ? 'View' : 'Receive'}</button></div>`;
+                }).join('') + '</div>';
+            }
+        } catch (err) {
+            list.innerHTML = `<div class="bg-white rounded-xl shadow-sm p-8 text-center text-red-500">${RAI.esc(err.message || 'Failed to load deliveries.')}</div>`;
+        }
+        RAI.loadDeliveryExceptions();
+    };
+
+    RAI.openDelivery = async function (orderId) {
+        const box = document.getElementById('inv-dlv-detail');
+        box.classList.remove('hidden');
+        box.innerHTML = '<div class="bg-white rounded-xl shadow-sm p-8 text-center text-gray-400 mt-4">Loading…</div>';
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/receiving/orders/${encodeURIComponent(orderId)}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            inv.delivery = data;
+            inv.deliveryExtras = [];
+            RAI.renderDelivery();
+        } catch (err) {
+            box.innerHTML = `<div class="bg-white rounded-xl shadow-sm p-6 text-center text-red-500 mt-4">${RAI.esc(err.message || 'Failed to open that delivery.')}</div>`;
+        }
+    };
+
+    RAI.renderDelivery = function () {
+        const box = document.getElementById('inv-dlv-detail');
+        const d = inv.delivery;
+        if (!d) return;
+        const open = d.receivable;
+        const rows = d.lines.map((l, i) => `<tr>
+            <td class="px-4 py-3"><div class="font-medium text-gray-800">${RAI.esc(l.name || '')}</div><div class="text-xs text-gray-500">${RAI.esc(l.sku || '')}</div></td>
+            <td class="px-4 py-3 text-right">${RAI.formatQty(l.quantity_ordered)}</td>
+            <td class="px-4 py-3 text-right">${RAI.formatQty(l.quantity_received)}${l.damaged ? `<div class="text-xs text-red-600">${RAI.formatQty(l.damaged)} damaged</div>` : ''}</td>
+            <td class="px-4 py-3 text-right font-semibold ${l.remaining ? 'text-amber-700' : 'text-green-700'}">${RAI.formatQty(l.remaining)}</td>
+            ${open ? `<td class="px-4 py-3 text-right"><input type="number" min="0" step="1" id="inv-dlv-q-${i}" placeholder="0" class="w-20 border rounded px-2 py-1 text-right"></td>
+            <td class="px-4 py-3 text-right"><input type="number" min="0" step="1" id="inv-dlv-d-${i}" placeholder="0" class="w-20 border border-red-200 rounded px-2 py-1 text-right"></td>` : ''}
+        </tr>`).join('');
+        const extras = (inv.deliveryExtras || []).map((x, i) => `<tr class="bg-amber-50">
+            <td class="px-4 py-3"><div class="font-medium text-gray-800">${RAI.esc(x.name || '')}</div><div class="text-xs text-amber-700">Not on this order · ${RAI.esc(x.sku || '')}</div></td>
+            <td class="px-4 py-3 text-right" colspan="3"></td>
+            <td class="px-4 py-3 text-right"><input type="number" min="0" step="1" id="inv-dlv-xq-${i}" value="${x.qty}" class="w-20 border rounded px-2 py-1 text-right"></td>
+            <td class="px-4 py-3 text-right"><input type="number" min="0" step="1" id="inv-dlv-xd-${i}" placeholder="0" class="w-20 border border-red-200 rounded px-2 py-1 text-right"></td></tr>`).join('');
+        const closure = d.closure ? `<div class="mb-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm">
+            Closed short by ${RAI.esc(d.closure.closed_by || '')} on ${new Date(d.closure.created_at).toLocaleDateString()}.
+            ${d.closure.note ? '“' + RAI.esc(d.closure.note) + '”' : ''}</div>` : '';
+        box.innerHTML = `<div class="bg-white rounded-xl shadow-sm mt-4 overflow-hidden">
+            <div class="px-5 py-3 border-b flex flex-wrap items-center justify-between gap-2">
+                <div class="font-semibold text-gray-800">${RAI.esc(d.order.order_number || 'Order')} ${d.order.po_number ? '· PO ' + RAI.esc(d.order.po_number) : ''}</div>
+                <button type="button" onclick="document.getElementById('inv-dlv-detail').classList.add('hidden')" class="text-sm text-gray-400 hover:text-gray-600">Close</button>
+            </div>
+            <div class="p-5">
+                ${closure}
+                ${open ? `<div class="relative mb-3"><i class="fas fa-barcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                    <input id="inv-dlv-scan" type="text" autocomplete="off" placeholder="Scan an item to add one to this delivery, then press Enter"
+                        class="w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-3 focus:border-blue-500 focus:outline-none"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();RAI.deliveryScan(this.value);this.value='';}"></div>` : ''}
+                <div class="overflow-x-auto"><table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide"><tr>
+                        <th class="text-left px-4 py-3">Item</th><th class="text-right px-4 py-3">Ordered</th><th class="text-right px-4 py-3">Received</th><th class="text-right px-4 py-3">Still owed</th>
+                        ${open ? '<th class="text-right px-4 py-3">Arrived OK</th><th class="text-right px-4 py-3 text-red-600">Damaged</th>' : ''}
+                    </tr></thead><tbody class="divide-y">${rows}${extras}</tbody></table></div>
+                <div id="inv-dlv-msg" class="mt-3"></div>
+                ${open ? `<div class="mt-4 flex flex-wrap items-center gap-3">
+                    <input id="inv-dlv-note" type="text" maxlength="300" placeholder="Note (optional) — e.g. box crushed, driver left early" class="flex-1 min-w-[14rem] border rounded-lg px-3 py-2 text-sm">
+                    <button type="button" onclick="RAI.postDelivery()" class="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-semibold"><i class="fas fa-check mr-1"></i> Post what arrived</button>
+                    <button type="button" onclick="RAI.closeDelivery()" class="bg-white border border-amber-400 text-amber-800 hover:bg-amber-50 px-4 py-2 rounded-lg text-sm font-semibold">Rest isn’t coming — close delivery</button>
+                </div>` : ''}
+            </div></div>`;
+        const sc = document.getElementById('inv-dlv-scan');
+        if (sc && !RAI.isTouchDevice()) sc.focus();
+    };
+
+    RAI.deliveryMsg = function (html, tone) {
+        const el = document.getElementById('inv-dlv-msg');
+        if (!el) return;
+        const c = tone === 'bad' ? 'bg-red-50 border-red-200 text-red-700' : tone === 'good' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-blue-50 border-blue-200 text-blue-800';
+        el.innerHTML = `<div class="border rounded-lg p-3 text-sm ${c}">${html}</div>`;
+    };
+
+    /** A scan adds one to the matching line, or lists the item as "not on this order". */
+    RAI.deliveryScan = async function (code) {
+        code = String(code || '').trim();
+        const d = inv.delivery;
+        if (!code || !d || !d.receivable) return;
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${RAI.invLocationId()}`);
+            const data = await resp.json();
+            if (resp.status === 300) { RAI.deliveryMsg('That barcode matches more than one item. Type the part number instead.', 'bad'); RAI.beep(true); return; }
+            if (!resp.ok) { RAI.deliveryMsg(RAI.esc(data.error || 'No item matches that code.'), 'bad'); RAI.beep(true); return; }
+            const p = data.product;
+            const idx = d.lines.findIndex(l => l.product_id === p.id);
+            if (idx >= 0) {
+                const el = document.getElementById(`inv-dlv-q-${idx}`);
+                if (el) el.value = (Number(el.value) || 0) + 1;
+                RAI.deliveryMsg(`+1 ${RAI.esc(p.name)}`, 'good');
+            } else {
+                const keep = RAI.snapshotDeliveryInputs();
+                const ex = inv.deliveryExtras.find(x => x.product_id === p.id);
+                if (ex) { ex.qty += 1; } else { inv.deliveryExtras.push({ product_id: p.id, name: p.name, sku: p.sku, qty: 1 }); }
+                RAI.renderDelivery();
+                RAI.restoreDeliveryInputs(keep);
+                RAI.deliveryMsg(`${RAI.esc(p.name)} is not on this order. It will be recorded as an extra item.`, 'info');
+            }
+            RAI.beep(false);
+        } catch (err) {
+            RAI.deliveryMsg('Could not reach the server. Check the connection and scan again.', 'bad');
+        }
+    };
+
+    /** Typed quantities, so a redraw for an extra item does not wipe what was entered. */
+    RAI.snapshotDeliveryInputs = function () {
+        const d = inv.delivery; if (!d) return null;
+        const keep = { q: [], d: [], xd: [] };
+        d.lines.forEach((l, i) => {
+            keep.q[i] = (document.getElementById(`inv-dlv-q-${i}`) || {}).value || '';
+            keep.d[i] = (document.getElementById(`inv-dlv-d-${i}`) || {}).value || '';
+        });
+        (inv.deliveryExtras || []).forEach((x, i) => {
+            const q = document.getElementById(`inv-dlv-xq-${i}`); if (q) x.qty = Number(q.value) || 0;
+            keep.xd[i] = (document.getElementById(`inv-dlv-xd-${i}`) || {}).value || '';
+        });
+        keep.note = (document.getElementById('inv-dlv-note') || {}).value || '';
+        return keep;
+    };
+
+    RAI.restoreDeliveryInputs = function (keep) {
+        if (!keep || !inv.delivery) return;
+        inv.delivery.lines.forEach((l, i) => {
+            const q = document.getElementById(`inv-dlv-q-${i}`); if (q) q.value = keep.q[i];
+            const dm = document.getElementById(`inv-dlv-d-${i}`); if (dm) dm.value = keep.d[i];
+        });
+        (inv.deliveryExtras || []).forEach((x, i) => {
+            const dm = document.getElementById(`inv-dlv-xd-${i}`); if (dm && keep.xd[i]) dm.value = keep.xd[i];
+        });
+        const n = document.getElementById('inv-dlv-note'); if (n) n.value = keep.note || '';
+    };
+
+    RAI.postDelivery = async function () {
+        const d = inv.delivery;
+        if (!d) return;
+        const actor = RAI.invActor();
+        if (!actor) { RAI.deliveryMsg('Enter your name at the top first, so the receipt shows who received it.', 'bad'); return; }
+        const note = (document.getElementById('inv-dlv-note') || {}).value || '';
+        const receipts = [];
+        d.lines.forEach((l, i) => {
+            const ok = Number((document.getElementById(`inv-dlv-q-${i}`) || {}).value) || 0;
+            const bad = Number((document.getElementById(`inv-dlv-d-${i}`) || {}).value) || 0;
+            if (ok > 0) receipts.push({ product_id: l.product_id, quantity: ok });
+            if (bad > 0) receipts.push({ product_id: l.product_id, quantity: bad, damaged: true, note });
+        });
+        (inv.deliveryExtras || []).forEach((x, i) => {
+            const ok = Number((document.getElementById(`inv-dlv-xq-${i}`) || {}).value) || 0;
+            const bad = Number((document.getElementById(`inv-dlv-xd-${i}`) || {}).value) || 0;
+            if (ok > 0) receipts.push({ product_id: x.product_id, quantity: ok });
+            if (bad > 0) receipts.push({ product_id: x.product_id, quantity: bad, damaged: true, note });
+        });
+        if (!receipts.length) { RAI.deliveryMsg('Enter how many arrived (or arrived damaged) on at least one line.', 'bad'); return; }
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/receiving/orders/${encodeURIComponent(d.order.id)}/lines`, {
+                method: 'POST',
+                body: JSON.stringify({ location_id: RAI.invLocationId(), actor_label: actor, receipts })
+            });
+            const data = await resp.json();
+            if (!resp.ok && !data.results) throw new Error(data.error);
+            const failed = (data.results || []).filter(r => !r.ok);
+            const over = (data.results || []).filter(r => r.over_received);
+            await RAI.openDelivery(d.order.id);
+            RAI.loadInvSummary();
+            RAI.loadDeliveryExceptions();
+            let html = `${data.applied} line(s) recorded.`;
+            if (over.length) html += ` ${over.length} line(s) are now over what was ordered — worth a second look.`;
+            if (failed.length) html += ` ${failed.length} line(s) failed: ${failed.map(f => RAI.esc(f.error || 'error')).join('; ')}.`;
+            RAI.deliveryMsg(html, failed.length ? 'bad' : 'good');
+        } catch (err) {
+            RAI.deliveryMsg(RAI.esc(err.message || 'Could not record that delivery.'), 'bad');
+        }
+    };
+
+    RAI.closeDelivery = async function () {
+        const d = inv.delivery;
+        if (!d) return;
+        const actor = RAI.invActor();
+        if (!actor) { RAI.deliveryMsg('Enter your name at the top first.', 'bad'); return; }
+        const outstanding = d.lines.filter(l => l.remaining > 0).length;
+        if (!confirm(outstanding
+            ? `Close this delivery with ${outstanding} line(s) still outstanding? What is owed will be kept on file and nothing more can be received against it.`
+            : 'Close this delivery? Everything arrived.')) return;
+        const note = (document.getElementById('inv-dlv-note') || {}).value || '';
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/receiving/orders/${encodeURIComponent(d.order.id)}/close`, {
+                method: 'POST',
+                body: JSON.stringify({ location_id: RAI.invLocationId(), actor_label: actor, note })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            await RAI.openDelivery(d.order.id);
+            RAI.loadDeliveries();
+            RAI.deliveryMsg(RAI.esc(data.message), 'good');
+        } catch (err) {
+            RAI.deliveryMsg(RAI.esc(err.message || 'Could not close that delivery.'), 'bad');
+        }
+    };
+
+    RAI.loadDeliveryExceptions = async function () {
+        const el = document.getElementById('inv-dlv-exceptions');
+        if (!el) return;
+        try {
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/receiving/exceptions?location_id=${RAI.invLocationId()}&days=90`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            if (!data.exceptions.length) { el.innerHTML = ''; return; }
+            const label = { damaged: ['Damaged', 'bg-red-100 text-red-700'], short: ['Short', 'bg-amber-100 text-amber-800'], not_ordered: ['Not ordered', 'bg-blue-100 text-blue-700'] };
+            el.innerHTML = `<div class="bg-white rounded-xl shadow-sm overflow-hidden">
+                <div class="px-5 py-3 border-b font-semibold text-gray-700">Delivery problems — last 90 days</div>
+                <div class="divide-y max-h-96 overflow-y-auto">${data.exceptions.slice(0, 100).map(x => {
+                    const [t, c] = label[x.type] || [x.type, 'bg-gray-100 text-gray-700'];
+                    return `<div class="px-5 py-3 flex flex-wrap items-center gap-3 text-sm">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${c}">${t}</span>
+                        <span class="flex-1 min-w-[10rem]"><span class="font-medium text-gray-800">${RAI.esc(x.name || x.sku || '')}</span> <span class="text-gray-400">× ${RAI.formatQty(x.quantity)}</span>
+                        ${x.note ? `<div class="text-xs text-gray-500">${RAI.esc(x.note)}</div>` : ''}</span>
+                        <span class="text-xs text-gray-400">${RAI.esc(x.by || '')} · ${new Date(x.at).toLocaleDateString()}</span></div>`;
+                }).join('')}</div></div>`;
+        } catch (err) { el.innerHTML = ''; }
+    };
+
+    // ------------------------------------------------------------
+    // PRINT SHELF LABELS (the shop prints its own barcode cards)
+    // ------------------------------------------------------------
+    RAI.printLabels = async function (format) {
+        const q = new URLSearchParams({ location_id: RAI.invLocationId(), format: format || 'shelf', limit: '500' });
+        const status = (document.getElementById('inv-stock-status') || {}).value;
+        if (status) q.set('status', status);
+        // The sheet is a page, but the session token travels in a header rather
+        // than a cookie, so fetch it here and open the result.
+        const win = window.open('', '_blank');
+        try {
+            // An item with no barcode would print a provisional code that nothing
+            // recognises. Give every stocked item without one a code first, so
+            // whatever is stuck to the shelf scans.
+            await RAI.api(`/store/${RAI.ctx.slug}/inventory/labels/generate`, {
+                method: 'POST',
+                body: JSON.stringify({ all_uncoded: true, location_id: RAI.invLocationId(), actor_label: RAI.invActor() })
+            });
+            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/labels/sheet?${q.toString()}`);
+            const html = await resp.text();
+            if (!win) { alert('Allow pop-ups for this site, then press Print labels again.'); return; }
+            win.document.open(); win.document.write(html); win.document.close();
+        } catch (err) {
+            if (win) win.close();
+            alert('Could not build the label sheet. Check the connection and try again.');
+        }
     };
 
     /** The console switched to the Inventory tab. */
@@ -851,7 +1205,7 @@
     // ------------------------------------------------------------
     // VIEW SWITCHING
     // ------------------------------------------------------------
-    RAI.VIEWS = ['scan', 'stock', 'replen', 'kits', 'count', 'transfer', 'analytics', 'history'];
+    RAI.VIEWS = ['scan', 'stock', 'replen', 'receive', 'kits', 'count', 'transfer', 'analytics', 'history'];
 
     RAI.showInvView = function (view) {
         inv.view = view;
@@ -873,6 +1227,7 @@
         if (inv.camera.on && view !== inv.camera.target) RAI.stopCamera();
         if (view === 'stock') RAI.loadInvStock();
         if (view === 'replen') RAI.loadReplenishment();
+        if (view === 'receive') RAI.loadDeliveries();
         if (view === 'history') RAI.loadInvHistory();
         if (view === 'kits') RAI.loadKits();
         if (view === 'count') RAI.loadCount();

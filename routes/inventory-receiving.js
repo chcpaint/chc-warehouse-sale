@@ -35,17 +35,33 @@ const RECEIVABLE_STATUSES = ['processing', 'out_on_delivery'];
 async function receivedSoFar(orderId) {
     const { data } = await supabaseAdmin
         .from('order_receipts')
-        .select('product_id, quantity_received, unexpected_item')
+        .select('product_id, quantity_received, unexpected_item, exception_type')
         .eq('order_id', orderId);
 
     const byProduct = new Map();
+    const damaged = new Map();
     const unexpected = [];
     for (const r of data || []) {
+        // Damaged units arrived but never reached the shelf: they are not
+        // "received", and they are still owed on the order.
+        if (r.exception_type === 'damaged') {
+            if (r.product_id) damaged.set(r.product_id, (damaged.get(r.product_id) || 0) + Number(r.quantity_received));
+            continue;
+        }
         if (r.unexpected_item) { unexpected.push(r); continue; }
         if (!r.product_id) continue;
         byProduct.set(r.product_id, (byProduct.get(r.product_id) || 0) + Number(r.quantity_received));
     }
-    return { byProduct, unexpected };
+    return { byProduct, unexpected, damaged };
+}
+
+/** The closing record for an order, if its delivery was closed short. */
+async function closureFor(orderId) {
+    const { data } = await supabaseAdmin
+        .from('order_receiving_closures')
+        .select('id, short_lines, note, closed_by, created_at')
+        .eq('order_id', orderId).maybeSingle();
+    return data || null;
 }
 
 function orderSummary(order, byProduct) {
@@ -100,20 +116,30 @@ router.get('/orders', async (req, res) => {
 
         const { data: receiptRows } = await supabaseAdmin
             .from('order_receipts')
-            .select('order_id, product_id, quantity_received, unexpected_item')
+            .select('order_id, product_id, quantity_received, unexpected_item, exception_type')
             .in('order_id', rows.map(o => o.id));
+
+        const { data: closureRows } = await supabaseAdmin
+            .from('order_receiving_closures')
+            .select('order_id')
+            .in('order_id', rows.map(o => o.id));
+        const closedIds = new Set((closureRows || []).map(c => c.order_id));
 
         const byOrder = new Map();
         for (const r of receiptRows || []) {
-            if (r.unexpected_item || !r.product_id) continue;
+            if (r.unexpected_item || !r.product_id || r.exception_type === 'damaged') continue;
             if (!byOrder.has(r.order_id)) byOrder.set(r.order_id, new Map());
             const m = byOrder.get(r.order_id);
             m.set(r.product_id, (m.get(r.product_id) || 0) + Number(r.quantity_received));
         }
 
-        const summaries = rows.map(o => orderSummary(o, byOrder.get(o.id) || new Map()));
-        // Whatever still needs attention first; a fully-received order is history, not a task.
-        summaries.sort((a, b) => (a.fully_received === b.fully_received ? 0 : a.fully_received ? 1 : -1));
+        const summaries = rows.map(o => ({
+            ...orderSummary(o, byOrder.get(o.id) || new Map()),
+            closed_short: closedIds.has(o.id)
+        }));
+        // Whatever still needs attention first; a fully-received or closed order is history, not a task.
+        const done = (x) => x.fully_received || x.closed_short;
+        summaries.sort((a, b) => (done(a) === done(b) ? 0 : done(a) ? 1 : -1));
 
         res.json({ orders: summaries });
     } catch (err) {
@@ -140,7 +166,8 @@ router.get('/orders/:orderId', async (req, res) => {
             .eq('id', orderId).eq('company_id', companyId).maybeSingle();
         if (!order) return res.status(404).json({ error: 'Order not found.' });
 
-        const { byProduct, unexpected } = await receivedSoFar(orderId);
+        const { byProduct, unexpected, damaged } = await receivedSoFar(orderId);
+        const closure = await closureFor(orderId);
         const items = Array.isArray(order.items) ? order.items : [];
 
         const lines = items.map(line => {
@@ -153,13 +180,15 @@ router.get('/orders/:orderId', async (req, res) => {
                 quantity_ordered: ordered,
                 quantity_received: received,
                 remaining: Math.max(0, ordered - received),
+                damaged: damaged.get(line.product_id) || 0,
                 over_received: received > ordered
             };
         });
 
         res.json({
             order: orderSummary(order, byProduct),
-            receivable: RECEIVABLE_STATUSES.includes(order.status),
+            receivable: RECEIVABLE_STATUSES.includes(order.status) && !closure,
+            closure,
             lines,
             unexpected: unexpected.map(u => ({
                 product_id: u.product_id, quantity_received: Number(u.quantity_received)
@@ -198,6 +227,9 @@ router.post('/orders/:orderId/lines', async (req, res) => {
         if (!order) return res.status(404).json({ error: 'Order not found.' });
         if (order.status === 'cancelled') return res.status(400).json({ error: 'This order was cancelled -- nothing to receive.' });
         if (order.status === 'closed') return res.status(400).json({ error: 'This order is already closed.' });
+        if (await closureFor(orderId)) {
+            return res.status(400).json({ error: 'This delivery was closed short. Nothing more can be received against it.' });
+        }
 
         const location = await req.resolveLocation(companyId, req.body?.location_id);
         if (!location) return res.status(400).json({ error: 'Select a valid location first.' });
@@ -224,6 +256,27 @@ router.post('/orders/:orderId/lines', async (req, res) => {
                 }
 
                 const orderLine = itemsById.get(productId);
+
+                // DAMAGED: arrived unusable. Recorded as evidence against the
+                // order, never added to stock, and still owed.
+                if (line.damaged === true) {
+                    const { data: prod } = await supabaseAdmin
+                        .from('products').select('id, sku, name')
+                        .eq('id', productId).eq('company_id', companyId).maybeSingle();
+                    if (!prod) { results.push({ index: idx, ok: false, error: 'That item is not in this account.' }); continue; }
+                    const note = req.text(line.note, 300);
+                    const { error: dmgErr } = await supabaseAdmin.from('order_receipts').insert({
+                        company_id: companyId, order_id: orderId, location_id: location.id,
+                        product_id: productId, sku: prod.sku || orderLine?.sku || null, name: prod.name || orderLine?.name || null,
+                        quantity_received: quantity, quantity_ordered: orderLine ? Number(orderLine.quantity) || 0 : null,
+                        unexpected_item: !orderLine, exception_type: 'damaged', exception_note: note || null,
+                        scanned_barcode: line.scanned_barcode || null, movement_id: null, actor_label: actor
+                    });
+                    if (dmgErr) { results.push({ index: idx, ok: false, error: 'Failed to record the damaged item.' }); continue; }
+                    results.push({ index: idx, ok: true, product_id: productId, sku: prod.sku, damaged: true, quantity });
+                    continue;
+                }
+
                 const outcome = await req.postOneMovement({
                     companyId, location, actor, settings: req.inventorySettings,
                     line: { product_id: productId, movement_type: 'receive', quantity, scanned_barcode: line.scanned_barcode,
@@ -280,6 +333,114 @@ router.post('/orders/:orderId/lines', async (req, res) => {
     } catch (err) {
         console.error('Order receiving error:', err);
         res.status(500).json({ error: 'Failed to record that batch.' });
+    }
+});
+
+/**
+ * POST /orders/:orderId/close
+ * Body: { location_id, actor_label, note? }
+ *
+ * The driver has gone and the rest is not coming today. Snapshot exactly which
+ * lines were still outstanding (damaged units count as outstanding) so a short
+ * delivery is a record, not an argument. It changes no stock and does not touch
+ * the order's own status -- CHC's order workflow is not this screen's to move.
+ */
+router.post('/orders/:orderId/close', async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const orderId = req.params.orderId;
+        if (!isValidUUID(orderId)) return res.status(400).json({ error: 'Invalid order id.' });
+
+        const { data: order } = await supabaseAdmin
+            .from('orders').select('id, status, items')
+            .eq('id', orderId).eq('company_id', companyId).maybeSingle();
+        if (!order) return res.status(404).json({ error: 'Order not found.' });
+        if (order.status === 'cancelled') return res.status(400).json({ error: 'This order was cancelled -- nothing to close.' });
+
+        const location = await req.resolveLocation(companyId, req.body?.location_id);
+        if (!location) return res.status(400).json({ error: 'Select a valid location first.' });
+        const actor = req.actorLabel();
+        if (!actor) return res.status(400).json({ error: 'Enter your name so this can be attributed.' });
+
+        if (await closureFor(orderId)) return res.status(409).json({ error: 'This delivery was already closed.' });
+
+        const { byProduct } = await receivedSoFar(orderId);
+        const short = [];
+        for (const l of Array.isArray(order.items) ? order.items : []) {
+            const ordered = Number(l.quantity) || 0;
+            const received = byProduct.get(l.product_id) || 0;
+            if (received < ordered) {
+                short.push({ product_id: l.product_id, sku: l.sku || null, name: l.name || null,
+                             ordered, received, outstanding: ordered - received });
+            }
+        }
+
+        const { error } = await supabaseAdmin.from('order_receiving_closures').insert({
+            company_id: companyId, order_id: orderId, location_id: location.id,
+            short_lines: short, note: req.text(req.body?.note, 500) || null, closed_by: actor
+        });
+        if (error) throw error;
+
+        res.status(201).json({
+            message: short.length
+                ? `Delivery closed with ${short.length} line(s) outstanding.`
+                : 'Delivery closed -- everything arrived.',
+            short_lines: short
+        });
+    } catch (err) {
+        console.error('Close delivery error:', err);
+        res.status(500).json({ error: 'Failed to close that delivery.' });
+    }
+});
+
+/**
+ * GET /exceptions?location_id=&days=
+ * Everything that went wrong at the back door in the last N days (default 90):
+ * damaged units, items nobody ordered, over-deliveries and deliveries closed
+ * short -- one flat list, newest first, for the "who owes us a credit" question.
+ */
+router.get('/exceptions', async (req, res) => {
+    try {
+        const companyId = req.company.id;
+        const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 90));
+        const since = new Date(Date.now() - days * 86400000).toISOString();
+        const locationId = req.query.location_id && isValidUUID(req.query.location_id) ? req.query.location_id : null;
+
+        let rq = supabaseAdmin.from('order_receipts')
+            .select('order_id, product_id, sku, name, quantity_received, quantity_ordered, unexpected_item, exception_type, exception_note, actor_label, created_at')
+            .eq('company_id', companyId).gte('created_at', since);
+        if (locationId) rq = rq.eq('location_id', locationId);
+        const { data: receipts } = await rq.order('created_at', { ascending: false }).limit(1000);
+
+        let cq = supabaseAdmin.from('order_receiving_closures')
+            .select('order_id, short_lines, note, closed_by, created_at')
+            .eq('company_id', companyId).gte('created_at', since);
+        if (locationId) cq = cq.eq('location_id', locationId);
+        const { data: closures } = await cq.order('created_at', { ascending: false }).limit(500);
+
+        const out = [];
+        for (const r of receipts || []) {
+            if (r.exception_type === 'damaged') {
+                out.push({ type: 'damaged', order_id: r.order_id, sku: r.sku, name: r.name, quantity: Number(r.quantity_received),
+                           note: r.exception_note, by: r.actor_label, at: r.created_at });
+            } else if (r.unexpected_item) {
+                out.push({ type: 'not_ordered', order_id: r.order_id, sku: r.sku, name: r.name, quantity: Number(r.quantity_received),
+                           note: null, by: r.actor_label, at: r.created_at });
+            }
+        }
+        for (const c of closures || []) {
+            for (const l of c.short_lines || []) {
+                out.push({ type: 'short', order_id: c.order_id, sku: l.sku, name: l.name, quantity: Number(l.outstanding),
+                           note: c.note, by: c.closed_by, at: c.created_at });
+            }
+        }
+        out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+        const counts = out.reduce((m, x) => { m[x.type] = (m[x.type] || 0) + 1; return m; }, {});
+        res.json({ days, counts, exceptions: out });
+    } catch (err) {
+        console.error('Receiving exceptions error:', err);
+        res.status(500).json({ error: 'Failed to load receiving exceptions.' });
     }
 });
 

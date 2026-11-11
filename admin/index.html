@@ -1852,6 +1852,13 @@
                 <p class="text-center text-gray-400 py-4">Loading...</p>
             </div>
 
+            <!-- Parts of Inventory that can be switched off while a shop settles in. -->
+            <div id="inv-features-box" class="hidden mt-4 border rounded-lg px-4 py-3 bg-white">
+                <p class="font-semibold text-gray-800"><i class="fas fa-sliders text-blue-500 mr-2"></i>Inventory parts</p>
+                <p class="text-sm text-gray-500 mb-2">Stock, scanning and reorders are always on. Switch the rest off for a shop that is just starting; nothing is deleted, and switching one back on restores it.</p>
+                <div id="inv-features-list" class="space-y-2"></div>
+            </div>
+
             <div class="mt-4 flex items-center justify-between gap-4 border rounded-lg px-4 py-3 bg-gray-50">
                 <div>
                     <p class="font-semibold text-gray-800"><i class="fas fa-barcode text-blue-500 mr-2"></i>Set up the scan-out kiosk</p>
@@ -4529,8 +4536,53 @@
         document.getElementById('modules-company-name').textContent = companyName;
         showModal('modules-modal');
         await loadModules();
+        await loadInventoryFeatures();
         await loadPoSettings();
         await loadTaxSettings();
+    }
+
+    const INV_FEATURE_LABELS = {
+        receiving: ['Deliveries', 'Receive against a CHC order, with damaged and short handling.'],
+        counts: ['Cycle counts', 'Count the shelf and post the differences.'],
+        transfers: ['Transfers', 'Move stock between this customer\u2019s shops.'],
+        labels: ['Shelf labels', 'The shop prints its own barcode cards.'],
+        analytics: ['Usage reports', 'Consumption and benchmark reports.']
+    };
+    let invFeatureState = null;
+
+    async function loadInventoryFeatures() {
+        const box = document.getElementById('inv-features-box');
+        const list = document.getElementById('inv-features-list');
+        if (!box || !list) return;
+        box.classList.add('hidden');
+        try {
+            const resp = await adminFetch(`/companies/${modulesCompanyId}/inventory/settings`);
+            const data = await resp.json();
+            if (!resp.ok || !data.settings || !data.settings.enabled) return;   // Inventory is off: nothing to tune
+            invFeatureState = data.settings.features || {};
+            list.innerHTML = Object.keys(INV_FEATURE_LABELS).map(k => {
+                const on = invFeatureState[k] !== false;
+                const [label, blurb] = INV_FEATURE_LABELS[k];
+                return `<div class="flex items-center gap-3">
+                    <div class="flex-1"><span class="font-medium text-gray-800">${esc(label)}</span>
+                        <span class="text-sm text-gray-500"> \u2014 ${esc(blurb)}</span></div>
+                    <button onclick="setInventoryFeature('${k}', ${on ? 'false' : 'true'})" class="text-2xl ${on ? 'text-green-600 hover:text-green-800' : 'text-gray-300 hover:text-gray-500'}"
+                        title="${on ? 'On \u2014 click to turn off' : 'Off \u2014 click to turn on'}"><i class="fas fa-${on ? 'toggle-on' : 'toggle-off'}"></i></button></div>`;
+            }).join('');
+            box.classList.remove('hidden');
+        } catch (err) { /* the modules list above already reports load problems */ }
+    }
+
+    async function setInventoryFeature(name, enable) {
+        try {
+            const resp = await adminFetch(`/companies/${modulesCompanyId}/inventory/settings`, {
+                method: 'PUT', body: JSON.stringify({ features: { [name]: enable } })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to change that.'); return; }
+            adminToast('Updated \u2014 ' + (INV_FEATURE_LABELS[name] || [name])[0] + ' is now ' + (enable ? 'ON' : 'OFF'));
+            await loadInventoryFeatures();
+        } catch (err) { alert('Failed to change that.'); }
     }
 
     async function loadModules() {

@@ -111,7 +111,11 @@ const KNOWN_COLUMNS = {
     order_receipts: new Set([
         'id', 'company_id', 'order_id', 'location_id', 'product_id', 'sku', 'name',
         'quantity_received', 'quantity_ordered', 'unexpected_item', 'scanned_barcode',
-        'movement_id', 'actor_label', 'actor_type', 'created_at'
+        'movement_id', 'actor_label', 'actor_type', 'created_at',
+        'exception_type', 'exception_note'
+    ]),
+    order_receiving_closures: new Set([
+        'id', 'company_id', 'order_id', 'location_id', 'short_lines', 'note', 'closed_by', 'created_at'
     ]),
     scheduler_runs: new Set(['id', 'job', 'run_key', 'detail', 'result', 'started_at', 'finished_at']),
     // Migration 056: monthly brand sales reports.
@@ -485,7 +489,7 @@ function createFakeSupabase(seed = {}) {
         inventory_drivers: [], kiosk_devices: [], kiosk_badges: [], kiosk_order_access: [],
         inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
         repair_kits: [], kit_items: [], company_kit_access: [],
-        kit_product_map: [], kit_consumptions: [], kit_submissions: [], kit_submission_counters: [], order_receipts: [],
+        kit_product_map: [], kit_consumptions: [], kit_submissions: [], kit_submission_counters: [], order_receipts: [], order_receiving_closures: [],
         kit_item_alternatives: [], product_crossover_reference: [],
         scheduler_runs: [], inventory_status: [], company_po_sequences: [],
         brand_report_subscriptions: [], monthly_brand_reports: [],

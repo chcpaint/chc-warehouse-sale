@@ -31,7 +31,8 @@ const {
     barcodeVariants,
     movementDelta,
     inventorySettings,
-    DEFAULT_INVENTORY_SETTINGS
+    DEFAULT_INVENTORY_SETTINGS,
+    INVENTORY_FEATURES
 } = require('../utils/inventory');
 
 const router = express.Router({ mergeParams: true });
@@ -116,7 +117,7 @@ router.get('/settings', async (req, res) => {
 
 /**
  * PUT /api/admin/companies/:companyId/inventory/settings
- * Body: { enabled, auto_draft, require_approval, allow_negative, scan_sound, alert_emails[] }
+ * Body: { enabled, auto_draft, require_approval, allow_negative, scan_sound, features{}, alert_emails[] }
  *
  * Writes only the `inventory` key of companies.settings — every other setting
  * on the company is read back and preserved.
@@ -136,6 +137,14 @@ router.put('/settings', async (req, res) => {
             require_approval: bool('require_approval'),
             allow_negative:   bool('allow_negative'),
             scan_sound:       bool('scan_sound'),
+            // Parts of Inventory that can be switched off. Only the names we know
+            // are read, and only booleans are kept, so a stray key can't land in
+            // the settings blob.
+            features:         INVENTORY_FEATURES.reduce((acc, f) => {
+                acc[f] = body.features && typeof body.features[f] === 'boolean'
+                    ? body.features[f] : current.features[f];
+                return acc;
+            }, {}),
             alert_emails:     body.alert_emails === undefined
                 ? current.alert_emails
                 : validEmails(Array.isArray(body.alert_emails) ? body.alert_emails : String(body.alert_emails).split(/[\s,;]+/)).slice(0, 25)

@@ -103,8 +103,32 @@ function actorLabel(req) {
 // the same auth and feature gate. Each is self-contained: removing a line below
 // removes that capability and nothing else.
 // ============================================================
+/**
+ * Refuse a part of Inventory the company has switched off (settings.inventory.
+ * features.<name> === false). Parts are on unless explicitly off, so every
+ * company already using them is unaffected. Nothing is deleted when a part is
+ * off -- switching it back on restores it exactly as it was.
+ */
+function requireFeature(name, label) {
+    return (req, res, next) => {
+        if (req.inventorySettings?.features?.[name] === false) {
+            return res.status(403).json({ error: `${label} is not switched on for this account.`, feature: name });
+        }
+        next();
+    };
+}
+
+// Shelf barcode labels: the shop prints its own (the same cards CHC's console
+// prints). The company comes from the session, never from the URL.
+router.use('/labels', requireFeature('labels', 'Barcode labels'), (req, res, next) => {
+    req.labelsCompanyId = req.company.id;
+    next();
+}, require('./inventory-labels'));
+
+router.use('/counts', requireFeature('counts', 'Cycle counts'));
+router.use('/transfers', requireFeature('transfers', 'Transfers'));
 router.use('/', require('./inventory-counts'));          // /counts, /transfers
-router.use('/analytics', require('./inventory-analytics'));
+router.use('/analytics', requireFeature('analytics', 'Usage reports'), require('./inventory-analytics'));
 
 /**
  * Repair kits reuse this file's location resolution, level lookup, text
@@ -132,7 +156,7 @@ router.use('/kits', (req, res, next) => {
  * stock_movements row like any other — just one that also remembers which
  * order it came off.
  */
-router.use('/receiving', (req, res, next) => {
+router.use('/receiving', requireFeature('receiving', 'Receiving against orders'), (req, res, next) => {
     req.resolveLocation = resolveLocation;
     req.postOneMovement = postOneMovement;
     req.text = text;

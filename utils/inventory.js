@@ -429,8 +429,23 @@ const DEFAULT_INVENTORY_SETTINGS = {
     require_approval: true,    // a manager must approve before it becomes a CHC order
     alert_emails: [],          // extra recipients for low-stock alerts
     allow_negative: false,     // block consuming more than is on hand
-    scan_sound: true
+    scan_sound: true,
+    // Parts of Inventory a shop can have switched off while it settles in. They
+    // default ON because every company that already runs Inventory has been using
+    // all of them; turning one off hides it in the shop and refuses its routes.
+    // Nothing is deleted either way. (Stock, scanning and reorders are the core
+    // and have no switch.)
+    features: {
+        receiving: true,       // receive against a CHC order, with exceptions
+        counts: true,          // cycle counts
+        transfers: true,       // shop-to-shop transfers
+        labels: true,          // printable shelf barcode labels
+        analytics: true        // usage and consumption reports
+    }
 };
+
+/** The inventory parts that can be switched off, in the order the admin lists them. */
+const INVENTORY_FEATURES = ['receiving', 'counts', 'transfers', 'labels', 'analytics'];
 
 /**
  * Read the inventory block out of companies.settings with defaults applied.
@@ -441,7 +456,12 @@ function inventorySettings(companySettings) {
     return {
         ...DEFAULT_INVENTORY_SETTINGS,
         ...raw,
-        alert_emails: Array.isArray(raw.alert_emails) ? raw.alert_emails : []
+        alert_emails: Array.isArray(raw.alert_emails) ? raw.alert_emails : [],
+        // Only an explicit false switches a part off; anything else keeps it on.
+        features: INVENTORY_FEATURES.reduce((acc, f) => {
+            acc[f] = !(raw.features && raw.features[f] === false);
+            return acc;
+        }, {})
     };
 }
 
@@ -450,6 +470,7 @@ module.exports = {
     MOVEMENT_TYPE_NAMES,
     STORE_MOVEMENT_TYPES,
     DEFAULT_INVENTORY_SETTINGS,
+    INVENTORY_FEATURES,
     cleanBarcode,
     canonicalBarcode,
     barcodeVariants,

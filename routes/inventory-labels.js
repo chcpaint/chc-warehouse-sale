@@ -22,7 +22,17 @@ const { toSvg } = require('../utils/barcode-128');
 const { detectSymbology } = require('../utils/inventory');
 
 const router = express.Router({ mergeParams: true });
-router.use(requireCompanyAccess);
+
+/**
+ * The same cards serve two doors: CHC's admin console (company id in the URL,
+ * guarded by requireCompanyAccess) and the shop's own Inventory tab (company id
+ * from the signed-in session, set by routes/inventory-store.js, which has
+ * already authenticated the session and checked the module is on). Only server
+ * code can set req.labelsCompanyId, so it can never be supplied by a client.
+ */
+function companyIdOf(req) { return req.labelsCompanyId || req.params.companyId; }
+
+router.use((req, res, next) => (req.labelsCompanyId ? next() : requireCompanyAccess(req, res, next)));
 
 /** Prefix that marks a code as one we minted rather than a manufacturer's. */
 const INTERNAL_PREFIX = 'RAI';
@@ -89,7 +99,7 @@ async function logAction(adminId, action, entityType, entityId, details, ip) {
  */
 router.get('/candidates', async (req, res) => {
     try {
-        const companyId = req.params.companyId;
+        const companyId = companyIdOf(req);
         const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit) || 500));
 
         const { data: products, error } = await supabaseAdmin
@@ -135,7 +145,7 @@ router.get('/candidates', async (req, res) => {
  */
 router.post('/generate', async (req, res) => {
     try {
-        const companyId = req.params.companyId;
+        const companyId = companyIdOf(req);
         const dryRun = !!req.body?.dry_run;
 
         let products = [];
@@ -159,6 +169,15 @@ router.post('/generate', async (req, res) => {
                 for (const c of codes || []) coded.add(c.product_id);
             }
             products = all.filter(p => !coded.has(p.id));
+
+            // A shop labels what it actually stocks, not its whole price list.
+            if (req.body.location_id && isValidUUID(req.body.location_id)) {
+                const { data: lv } = await supabaseAdmin
+                    .from('inventory_levels').select('product_id')
+                    .eq('company_id', companyId).eq('location_id', req.body.location_id);
+                const stocked = new Set((lv || []).map(r => r.product_id));
+                products = products.filter(p => stocked.has(p.id));
+            }
         } else {
             return res.status(400).json({ error: 'Supply product_ids, or set all_uncoded.' });
         }
@@ -190,8 +209,11 @@ router.post('/generate', async (req, res) => {
         }
 
         if (!dryRun && created.length) {
-            await logAction(req.admin.id, 'internal_barcodes_generated', 'company', companyId,
-                { count: created.length }, req.ip);
+            // admin_id is a CHC staff id; a shop-driven run has none, so it is
+            // recorded against the company with the shop's own name instead.
+            await logAction(req.admin ? req.admin.id : null, 'internal_barcodes_generated', 'company', companyId,
+                { count: created.length, by: req.admin ? 'admin' : 'shop', actor: req.admin ? undefined : String(req.body?.actor_label || '').slice(0, 80) || undefined },
+                req.ip);
         }
 
         res.json({
@@ -253,7 +275,7 @@ function clamp(n, lo, hi) { return Math.min(hi, Math.max(lo, Number.isFinite(n) 
  */
 router.get('/sheet', async (req, res) => {
     try {
-        const companyId = req.params.companyId;
+        const companyId = companyIdOf(req);
         const format = req.query.format === 'reorder' ? 'reorder' : 'shelf';
         const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
 

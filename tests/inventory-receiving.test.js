@@ -450,3 +450,192 @@ test('the fake knows every column migration 032 added for order_receipts', () =>
         assert.ok(KNOWN_COLUMNS.order_receipts.has(col), `order_receipts.${col} missing from KNOWN_COLUMNS`);
     }
 });
+
+// ==================================================================
+// EXCEPTIONS: damaged, closed short, wrong item (migration 059)
+// ==================================================================
+
+const post = (order, receipts) => request(app()).post(`${R}/orders/${order.id}/lines`).send({
+    location_id: LOC, actor_label: 'Sam', receipts
+});
+
+test('a damaged unit is recorded against the order but never added to stock', async () => {
+    reset();
+    const order = await seedOrder();
+    const res = await post(order, [{ product_id: CLEAR, quantity: 1, damaged: true, note: 'Can dented in transit' }]);
+    assert.equal(res.status, 201);
+    assert.equal(res.body.results[0].damaged, true);
+
+    const lvl = fake.db.inventory_levels.find(l => l.product_id === CLEAR);
+    assert.equal(Number(lvl.on_hand), 5, 'stock must not move for a damaged unit');
+    assert.equal(fake.db.stock_movements.length, 0, 'no ledger row for a damaged unit');
+
+    const rows = fake.db.order_receipts;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].exception_type, 'damaged');
+    assert.equal(rows[0].exception_note, 'Can dented in transit');
+    assert.equal(rows[0].movement_id, null);
+});
+
+test('damaged units still count as owed on the order', async () => {
+    reset();
+    const order = await seedOrder();
+    await post(order, [{ product_id: CLEAR, quantity: 3 }]);                   // 3 good
+    await post(order, [{ product_id: CLEAR, quantity: 1, damaged: true }]);    // 1 damaged
+    const res = await request(app()).get(`${R}/orders/${order.id}`);
+    const line = res.body.lines.find(l => l.product_id === CLEAR);
+    assert.equal(line.quantity_received, 3);
+    assert.equal(line.damaged, 1);
+    assert.equal(line.remaining, 1, 'the damaged unit is still owed');
+});
+
+test('a damaged line for an item that is not in this account is refused', async () => {
+    reset();
+    const order = await seedOrder();
+    authCompany = { id: CO, name: 'Assured Collision', slug: 'assured' };
+    const res = await post(order, [{ product_id: '99999999-9999-4999-8999-999999999999', quantity: 1, damaged: true }]);
+    assert.equal(res.status, 400);
+    assert.equal(fake.db.order_receipts.length, 0);
+});
+
+test('closing a delivery short records exactly what was outstanding', async () => {
+    reset();
+    const order = await seedOrder();
+    await post(order, [{ product_id: CLEAR, quantity: 4 }, { product_id: TAPE, quantity: 6 }]);
+    const res = await request(app()).post(`${R}/orders/${order.id}/close`).send({
+        location_id: LOC, actor_label: 'Sam', note: 'Driver left; tape on backorder'
+    });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.short_lines.length, 1);
+    assert.equal(res.body.short_lines[0].product_id, TAPE);
+    assert.equal(res.body.short_lines[0].outstanding, 4);
+
+    // stock untouched by the close itself
+    assert.equal(Number(fake.db.inventory_levels.find(l => l.product_id === TAPE).on_hand), 26);
+});
+
+test('a closed delivery cannot be closed twice or received against again', async () => {
+    reset();
+    const order = await seedOrder();
+    await request(app()).post(`${R}/orders/${order.id}/close`).send({ location_id: LOC, actor_label: 'Sam' });
+    const again = await request(app()).post(`${R}/orders/${order.id}/close`).send({ location_id: LOC, actor_label: 'Sam' });
+    assert.equal(again.status, 409);
+    const rcv = await post(order, [{ product_id: CLEAR, quantity: 1 }]);
+    assert.equal(rcv.status, 400);
+    const detail = await request(app()).get(`${R}/orders/${order.id}`);
+    assert.equal(detail.body.receivable, false);
+    assert.ok(detail.body.closure);
+});
+
+test('closing needs a name and a valid location', async () => {
+    reset();
+    const order = await seedOrder();
+    const noName = await request(app()).post(`${R}/orders/${order.id}/close`).send({ location_id: LOC });
+    assert.equal(noName.status, 400);
+    const noLoc = await request(app()).post(`${R}/orders/${order.id}/close`).send({ actor_label: 'Sam' });
+    assert.equal(noLoc.status, 400);
+});
+
+test('a company cannot close another company\'s delivery', async () => {
+    reset();
+    const order = await seedOrder();
+    authCompany = { id: OTHER_CO, name: 'Other Shop', slug: 'other' };
+    const res = await request(app()).post(`${R}/orders/${order.id}/close`).send({ location_id: LOC, actor_label: 'Eve' });
+    assert.equal(res.status, 404);
+});
+
+test('the exceptions report lists damaged, not-ordered and short items', async () => {
+    reset();
+    const order = await seedOrder();
+    await post(order, [
+        { product_id: CLEAR, quantity: 1, damaged: true, note: 'Leaking' },
+        { product_id: FILTER, quantity: 2 }                                   // not on the order
+    ]);
+    await request(app()).post(`${R}/orders/${order.id}/close`).send({ location_id: LOC, actor_label: 'Sam', note: 'Rest to follow' });
+    const res = await request(app()).get(`${R}/exceptions`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.counts.damaged, 1);
+    assert.equal(res.body.counts.not_ordered, 1);
+    assert.equal(res.body.counts.short, 2);       // both order lines outstanding (damaged one still owed)
+});
+
+test('the exceptions report only shows this company', async () => {
+    reset();
+    const order = await seedOrder();
+    await post(order, [{ product_id: CLEAR, quantity: 1, damaged: true }]);
+    authCompany = { id: OTHER_CO, name: 'Other Shop', slug: 'other' };
+    const res = await request(app()).get(`${R}/exceptions`);
+    assert.equal(res.body.exceptions.length, 0);
+});
+
+// ==================================================================
+// FEATURE SWITCHES (settings.inventory.features)
+// ==================================================================
+
+test('a part switched off is refused, and the rest of Inventory still works', async () => {
+    reset({ settings: { features: { receiving: false, counts: false, transfers: false, analytics: false } } });
+    assert.equal((await request(app()).get(`${R}/orders`)).status, 403);
+    assert.equal((await request(app()).get('/api/store/assured/inventory/counts')).status, 403);
+    assert.equal((await request(app()).get('/api/store/assured/inventory/transfers')).status, 403);
+    assert.equal((await request(app()).get('/api/store/assured/inventory/analytics/summary')).status, 403);
+    // core still answers
+    const levels = await request(app()).get(`/api/store/assured/inventory/levels?location_id=${LOC}`);
+    assert.equal(levels.status, 200);
+});
+
+test('with no features block at all, every part stays on (existing companies are unchanged)', async () => {
+    reset();
+    assert.equal((await request(app()).get(`${R}/orders`)).status, 200);
+    assert.notEqual((await request(app()).get('/api/store/assured/inventory/counts?location_id=' + LOC)).status, 403);
+});
+
+// ==================================================================
+// SHELF LABELS from the shop's own Inventory tab
+// ==================================================================
+
+const L = '/api/store/assured/inventory/labels';
+
+test('a shop can print shelf labels for its own location', async () => {
+    reset();
+    const res = await request(app()).get(`${L}/sheet?location_id=${LOC}`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers['content-type'], /text\/html/);
+    assert.match(res.text, /PRF611N/);
+    assert.match(res.text, /Assured Collision/);
+    assert.match(res.text, /<svg/);
+});
+
+test('a shop\'s label sheet never contains another company\'s items', async () => {
+    reset({ extra: {} });
+    fake.db.products.push({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', company_id: OTHER_CO, sku: 'OTHERONLY-9', name: 'Other shop item', category: 'Paint', price: 5, is_active: true });
+    const res = await request(app()).get(`${L}/sheet`);
+    assert.equal(res.status, 200);
+    assert.doesNotMatch(res.text, /OTHERONLY-9/);
+});
+
+test('labels are refused when that part is switched off', async () => {
+    reset({ settings: { features: { labels: false } } });
+    const res = await request(app()).get(`${L}/sheet?location_id=${LOC}`);
+    assert.equal(res.status, 403);
+});
+
+test('a shop session cannot pose as another company on the label routes', async () => {
+    reset();
+    const res = await request(app()).get(`${L}/sheet?companyId=${OTHER_CO}`);
+    assert.doesNotMatch(res.text, /Other Shop/);
+});
+
+test('a shop mints barcodes only for what it stocks, and the audit row does not need an admin', async () => {
+    reset();
+    // CLEAR and TAPE are stocked at LOC; FILTER is in the price list only.
+    const res = await request(app()).post(`${L}/generate`).send({ all_uncoded: true, location_id: LOC, actor_label: 'Sam' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.created, 2);
+    const skus = res.body.codes.map(c => c.sku).sort();
+    assert.deepEqual(skus, ['MMM06334', 'PRF611N']);
+    assert.ok(fake.db.audit_log.some(a => a.action === 'internal_barcodes_generated' && a.admin_id === null));
+
+    // Re-running creates nothing new.
+    const again = await request(app()).post(`${L}/generate`).send({ all_uncoded: true, location_id: LOC });
+    assert.equal(again.body.created, 0);
+});
