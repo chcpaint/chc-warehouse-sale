@@ -1223,7 +1223,7 @@
                         <div class="ml-auto flex gap-2">
                             <button onclick="downloadAdminReportCSV('orders')" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Orders CSV</button>
                             <button onclick="downloadAdminReportCSV('items')" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Item CSV</button>
-                            <button onclick="downloadAdminReportPDF(false)" class="px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm"><i class="fas fa-file-pdf mr-1"></i>Summary PDF</button>
+                            <button onclick="downloadAdminReportPDF(false)" class="px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm"><i class="fas fa-file-pdf mr-1"></i>Purchase report PDF</button>
                             <button onclick="downloadAdminReportPDF(true)" class="px-3 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-sm"><i class="fas fa-print mr-1"></i>Print</button>
                         </div>
                     </div>
@@ -3412,27 +3412,17 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
         a.download = `CHC-report-${name}-${arSlug()}.csv`; a.click(); URL.revokeObjectURL(a.href);
     }
+    // The Purchase report PDF (shared with the shop console): summary, by
+    // location, by order, by item, and each shop's items. See /purchase-report.js.
     function downloadAdminReportPDF(printIt) {
-        if (!window.jspdf || !window.jspdf.jsPDF) { alert('PDF generator is still loading \u2014 try again in a moment.'); return; }
-        const { jsPDF } = window.jspdf; const doc = new jsPDF();
-        const cSel = document.getElementById('rep-company'); const cName = cSel.options[cSel.selectedIndex] ? cSel.options[cSel.selectedIndex].text : 'All Companies';
+        if (!window.PurchaseReport) { alert('The PDF maker is still loading. Try again in a moment.'); return; }
+        const cSel = document.getElementById('rep-company'); const cName = cSel.value && cSel.options[cSel.selectedIndex] ? cSel.options[cSel.selectedIndex].text : 'All companies';
         const sSel = document.getElementById('rep-shop'); const sName = sSel.options[sSel.selectedIndex] ? sSel.options[sSel.selectedIndex].text : 'All shops';
-        const orders = arState.filteredOrders;
-        const totalSpend = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
-        const units = arState.items.reduce((s, i) => s + i.qty, 0);
-        doc.setFontSize(18); doc.setTextColor(30, 64, 175); doc.text('Purchase Summary', 14, 18);
-        doc.setFontSize(10); doc.setTextColor(90, 90, 90);
-        doc.text('CHC Paint & Auto Body Supplies', 14, 25);
-        doc.text('Generated: ' + new Date().toLocaleDateString(), 150, 18);
-        doc.text('Company: ' + cName + '     Shop: ' + sName, 14, 33);
-        doc.text('Period: ' + arState.periodLabel, 14, 39);
-        doc.setTextColor(20, 20, 20); doc.setFontSize(11);
-        doc.text(`Orders: ${orders.length}    Total spend: $${totalSpend.toFixed(2)}    Units: ${units}    Unique items: ${arState.items.length}`, 14, 49);
-        doc.autoTable({ startY: 56, head: [['SKU', 'Item', 'Qty', 'Orders', 'Spend']],
-            body: arState.items.slice().sort((a, b) => b.spend - a.spend).map(i => [i.sku || '', i.name, String(i.qty), String(i.orders), '$' + i.spend.toFixed(2)]),
-            styles: { fontSize: 8, cellPadding: 1.5 }, headStyles: { fillColor: [30, 64, 175] },
-            columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } } });
-        if (printIt) { doc.output('dataurlnewwindow'); } else { doc.save(`CHC-summary-${arSlug()}.pdf`); }
+        const report = PurchaseReport.buildPurchaseReport(arState.orders, { itemTerm: document.getElementById('rep-item').value });
+        PurchaseReport.downloadPurchasePdf(report, {
+            title: 'Purchase report', company: cName, shop: sName, period: arState.periodLabel,
+            fileBase: ['Purchase-report', cName, sName, arState.periodLabel].filter(Boolean).join('-').replace(/[^a-z0-9]+/gi, '-')
+        }, printIt ? 'print' : 'save');
     }
 
     function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
@@ -10422,6 +10412,7 @@
     </script>
     <script src="/admin-look.js"></script>
     <script src="/ppg-split.js"></script>
+    <script src="/purchase-report.js"></script>
     <script src="/support-footer.js"></script>
     <script src="/help-content.js"></script>
     <script src="/help-bot.js"></script>
