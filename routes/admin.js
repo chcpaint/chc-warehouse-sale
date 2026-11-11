@@ -8,6 +8,7 @@ const { ROLES: SHEET_ROLES } = require('../utils/sheet-detect');
 const { buildIndex: buildCatalogIndex, classify: classifyCatalogRow } = require('../utils/catalog-review');
 const { Readable } = require('stream');
 const { supabaseAdmin } = require('../utils/supabase');
+const { libraryTable } = require('../utils/library-scope');
 const { detectSymbology } = require('../utils/inventory');   // lower-case values the product_barcodes check constraint allows
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requirePasswordCurrent, requireOrderAccess } = require('../middleware/auth');
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
@@ -15,7 +16,7 @@ const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = 
 const { searchTerm } = require('../utils/search-term');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed, sendOrderStatusUpdate, sendOrderNoteAdded } = require('../utils/email');
-const { orderScopeIds, applyOrderScope, orderInScope, staffLocationIds, isHeadOffice } = require('../utils/order-scope');
+const { orderScopeIds, applyOrderScope, orderInScope, staffLocationIds, isHeadOffice, staffDistributorId } = require('../utils/order-scope');
 const { redactSecrets } = require('../utils/audit');
 const { ALL_STATUSES, statusOptionsFor, labelFor, isSimplified } = require('../utils/order-status');
 const { hidePricingEnabled } = require('../utils/pricing-visibility');
@@ -155,6 +156,8 @@ router.use('/companies/:companyId/notes', require('./contact-notes-admin'));
 router.use('/companies/:companyId/tax', require('./tax-admin'));
 // PPG paint lines vs sundries: the report per company, and CHC's item corrections.
 router.use('/', require('./report-groups-admin'));
+// Uptime monitor results and alert list (super admin); see migrations/064.
+router.use('/uptime', require('./uptime-admin'));
 router.use('/distributor-tax', require('./distributor-tax-admin'));
 router.use('/billing', require('./billing-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));
@@ -317,6 +320,14 @@ router.post('/companies', requireSuperAdmin, async (req, res) => {
 
         if (existing) {
             return res.status(409).json({ error: 'A company with a similar name already exists.' });
+        }
+
+        // A licence can cap the number of customers (distributors.max_companies, migration 066).
+        if (req.distributor && req.distributor.max_companies != null) {
+            const { count } = await supabaseAdmin.from('companies').select('id', { count: 'exact', head: true }).eq('distributor_id', req.distributor.id);
+            if ((count || 0) >= req.distributor.max_companies) {
+                return res.status(409).json({ error: `Your refinishAI licence covers ${req.distributor.max_companies} customers. Contact refinishAI to add more.`, code: 'licence_limit' });
+            }
         }
 
         const hashedCode = await bcrypt.hash(access_code, 12);
@@ -697,10 +708,12 @@ function parseBranchEmails(raw) {
 /** GET /api/admin/branches — list all CHC branches */
 router.get('/branches', async (req, res) => {
     try {
-        const { data, error } = await supabaseAdmin
+        let bq = supabaseAdmin
             .from('supplier_branches')
             .select('id, name, emails, city, is_active')
             .order('name');
+        if (staffDistributorId(req)) bq = bq.eq('distributor_id', staffDistributorId(req));
+        const { data, error } = await bq;
         if (error) throw error;
         res.json({ branches: data || [] });
     } catch (err) {
@@ -716,7 +729,7 @@ router.post('/branches', requireSuperAdmin, async (req, res) => {
         if (!name) return res.status(400).json({ error: 'Branch name is required.' });
         const { data, error } = await supabaseAdmin
             .from('supplier_branches')
-            .insert({ name, city: stripHtml(req.body.city || '') || null, emails: parseBranchEmails(req.body.emails) })
+            .insert({ name, city: stripHtml(req.body.city || '') || null, emails: parseBranchEmails(req.body.emails), ...(staffDistributorId(req) ? { distributor_id: staffDistributorId(req) } : {}) })
             .select()
             .single();
         if (error) throw error;
@@ -740,8 +753,10 @@ router.put('/branches/:id', requireSuperAdmin, async (req, res) => {
             .from('supplier_branches')
             .update(updates)
             .eq('id', req.params.id)
+            .eq('distributor_id', staffDistributorId(req) || '00000000-0000-0000-0000-000000000000')
             .select()
-            .single();
+            .maybeSingle();
+        if (!error && !data) return res.status(404).json({ error: 'Branch not found.' });
         if (error) throw error;
         await logAction(req.admin.id, 'branch_updated', 'branch', data.id, updates, req.ip);
         res.json({ branch: data });
@@ -754,7 +769,8 @@ router.put('/branches/:id', requireSuperAdmin, async (req, res) => {
 /** DELETE /api/admin/branches/:id — delete a branch (locations are unassigned via FK) */
 router.delete('/branches/:id', requireSuperAdmin, async (req, res) => {
     try {
-        const { error } = await supabaseAdmin.from('supplier_branches').delete().eq('id', req.params.id);
+        const { error } = await supabaseAdmin.from('supplier_branches').delete().eq('id', req.params.id)
+            .eq('distributor_id', staffDistributorId(req) || '00000000-0000-0000-0000-000000000000');
         if (error) throw error;
         await logAction(req.admin.id, 'branch_deleted', 'branch', req.params.id, {}, req.ip);
         res.json({ message: 'Branch deleted.' });
@@ -1326,7 +1342,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         const masterPPG = {};
         {
             for (let from = 0; ; from += 1000) {
-                const { data: mp } = await supabaseAdmin.from('item_library')
+                const { data: mp } = await libraryTable(req)
                     .select('sku_key, list_price')
                     .ilike('brand', 'ppg')
                     .range(from, from + 999);
@@ -1473,7 +1489,7 @@ router.post('/companies/:companyId/catalog-upload', requireCompanyAccess, catalo
         if (priceFromMaster) {
             const needKeys = [...new Set(normalizedRows.filter(r => !(Number(r.price) > 0)).map(r => skuKeyOf(r.sku)).filter(Boolean))];
             for (let i = 0; i < needKeys.length; i += 200) {
-                const { data: mp } = await supabaseAdmin.from('item_library').select('sku_key, list_price').in('sku_key', needKeys.slice(i, i + 200));
+                const { data: mp } = await libraryTable(req).select('sku_key, list_price').in('sku_key', needKeys.slice(i, i + 200));
                 (mp || []).forEach(r => { if (r.sku_key && Number(r.list_price) > 0 && masterAny[r.sku_key] === undefined) masterAny[r.sku_key] = Number(r.list_price); });
             }
         }
@@ -2012,7 +2028,9 @@ router.get('/reports/rebates', requireSuperAdmin, async (req, res) => {
         }
         const ids = [...new Set((ruleRows || []).map(r => r.company_id))];
         const { data: companies } = ids.length
-            ? await supabaseAdmin.from('companies').select('id, name').in('id', ids).order('name')
+            ? await (staffDistributorId(req)
+                ? supabaseAdmin.from('companies').select('id, name').in('id', ids).eq('distributor_id', staffDistributorId(req))
+                : supabaseAdmin.from('companies').select('id, name').in('id', ids)).order('name')
             : { data: [] };
         const out = [];
         for (const c of companies || []) {

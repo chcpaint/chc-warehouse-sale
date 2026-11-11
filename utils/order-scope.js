@@ -45,6 +45,31 @@ const isHeadOffice = role => HEAD_OFFICE_ROLES.includes(role);
 // accidentally returning everything when a desk has no branch/locations.
 const NO_MATCH = '00000000-0000-0000-0000-000000000000';
 
+/**
+ * Distributor fence. Every staff role sees only its own distributor's orders
+ * (a licensed distributor never sees CHC's, and the reverse). It relies on
+ * orders.distributor_id (migration 066); until that column exists the fence is
+ * left off and a CONFIG WARNING is printed, so applying the code before the
+ * SQL never breaks the order screens.
+ */
+let distributorColumnReady = false;
+async function detectOrderDistributorColumn() {
+    try {
+        const { error } = await supabaseAdmin.from('orders').select('distributor_id').limit(1);
+        distributorColumnReady = !error;
+        if (error) console.warn('CONFIG WARNING: orders.distributor_id is missing. Run migrations/066_distributor_licensing.sql so staff screens are fenced per distributor.');
+    } catch (_) { distributorColumnReady = false; }
+    return distributorColumnReady;
+}
+function setDistributorColumnReady(v) { distributorColumnReady = !!v; }
+
+/** The distributor a staff account works for (platform admin: the one it is visiting). */
+function staffDistributorId(req) {
+    const a = req.admin || {};
+    if (a.role === 'platform_admin') return (req.distributor && req.distributor.id) || null;
+    return a.distributor_id || (req.distributor && req.distributor.id) || null;
+}
+
 /** The company_location ids routed to a CHC branch. */
 async function branchLocationIds(branchId) {
     if (!branchId) return [];
@@ -136,6 +161,8 @@ async function orderScopeIds(req) {
  */
 function applyOrderScope(query, req, ids, companyId) {
     const role = req.admin.role;
+    const dist = distributorColumnReady ? staffDistributorId(req) : null;
+    if (dist) query = query.eq('distributor_id', dist);
 
     if (role === 'super_admin') {
         return companyId ? query.eq('company_id', companyId) : query;
@@ -162,11 +189,14 @@ function applyOrderScope(query, req, ids, companyId) {
 async function orderInScope(req, orderId) {
     const { data: order } = await supabaseAdmin
         .from('orders')
-        .select('id, company_id, location_id')
+        .select(distributorColumnReady ? 'id, company_id, location_id, distributor_id' : 'id, company_id, location_id')
         .eq('id', orderId)
         .maybeSingle();
 
     if (!order) return { ok: false, code: 404 };
+    // Another distributor's order is "not found", whatever the role.
+    const dist = distributorColumnReady ? staffDistributorId(req) : null;
+    if (dist && order.distributor_id && order.distributor_id !== dist) return { ok: false, code: 404 };
 
     const role = req.admin.role;
     if (role === 'super_admin') return { ok: true, order };
@@ -195,6 +225,11 @@ async function orderInScope(req, orderId) {
  */
 async function companyInScope(req, companyId) {
     const role = req.admin.role;
+    const dist = staffDistributorId(req);
+    if (dist) {
+        const { data: co } = await supabaseAdmin.from('companies').select('distributor_id').eq('id', companyId).maybeSingle();
+        if (co && co.distributor_id && co.distributor_id !== dist) return false;
+    }
     if (role === 'super_admin' || isHeadOffice(role)) return true;
 
     if (role === 'order_desk') {
@@ -215,5 +250,6 @@ async function companyInScope(req, companyId) {
 module.exports = {
     branchLocationIds, staffBranchIds, staffCompanyIds, staffLocationIds,
     orderScopeIds, applyOrderScope, orderInScope, companyInScope,
+    staffDistributorId, detectOrderDistributorColumn, setDistributorColumnReady,
     HEAD_OFFICE_ROLES, isHeadOffice
 };

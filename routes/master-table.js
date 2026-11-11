@@ -44,6 +44,7 @@
 const express = require('express');
 const XLSX = require('xlsx');
 const { supabaseAdmin } = require('../utils/supabase');
+const { libraryTable } = require('../utils/library-scope');
 const { detectSymbology } = require('../utils/inventory');   // values the product_barcodes check constraint allows (lower-case)
 const { requireSuperAdmin } = require('../middleware/auth');
 const { catalogUpload } = require('../middleware/upload');
@@ -215,9 +216,8 @@ const sameValue = (a, b) => {
  * Returns the plan AND the change rows. Apply then executes the plan rather
  * than recomputing it, so a preview and the load that follows cannot differ.
  */
-async function planImport(rows) {
-    const existing = await readAll(() => supabaseAdmin
-        .from('item_library')
+async function planImport(rows, req) {
+    const existing = await readAll(() => libraryTable(req)
         .select('id, sku, sku_key, name, brand, vendor_code, barcode, unit, case_qty, list_price, category, sub_category, notes'));
 
     const bySkuKey = new Map(existing.map(r => [r.sku_key, r]));
@@ -360,14 +360,13 @@ router.post('/import', catalogUpload.single('file'), async (req, res) => {
                                           sheets: parsed.sheetNames });
         }
 
-        const { plan, changes } = await planImport(parsed.rows);
+        const { plan, changes } = await planImport(parsed.rows, req);
         const summary = summarise(plan, changes, parsed.rows.length);
         const apply = String(req.query.apply) === 'true';
 
         // The ledger records previews too. A load that was looked at and not
         // run is part of the story of how the catalogue got the way it is.
-        const { data: batch, error: batchErr } = await supabaseAdmin
-            .from('item_library_imports')
+        const { data: batch, error: batchErr } = await libraryTable(req, 'item_library_imports')
             .insert({
                 filename: stripHtml(req.file.originalname || '').slice(0, 200),
                 sheet_name: parsed.sheetName,
@@ -404,12 +403,12 @@ router.post('/import', catalogUpload.single('file'), async (req, res) => {
         let created = 0, updated = 0;
         for (let i = 0; i < plan.create.length; i += 200) {
             const slice = plan.create.slice(i, i + 200);
-            const { error } = await supabaseAdmin.from('item_library').insert(slice);
+            const { error } = await libraryTable(req).insert(slice);
             if (error) throw error;
             created += slice.length;
         }
         for (const u of plan.update) {
-            const { error } = await supabaseAdmin.from('item_library')
+            const { error } = await libraryTable(req)
                 .update({ ...u.patch, updated_at: new Date().toISOString() })
                 .eq('id', u.id);
             if (error) throw error;
@@ -425,7 +424,7 @@ router.post('/import', catalogUpload.single('file'), async (req, res) => {
             new_value: c.new_value || null, reason: c.reason || null
         }));
         for (let i = 0; i < logRows.length; i += 500) {
-            const { error } = await supabaseAdmin.from('item_library_changes').insert(logRows.slice(i, i + 500));
+            const { error } = await libraryTable(req, 'item_library_changes').insert(logRows.slice(i, i + 500));
             if (error) console.error('Change log write failed (import already applied):', error.message);
         }
 
@@ -454,7 +453,7 @@ router.get('/', async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit) || 50, 500);
         const offset = Math.max(parseInt(req.query.offset) || 0, 0);
-        let q = supabaseAdmin.from('item_library')
+        let q = libraryTable(req)
             .select('id, sku, sku_key, name, brand, category, sub_category, barcode, barcode_level, unit, case_qty, list_price, is_active, updated_at',
                     { count: 'exact' });
 
@@ -494,7 +493,7 @@ router.get('/stats', async (req, res) => {
             .select('company_id, company_name, products, matched_exact, matched_by_alias, proposed_aliases, unmatched, pct_resolved')
             .order('products', { ascending: false });
 
-        const { data: imports } = await supabaseAdmin.from('item_library_imports')
+        const { data: imports } = await libraryTable(req, 'item_library_imports')
             .select('id, filename, sheet_name, rows_in_file, created_count, updated_count, skipped_count, field_changes, applied, created_at')
             .order('created_at', { ascending: false }).limit(10);
 
@@ -523,7 +522,7 @@ router.get('/imports/:id/changes', async (req, res) => {
     try {
         if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid import id.' });
         const limit = Math.min(parseInt(req.query.limit) || 200, 2000);
-        let q = supabaseAdmin.from('item_library_changes')
+        let q = libraryTable(req, 'item_library_changes')
             .select('sku, sku_key, action, field, old_value, new_value, reason, created_at', { count: 'exact' })
             .eq('import_id', req.params.id);
         if (clean(req.query.action)) q = q.eq('action', clean(req.query.action));
@@ -574,7 +573,7 @@ router.post('/aliases', async (req, res) => {
         const libKey = skuKey(req.body.library_sku || req.body.library_sku_key);
         if (!libKey) return res.status(400).json({ error: 'A master part number is required.' });
 
-        const { data: master } = await supabaseAdmin.from('item_library')
+        const { data: master } = await libraryTable(req)
             .select('sku_key, sku, name').eq('sku_key', libKey).maybeSingle();
         if (!master) return res.status(400).json({ error: `${req.body.library_sku} is not in the master table.` });
 
@@ -715,7 +714,7 @@ router.post('/items', async (req, res) => {
         if (!name) return res.status(400).json({ error: 'An item name is required — a part with no name cannot be looked up or reported on.' });
 
         const key = skuKey(sku);
-        const { data: clash } = await supabaseAdmin.from('item_library')
+        const { data: clash } = await libraryTable(req)
             .select('sku, name').eq('sku_key', key).maybeSingle();
         if (clash) {
             return res.status(409).json({
@@ -725,7 +724,7 @@ router.post('/items', async (req, res) => {
 
         const barcode = clean(req.body.barcode) || null;
         if (barcode) {
-            const { data: owner } = await supabaseAdmin.from('item_library')
+            const { data: owner } = await libraryTable(req)
                 .select('sku, name').eq('barcode', barcode).maybeSingle();
             if (owner) {
                 return res.status(409).json({
@@ -734,7 +733,7 @@ router.post('/items', async (req, res) => {
             }
         }
 
-        const { data, error } = await supabaseAdmin.from('item_library').insert({
+        const { data, error } = await libraryTable(req).insert({
             sku, sku_key: key, name,
             brand: clean(req.body.brand) || null,
             category: clean(req.body.category) || null,
@@ -765,7 +764,7 @@ router.post('/items', async (req, res) => {
 router.put('/items/:id', async (req, res) => {
     try {
         if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid item id.' });
-        const { data: current } = await supabaseAdmin.from('item_library')
+        const { data: current } = await libraryTable(req)
             .select('*').eq('id', req.params.id).maybeSingle();
         if (!current) return res.status(404).json({ error: 'That item is not in the master table.' });
 
@@ -781,7 +780,7 @@ router.put('/items/:id', async (req, res) => {
         if (req.body.barcode !== undefined) {
             const barcode = clean(req.body.barcode) || null;
             if (barcode) {
-                const { data: owner } = await supabaseAdmin.from('item_library')
+                const { data: owner } = await libraryTable(req)
                     .select('id, sku, name').eq('barcode', barcode);
                 const other = (owner || []).find(o => o.id !== current.id);
                 if (other) {
@@ -796,7 +795,7 @@ router.put('/items/:id', async (req, res) => {
         if (patch.name === null) return res.status(400).json({ error: 'An item name is required.' });
 
         patch.updated_at = new Date().toISOString();
-        const { data, error } = await supabaseAdmin.from('item_library')
+        const { data, error } = await libraryTable(req)
             .update(patch).eq('id', req.params.id).select().single();
         if (error) throw error;
 
@@ -930,15 +929,15 @@ router.post('/push', async (req, res) => {
         if (Array.isArray(req.body.item_ids) && req.body.item_ids.length) {
             const ids = req.body.item_ids.filter(isValidUUID);
             if (!ids.length) return res.status(400).json({ error: 'No valid item ids were given.' });
-            items = await readAll(() => supabaseAdmin.from('item_library')
+            items = await readAll(() => libraryTable(req)
                 .select('id, sku, sku_key, name, brand, category, barcode, barcode_level, unit, case_qty, list_price, is_active')
                 .in('id', ids));
         } else if (clean(req.body.brand)) {
-            items = await readAll(() => supabaseAdmin.from('item_library')
+            items = await readAll(() => libraryTable(req)
                 .select('id, sku, sku_key, name, brand, category, barcode, barcode_level, unit, case_qty, list_price, is_active')
                 .eq('brand', clean(req.body.brand)));
         } else if (req.body.all === true) {
-            items = await readAll(() => supabaseAdmin.from('item_library')
+            items = await readAll(() => libraryTable(req)
                 .select('id, sku, sku_key, name, brand, category, barcode, barcode_level, unit, case_qty, list_price, is_active'));
         } else {
             return res.status(400).json({ error: 'Choose which items to push: some ids, a brand, or all of them.' });
@@ -1175,7 +1174,7 @@ router.post('/sync', async (req, res) => {
         const candidates = companies.filter(c => (policyFor.get(c.id) || {}).push_mode !== 'frozen');
 
         const master = await readAll(() => {
-            let q = supabaseAdmin.from('item_library').select('id, sku, sku_key, name, brand, barcode, is_active');
+            let q = libraryTable(req).select('id, sku, sku_key, name, brand, barcode, is_active');
             if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
             return q;
         });
@@ -1418,7 +1417,7 @@ router.post('/prices', async (req, res) => {
         const candidates = companies.filter(c => (policyFor.get(c.id) || {}).push_mode !== 'frozen');
 
         const master = await readAll(() => {
-            let q = supabaseAdmin.from('item_library')
+            let q = libraryTable(req)
                 .select('sku_key, sku, name, list_price, is_active').ilike('brand', brand);
             if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
             return q;
@@ -1522,7 +1521,7 @@ router.post('/prices', async (req, res) => {
 router.get('/gaps', async (req, res) => {
     try {
         const master = await readAll(() => {
-            let q = supabaseAdmin.from('item_library')
+            let q = libraryTable(req)
                 .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active');
             if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
             return q;
@@ -1654,7 +1653,7 @@ router.post('/backfill', async (req, res) => {
         if (!fields.length) return res.status(400).json({ error: 'Choose at least one field to fill in.' });
 
         const master = await readAll(() => {
-            let q = supabaseAdmin.from('item_library')
+            let q = libraryTable(req)
                 .select('id, sku, sku_key, name, brand, category, barcode, list_price, is_active');
             if (req.distributor) q = q.eq('distributor_id', req.distributor.id);
             return q;
@@ -1743,7 +1742,7 @@ router.post('/backfill', async (req, res) => {
                               needs_a_decision: disputed.slice(0, 100) });
         }
 
-        const { data: run } = await supabaseAdmin.from('item_library_imports').insert({
+        const { data: run } = await libraryTable(req, 'item_library_imports').insert({
             filename: null, sheet_name: null, source_label: 'backfill_from_customers',
             rows_in_file: willFill.length, created_count: 0,
             updated_count: new Set(willFill.map(w => w.item_id)).size,
@@ -1761,7 +1760,7 @@ router.post('/backfill', async (req, res) => {
         }
         let filled = 0;
         for (const [itemId, patch] of patches) {
-            const { error } = await supabaseAdmin.from('item_library')
+            const { error } = await libraryTable(req)
                 .update({ ...patch, updated_at: new Date().toISOString() }).eq('id', itemId);
             if (!error) filled += Object.keys(patch).length;
         }
@@ -1772,7 +1771,7 @@ router.post('/backfill', async (req, res) => {
             reason: `Filled from ${w.customers.join(', ')} — the master was blank and every customer agreed.`
         }));
         for (let i = 0; run && i < logRows.length; i += 500) {
-            const { error } = await supabaseAdmin.from('item_library_changes').insert(logRows.slice(i, i + 500));
+            const { error } = await libraryTable(req, 'item_library_changes').insert(logRows.slice(i, i + 500));
             if (error) console.error('Backfill log write failed (backfill already applied):', error.message);
         }
 

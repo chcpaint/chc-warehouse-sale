@@ -584,9 +584,9 @@ test('a corrupt uploaded logo still yields a PDF (falls back to the shipped logo
 test('without inventory, kits need no mapping: lines come from the master kit, priced from the shop catalogue or the item library', async () => {
     reset();
     fake.db.item_library = [
-        { id: 'l1', sku_key: 'PRF611N', name: 'ProForm Clear (library)', brand: 'PPG', category: 'Paint', list_price: 250 },
-        { id: 'l2', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', category: 'Masking', list_price: 12 },
-        { id: 'l3', sku_key: 'FUS123EZ', name: 'Fusor 123 Adhesive', brand: 'Fusor', category: 'Adhesives', list_price: 40 }
+        { id: 'l1', distributor_id: D_CHC, sku_key: 'PRF611N', name: 'ProForm Clear (library)', brand: 'PPG', category: 'Paint', list_price: 250 },
+        { id: 'l2', distributor_id: D_CHC, sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', category: 'Masking', list_price: 12 },
+        { id: 'l3', distributor_id: D_CHC, sku_key: 'FUS123EZ', name: 'Fusor 123 Adhesive', brand: 'Fusor', category: 'Adhesives', list_price: 40 }
     ];
     let res = await request(app()).get(S + '/kits');
     assert.equal(res.body.kits[0].ready, true, 'ready with nothing mapped');
@@ -608,7 +608,7 @@ test('without inventory, kits need no mapping: lines come from the master kit, p
 
 test('without inventory, a part that is in neither the shop catalogue nor the library is still blocked, not invented', async () => {
     reset();
-    fake.db.item_library = [{ id: 'l2', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', list_price: 12 }];
+    fake.db.item_library = [{ id: 'l2', distributor_id: D_CHC, sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', list_price: 12 }];
     const res = await request(app()).post(S).send(body());
     assert.equal(res.status, 409);
     assert.match(res.body.error, /FUS123EZ.*item library/);
@@ -617,8 +617,8 @@ test('without inventory, a part that is in neither the shop catalogue nor the li
 test('a library part with no price blocks the kit instead of billing $0', async () => {
     reset();
     fake.db.item_library = [
-        { id: 'l2', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', list_price: 0 },
-        { id: 'l3', sku_key: 'FUS123EZ', name: 'Fusor 123', list_price: 40 }
+        { id: 'l2', distributor_id: D_CHC, sku_key: 'MMM08852', name: '3M Masking Tape 36mm', list_price: 0 },
+        { id: 'l3', distributor_id: D_CHC, sku_key: 'FUS123EZ', name: 'Fusor 123', list_price: 40 }
     ];
     const res = await request(app()).post(S).send(body());
     assert.equal(res.status, 409);
@@ -628,8 +628,8 @@ test('a library part with no price blocks the kit instead of billing $0', async 
 test('a mapping the shop already has still wins over the master kit', async () => {
     reset();
     fake.db.item_library = [
-        { id: 'l2', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', list_price: 12 },
-        { id: 'l3', sku_key: 'FUS123EZ', name: 'Fusor 123', list_price: 40 }
+        { id: 'l2', distributor_id: D_CHC, sku_key: 'MMM08852', name: '3M Masking Tape 36mm', list_price: 12 },
+        { id: 'l3', distributor_id: D_CHC, sku_key: 'FUS123EZ', name: 'Fusor 123', list_price: 40 }
     ];
     fake.db.kit_product_map.push({ id: 'm2', company_id: CO, kit_item_id: L_TAPE, product_id: TAPE, quantity: null, is_excluded: false });
     const res = await request(app()).get(S + '/kits/' + KIT + '/preview');
@@ -641,7 +641,7 @@ test('a shop with Inventory on still has to map (kits are tied to its stock)', a
     reset();
     fake.db.companies[0].settings.inventory = { enabled: true };
     fake.db.item_library = [
-        { id: 'l1', sku_key: 'PRF611N', name: 'x', list_price: 250 }, { id: 'l2', sku_key: 'MMM08852', name: 'y', list_price: 12 }, { id: 'l3', sku_key: 'FUS123EZ', name: 'z', list_price: 40 }
+        { id: 'l1', distributor_id: D_CHC, sku_key: 'PRF611N', name: 'x', list_price: 250 }, { id: 'l2', distributor_id: D_CHC, sku_key: 'MMM08852', name: 'y', list_price: 12 }, { id: 'l3', distributor_id: D_CHC, sku_key: 'FUS123EZ', name: 'z', list_price: 40 }
     ];
     const res = await request(app()).post(S).send(body());
     assert.equal(res.status, 409);
@@ -652,8 +652,8 @@ test('a shop with Inventory on still has to map (kits are tied to its stock)', a
 // ADD KIT: a shop builds its own kit
 // ==================================================================
 const libParts = () => [
-    { id: 'l1', sku: 'MMM08852', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', unit: 'each', list_price: 12 },
-    { id: 'l2', sku: 'MMM-09999', sku_key: 'MMM09999', name: '3M Body Filler', brand: '3M', unit: 'each', list_price: 40 }
+    { id: 'l1', distributor_id: D_CHC, sku: 'MMM08852', sku_key: 'MMM08852', name: '3M Masking Tape 36mm', brand: '3M', unit: 'each', list_price: 12 },
+    { id: 'l2', distributor_id: D_CHC, sku: 'MMM-09999', sku_key: 'MMM09999', name: '3M Body Filler', brand: '3M', unit: 'each', list_price: 40 }
 ];
 
 test('part search finds the shop catalogue and, without inventory, the CHC library; never twice', async () => {

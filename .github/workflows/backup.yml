@@ -1,0 +1,158 @@
+name: Nightly backup and restore drill
+
+# Every night: an encrypted copy of the database and every stored file, kept
+# OUTSIDE Supabase (as a GitHub artifact, and optionally in an S3-compatible
+# bucket), then restored into a throwaway Postgres to prove it works.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   SUPABASE_DB_URL            Supabase > Connect > "Session pooler" URI (with the DB password)
+#   SUPABASE_URL               https://<project>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  Supabase > Project Settings > API > service_role
+#   BACKUP_PASSPHRASE          a long random passphrase; keep a copy offline -- without it a backup cannot be opened
+# Optional second copy (e.g. Cloudflare R2, Backblaze B2, AWS S3):
+#   BACKUP_S3_BUCKET, BACKUP_S3_ENDPOINT, BACKUP_S3_ACCESS_KEY_ID, BACKUP_S3_SECRET_ACCESS_KEY
+#
+# Read-only on production. See docs/OPERATIONS.md for restoring.
+
+on:
+  schedule:
+    - cron: '17 7 * * *'   # 07:17 UTC = 2:17 a.m. Toronto (3:17 a.m. in summer)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false
+
+env:
+  PG_IMAGE: postgres:17
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      name: ${{ steps.pack.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --omit=dev
+
+      - name: Check the secrets are set
+        env:
+          A: ${{ secrets.SUPABASE_DB_URL }}
+          B: ${{ secrets.SUPABASE_URL }}
+          C: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          D: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          missing=""
+          [ -n "$A" ] || missing="$missing SUPABASE_DB_URL"
+          [ -n "$B" ] || missing="$missing SUPABASE_URL"
+          [ -n "$C" ] || missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          [ -n "$D" ] || missing="$missing BACKUP_PASSPHRASE"
+          if [ -n "$missing" ]; then echo "::error::Missing repository secrets:$missing"; exit 1; fi
+          if [ ${#D} -lt 24 ]; then echo "::error::BACKUP_PASSPHRASE must be at least 24 characters"; exit 1; fi
+
+      - name: Database
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          OUT_DIR: out
+        run: |
+          mkdir -p out
+          export PG_DUMP="docker run --rm --network host -v $PWD:/w -w /w $PG_IMAGE pg_dump"
+          export PSQL="docker run --rm -i --network host $PG_IMAGE psql"
+          bash scripts/backup/dump-db.sh
+
+      - name: Stored files
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/backup/storage.js download out/storage
+
+      - name: Encrypt
+        id: pack
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          name="chc-backup-$(date -u +%F)"
+          tar -czf "$name.tar.gz" -C out .
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 --output "$name.tar.gz.gpg" "$name.tar.gz"
+          rm -f "$name.tar.gz"; rm -rf out
+          sha256sum "$name.tar.gz.gpg" > "$name.tar.gz.gpg.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Encrypted backup: $(du -h "$name.tar.gz.gpg" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.name }}
+          path: |
+            ${{ steps.pack.outputs.name }}.tar.gz.gpg
+            ${{ steps.pack.outputs.name }}.tar.gz.gpg.sha256
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Second copy (optional S3-compatible bucket)
+        env:
+          BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          if [ -z "$BUCKET" ]; then echo "No second bucket configured; skipping."; exit 0; fi
+          name="${{ steps.pack.outputs.name }}"
+          aws s3 cp "$name.tar.gz.gpg" "s3://$BUCKET/chc/$name.tar.gz.gpg" ${ENDPOINT:+--endpoint-url "$ENDPOINT"}
+          aws s3 cp "$name.tar.gz.gpg.sha256" "s3://$BUCKET/chc/$name.tar.gz.gpg.sha256" ${ENDPOINT:+--endpoint-url "$ENDPOINT"}
+
+  restore-drill:
+    needs: backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      scratch:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: drill
+          POSTGRES_DB: drill
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.backup.outputs.name }}
+      - name: Checksum
+        run: sha256sum -c "${{ needs.backup.outputs.name }}.tar.gz.gpg.sha256"
+      - name: Restore into a throwaway database and count every row
+        id: drill
+        env:
+          BACKUP_FILE: ${{ needs.backup.outputs.name }}.tar.gz.gpg
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          TARGET_DB_URL: postgres://postgres:drill@localhost:5432/drill
+        run: |
+          export PG_RESTORE="docker run --rm --network host -v $PWD:$PWD -v /tmp:/tmp $PG_IMAGE pg_restore"
+          export PSQL="docker run --rm -i --network host $PG_IMAGE psql"
+          export WORK_DIR="$(mktemp -d)"
+          export DRILL_RESULT=/tmp/drill.json
+          bash scripts/backup/restore-drill.sh
+
+      - name: Record the result (shown in the console and on the Help page)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -f /tmp/drill.json ]; then body=$(cat /tmp/drill.json); else body='{"status":"failed","note":"The drill did not finish"}'; fi
+          body=$(node -e 'const b=JSON.parse(process.argv[1]); b.run_url=process.argv[2]; console.log(JSON.stringify(b))' "$body" "$RUN_URL")
+          code=$(curl -sS -o /tmp/rec.out -w '%{http_code}' -X POST "$SUPABASE_URL/rest/v1/backup_runs" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" -H "Prefer: return=minimal" -d "$body")
+          if [ "$code" != "201" ]; then echo "::warning::Could not record the result (HTTP $code). Run migration 065_backup_runs.sql."; cat /tmp/rec.out; fi

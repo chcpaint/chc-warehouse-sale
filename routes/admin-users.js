@@ -48,6 +48,20 @@ const router = express.Router({ mergeParams: true });
 // Everything here is super-admin only.
 router.use(requireSuperAdmin);
 
+// Each distributor manages only its own staff. Any route with :id first checks
+// the account belongs to this admin's distributor; another distributor's
+// account is "not found".
+const { staffDistributorId } = require('../utils/order-scope');
+router.param('id', async (req, res, next, id) => {
+    try {
+        const mine = staffDistributorId(req);
+        if (!mine) return next();
+        const { data } = await supabaseAdmin.from('admin_users').select('distributor_id').eq('id', id).maybeSingle();
+        if (data && data.distributor_id && data.distributor_id !== mine) return res.status(404).json({ error: 'Staff account not found.' });
+        next();
+    } catch (err) { next(err); }
+});
+
 const ROLES = ['order_desk', 'order_manager', 'sales_director', 'super_admin'];
 // Only order_desk has anything to assign — order_manager sees every branch
 // and customer by role, and super_admin sees everything in the console.
@@ -163,10 +177,14 @@ router.get('/branches', async (req, res) => {
 /** List CHC staff, with a clear status/warning and their full branch + customer assignment. */
 router.get('/', async (req, res) => {
     try {
-        const { data, error } = await supabaseAdmin
+        let listQ = supabaseAdmin
             .from('admin_users')
             .select('id, email, name, role, branch_id, is_active, is_branch_manager, last_login, password_hash, invite_expires_at, must_change_password')
+            .neq('role', 'platform_admin')
             .order('created_at', { ascending: true });
+        const mine = staffDistributorId(req);
+        if (mine) listQ = listQ.eq('distributor_id', mine);
+        const { data, error } = await listQ;
         if (error) throw error;
 
         const users = data || [];
@@ -287,7 +305,8 @@ router.post('/', async (req, res) => {
                 is_active: true,
                 invite_token: token,
                 invite_expires_at: expires,
-                created_by: req.admin.id
+                created_by: req.admin.id,
+                ...(staffDistributorId(req) ? { distributor_id: staffDistributorId(req) } : {})
             })
             .select('id, email, name, role')
             .single();
@@ -300,7 +319,7 @@ router.post('/', async (req, res) => {
 
         const invite = await sendInvite({
             to: email, name,
-            inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=admin`,
+            inviteUrl: `${require('../utils/tenant').appBaseUrl(req.distributor)}/set-password.html?token=${token}&kind=admin`,
             context: 'CHC order desk',
             invitedBy: req.admin.name,
             expiresText: `${INVITE_TTL_DAYS} days`
@@ -399,7 +418,7 @@ router.post('/:id/resend-invite', async (req, res) => {
             .update({ invite_token: token, invite_expires_at: expires, updated_at: new Date().toISOString() })
             .eq('id', id);
 
-        const link = `${baseUrl()}/set-password.html?token=${token}&kind=admin`;
+        const link = `${require('../utils/tenant').appBaseUrl(req.distributor)}/set-password.html?token=${token}&kind=admin`;
         // link_only: nothing is emailed; the admin hands the link over themselves
         // (Teams, text, phone) -- for when the person's inbox is not receiving mail.
         if (req.body && req.body.link_only === true) {

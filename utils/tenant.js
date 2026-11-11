@@ -31,11 +31,15 @@ function normalizeHost(hostHeader) {
     return String(hostHeader || '').split(':')[0].trim().toLowerCase();
 }
 
+const BASE_COLS = 'id, name, slug, custom_domain, settings, is_active, is_default';
+const LICENCE_COLS = ', short_name, support_email, country, licence_status, trial_ends_on, max_companies';
+
 async function loadDistributors() {
-    const { data, error } = await supabaseAdmin
-        .from('distributors')
-        .select('id, name, slug, custom_domain, settings, is_active, is_default')
-        .eq('is_active', true);
+    // Licence columns arrive with migration 066; before it runs, carry on without them.
+    let { data, error } = await supabaseAdmin.from('distributors').select(BASE_COLS + LICENCE_COLS).eq('is_active', true);
+    if (error && /column|schema cache/i.test(error.message || '')) {
+        ({ data, error } = await supabaseAdmin.from('distributors').select(BASE_COLS).eq('is_active', true));
+    }
     if (error) throw error;
 
     const byDomain = new Map();
@@ -61,6 +65,27 @@ async function getCache() {
 function invalidateDistributorCache() {
     cache = { at: 0, byDomain: new Map(), bySlug: new Map(), byId: new Map(), defaultDistributor: null };
 }
+
+/**
+ * Is this distributor's licence in force? The default distributor (CHC) is
+ * never blocked. A suspended or cancelled licence, or a trial past its end
+ * date, stops that distributor's console, shops and kiosks until it is
+ * reactivated from the platform console. Returns null or { code, message }.
+ */
+function licenceBlock(d, today = new Date().toISOString().slice(0, 10)) {
+    if (!d || d.is_default) return null;
+    const status = d.licence_status || 'active';
+    if (status === 'suspended' || status === 'cancelled') {
+        return { code: 'licence_inactive', message: 'This service is paused for this account. Please contact refinishAI.' };
+    }
+    if (status === 'trial' && d.trial_ends_on && String(d.trial_ends_on) < today) {
+        return { code: 'trial_ended', message: 'The trial for this account has ended. Please contact refinishAI to continue.' };
+    }
+    return null;
+}
+
+// Always reachable, whatever the licence: health checks and the public help page's facts.
+const LICENCE_FREE_PATHS = [/^\/api\/health/, /^\/api\/help\//];
 
 /**
  * Express middleware. Always sets req.distributor to something -- there is
@@ -89,6 +114,10 @@ async function resolveDistributor(req, res, next) {
         }
 
         req.distributor = distributor;
+        const block = licenceBlock(distributor);
+        if (block && !LICENCE_FREE_PATHS.some(re => re.test(req.originalUrl || req.url || ''))) {
+            return res.status(402).json({ error: block.message, code: block.code });
+        }
         next();
     } catch (err) {
         console.error('Distributor resolution failed:', err);
@@ -96,4 +125,23 @@ async function resolveDistributor(req, res, next) {
     }
 }
 
-module.exports = { resolveDistributor, invalidateDistributorCache, getCache };
+/**
+ * The web address a distributor's people use: its own domain, else its
+ * subdomain of PLATFORM_DOMAIN, else the app's main address. Invitation and
+ * password links must use it, because a sign-in is only accepted on the
+ * account's own distributor's address.
+ */
+function appBaseUrl(d) {
+    const fallback = (process.env.APP_URL || process.env.PUBLIC_URL || 'https://chcsale.com').replace(/\/$/, '');
+    if (!d || d.is_default) return fallback;
+    if (d.custom_domain) return `https://${String(d.custom_domain).toLowerCase()}`;
+    const pd = (process.env.PLATFORM_DOMAIN || '').toLowerCase();
+    if (pd && d.slug) return `https://${d.slug}.${pd}`;
+    return fallback;
+}
+async function appBaseUrlForId(distributorId) {
+    if (!distributorId) return appBaseUrl(null);
+    try { const c = await getCache(); return appBaseUrl(c.byId.get(distributorId)); } catch (_) { return appBaseUrl(null); }
+}
+
+module.exports = { resolveDistributor, invalidateDistributorCache, getCache, licenceBlock, appBaseUrl, appBaseUrlForId };

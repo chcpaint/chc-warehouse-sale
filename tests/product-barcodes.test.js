@@ -34,6 +34,7 @@ const stubs = {
     [path.join(ROOT, 'utils/supabase.js')]: { supabaseAdmin: supabaseProxy },
     [path.join(ROOT, 'middleware/auth.js')]: {
         requireAdminAuth: (req, res, next) => { req.admin = authAdmin; next(); },
+        requireSharedContentEditor: (req, res, next) => next(),
         requireSuperAdmin: (req, res, next) => next(),
         requirePlatformAdmin: (req, res, next) => next(),
         requireCompanyAccess: (req, res, next) => { req.admin = authAdmin; next(); },

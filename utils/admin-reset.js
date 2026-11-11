@@ -29,7 +29,11 @@ const COOLDOWN_MINUTES = 2;
 const baseUrl = () =>
     (process.env.APP_URL || process.env.PUBLIC_URL || 'https://chcsale.com').replace(/\/$/, '');
 
-const setPasswordUrl = token => `${baseUrl()}/set-password.html?token=${token}&kind=admin`;
+// The reset link goes to the distributor's own address (see utils/tenant.js appBaseUrl).
+const setPasswordUrl = (token, distributor) => {
+    const base = distributor && !distributor.is_default ? require('./tenant').appBaseUrl(distributor) : baseUrl();
+    return `${base}/set-password.html?token=${token}&kind=admin`;
+};
 
 function newToken(hours = RESET_TTL_HOURS) {
     return {
@@ -77,7 +81,7 @@ async function requestAdminPasswordReset({ email, distributor }) {
 
     const mail = await sendInvite({
         to: admin.email, name: admin.name,
-        inviteUrl: setPasswordUrl(token),
+        inviteUrl: setPasswordUrl(token, distributor),
         context: 'CHC order console',
         expiresText: `${RESET_TTL_HOURS} hours`,
         reset: !!admin.password_hash

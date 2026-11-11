@@ -17,8 +17,12 @@ const { resolveGroupId } = require('./people-activity');
 
 const ROLES = ['member', 'owner'];
 const INVITE_TTL_DAYS = 7;
-const baseUrl = () =>
+const defaultBaseUrl = () =>
     (process.env.APP_URL || process.env.PUBLIC_URL || 'https://chcsale.com').replace(/\/$/, '');
+// A licensed distributor's shops sign in on that distributor's own address.
+const baseUrlFor = async company => (company && company.distributor_id)
+    ? require('./tenant').appBaseUrlForId(company.distributor_id)
+    : defaultBaseUrl();
 
 function newInvite() {
     return {
@@ -98,7 +102,7 @@ async function createUser({ company, name, email, locationId, groupId, role, inv
 
     const invite = await sendInvite({
         to: email, name,
-        inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`,
+        inviteUrl: `${await baseUrlFor(company)}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`,
         context: company.name,
         expiresText: `${INVITE_TTL_DAYS} days`
     });
@@ -172,7 +176,7 @@ async function resendInvite({ company, userId, linkOnly = false }) {
         .update({ invite_token: token, invite_expires_at: expires, updated_at: new Date().toISOString() })
         .eq('id', userId);
 
-    const link = `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`;
+    const link = `${await baseUrlFor(company)}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`;
     // linkOnly: nothing is emailed -- the admin hands the link over themselves
     // (Teams, text, phone). For when the person's inbox is not receiving mail.
     if (linkOnly) {
@@ -224,7 +228,7 @@ async function requestPasswordReset({ company, email }) {
 
     const mail = await sendInvite({
         to: user.email, name: user.name,
-        inviteUrl: `${baseUrl()}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`,
+        inviteUrl: `${await baseUrlFor(company)}/set-password.html?token=${token}&kind=company&slug=${encodeURIComponent(company.slug)}`,
         context: company.name,
         expiresText: `${INVITE_TTL_DAYS} days`,
         reset: !!user.password_hash

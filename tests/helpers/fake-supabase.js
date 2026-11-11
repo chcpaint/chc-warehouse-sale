@@ -46,6 +46,8 @@ const KNOWN_COLUMNS = {
         'followup_invoice_waived_at', 'followup_invoice_waived_by', 'followup_invoice_waived_note',
         'closed_at', 'closed_by',
         'po_source', 'po_normalized', 'placed_by_user_id',
+        // Migration 066: set by trigger from the company.
+        'distributor_id',
         // Added by migration 025 for order attribution. They were missing here
         // until a demo run hit PUT /orders/:id/status and the guard refused the
         // write — which is the guard doing its job, but it should have been
@@ -139,14 +141,18 @@ const KNOWN_COLUMNS = {
         // Added by migration 029 so the master file can actually be loaded:
         // the category columns it carries, and barcode_level, which records
         // whether a code identifies one item or a case.
-        'category', 'sub_category', 'barcode_level', 'is_active', 'updated_at'
+        'category', 'sub_category', 'barcode_level', 'is_active', 'updated_at',
+        // Every distributor has its own library (migration 037 column, enforced by utils/library-scope.js).
+        'distributor_id'
     ]),
     item_library_imports: new Set([
+        'distributor_id',   // migration 066
         'id', 'filename', 'sheet_name', 'source_label', 'rows_in_file', 'created_count',
         'updated_count', 'unchanged_count', 'skipped_count', 'field_changes', 'applied',
         'imported_by', 'created_at', 'notes'
     ]),
     item_library_changes: new Set([
+        'distributor_id',   // migration 066
         'id', 'import_id', 'item_id', 'sku_key', 'sku', 'action', 'field',
         'old_value', 'new_value', 'reason', 'created_at'
     ]),
@@ -216,7 +222,11 @@ const KNOWN_COLUMNS = {
     distributors: new Set([
         'id', 'name', 'slug', 'custom_domain', 'logo_url', 'contact_email', 'contact_phone',
         'settings', 'stripe_account_id', 'stripe_connect_status', 'is_active', 'is_default',
-        'created_at', 'updated_at'
+        'created_at', 'updated_at',
+        // Migration 066: licensing.
+        'short_name', 'support_email', 'country', 'licence_plan', 'licence_status', 'licence_term',
+        'licence_fee', 'licence_currency', 'licence_started_on', 'licence_renews_on', 'trial_ends_on',
+        'max_companies', 'billing_contact_email', 'licence_notes'
     ]),
     admin_users: new Set([
         'id', 'email', 'password_hash', 'name', 'role', 'company_id', 'is_active', 'last_login',
@@ -227,7 +237,7 @@ const KNOWN_COLUMNS = {
     // generalizing the single admin_users.branch_id column above.
     admin_user_branches: new Set(['admin_user_id', 'branch_id', 'created_at']),
     admin_user_companies: new Set(['admin_user_id', 'company_id', 'created_at']),
-    supplier_branches: new Set(['id', 'name', 'emails', 'city', 'is_active', 'created_at', 'updated_at']),
+    supplier_branches: new Set(['id', 'name', 'emails', 'city', 'is_active', 'created_at', 'updated_at', 'distributor_id']),   // distributor_id: migration 037
     // Added by migration 020 (customer users) and 045 (groups).
     company_users: new Set([
         'id', 'company_id', 'location_id', 'email', 'name', 'password_hash', 'role', 'is_active',

@@ -125,7 +125,7 @@
     <main>
         <section id="how-to" aria-labelledby="how-to-h">
             <h2 id="how-to-h">How to</h2>
-            <p class="lede">What you see depends on what your shop uses: shops that only order from CHC see Ordering, and shops on refinishAI Inventory also see Stock, Kits and Reports.</p>
+            <p class="lede">What you see depends on what your shop uses: shops that only order from their distributor see Ordering, and shops on refinishAI Inventory also see Stock, Kits and Reports.</p>
             <div id="no-match" class="no-match hidden"></div>
             <div id="areas" class="areas"></div>
         </section>
@@ -133,7 +133,7 @@
         <section id="security" aria-labelledby="security-h">
             <h2 id="security-h">Security and data protection</h2>
             <p class="lede">The short version for your IT team. Ask us for the full security write-up.</p>
-            <div class="checks">
+            <div class="checks" id="checks-in-place">
                 <div class="check"><h3>Encrypted in transit <span class="pill ok">In place</span></h3>
                     <p>Every page and every request uses HTTPS, and browsers are told to use HTTPS only.</p></div>
                 <div class="check"><h3>Encrypted at rest <span class="pill ok">In place</span></h3>
@@ -141,7 +141,7 @@
                 <div class="check"><h3>Each customer kept separate <span class="pill ok">In place</span></h3>
                     <p>Our server checks every request against the signed-in company and location. One shop cannot read another shop's orders, stock or prices.</p></div>
                 <div class="check"><h3>Passwords never stored <span class="pill ok">In place</span></h3>
-                    <p>Only a one-way hash (bcrypt) is kept, so nobody, CHC included, can read a password. Reset links expire.</p></div>
+                    <p>Only a one-way hash (bcrypt) is kept, so nobody, your distributor included, can read a password. Reset links expire.</p></div>
                 <div class="check"><h3>Sign-ins expire <span class="pill ok">In place</span></h3>
                     <p>Sessions end after 12 to 24 hours. Repeated failed sign-ins are slowed down and then blocked.</p></div>
                 <div class="check"><h3>Browser protections <span class="pill ok">In place</span></h3>
@@ -152,17 +152,18 @@
                     <p>Each code change runs the full automated test suite and a scan for known vulnerabilities in the software it depends on.</p></div>
                 <div class="check"><h3>Where your data lives <span class="pill ok">In place</span></h3>
                     <p>In the United States (US West), with Supabase for the database and Railway for the app.</p></div>
-                <div class="check"><h3>Backups <span class="pill ok">In place</span></h3>
-                    <p>The database is backed up automatically by Supabase.</p></div>
+                <div class="check"><h3>Daily backups <span class="pill ok">In place</span></h3>
+                    <p>Supabase backs up the whole database every day and keeps the last 7 days.</p></div>
             </div>
+            <div class="note" id="report"><strong>Found a security problem?</strong> Please email <a href="mailto:adam@chcpaint.com?subject=Security%20report">adam@chcpaint.com</a> with what you found and how to reproduce it. We reply within two business days, fix confirmed issues as a priority, keep you informed, and will not take action against good-faith research that avoids other people's data and does not disrupt the service. Machine-readable details: <a href="/.well-known/security.txt">security.txt</a>.</div>
             <h3 class="sub">Being put in place</h3>
             <div class="checks">
-                <div class="check"><h3>Restore drills <span class="pill wip">In progress</span></h3>
-                    <p>A scheduled test that restores a backup into a separate copy, to prove recovery works, and a decision on point-in-time recovery.</p></div>
+                <div class="check" id="card-drill"><h3>Off-site backups, tested nightly <span class="pill wip">In progress</span></h3>
+                    <p>An encrypted nightly copy of the database and every stored file, kept outside Supabase, and restored automatically each night into a separate database to prove it works.</p></div>
                 <div class="check"><h3>Two-step sign-in for distributor staff <span class="pill wip">In progress</span></h3>
                     <p>A second step at sign-in for the people who can see every customer.</p></div>
-                <div class="check"><h3>Outside uptime monitoring <span class="pill wip">In progress</span></h3>
-                    <p>An outside service that checks the console every minute and alerts us if it stops answering.</p></div>
+                <div class="check" id="card-uptime"><h3>Uptime monitoring <span class="pill wip">In progress</span></h3>
+                    <p>A check every minute, from outside the app's own servers, that alerts us within minutes if it stops answering.</p></div>
             </div>
         </section>
 
@@ -176,7 +177,7 @@
         <section id="contact" aria-labelledby="contact-h">
             <div class="contact">
                 <h2 id="contact-h">Can't find your answer?</h2>
-                <p>Email the CHC team and we will get back to you.</p>
+                <p>Email the refinishAI support team and we will get back to you.</p>
                 <a class="btn" href="mailto:info@chcpaint.com?subject=refinishAI%20help">Email info@chcpaint.com</a>
                 <p>Problems with the software itself, or security questions from your IT team: <a href="mailto:adam@chcpaint.com?subject=refinishAI%20support">Adam Berube, adam@chcpaint.com</a></p>
             </div>
@@ -242,6 +243,29 @@
 
     // ---- AI use (from the register) ----
     const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six'];
+    // ---- Evidence: cards move to "In place" only when the records say so ----
+    fetch('/api/help/status').then(r => r.ok ? r.json() : null).then(st => {
+        if (!st) return;
+        const inPlace = document.getElementById('checks-in-place');
+        const promote = (id, text) => {
+            const card = document.getElementById(id);
+            if (!card) return;
+            const pill = card.querySelector('.pill'); pill.className = 'pill ok'; pill.textContent = 'In place';
+            card.querySelector('p').textContent = text;
+            inPlace.appendChild(card);
+        };
+        const day = ts => new Date(ts).toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
+        const b = st.backups || {};
+        if (b.last_passed_at && Date.now() - Date.parse(b.last_passed_at) < 3 * 864e5) {
+            promote('card-drill', `Every night an encrypted copy of the database and every stored file is kept outside Supabase, then restored into a separate database and every row counted. Last successful restore test: ${day(b.last_passed_at)}.`);
+        }
+        const u = st.uptime || {};
+        if (u.monitor === 'ok') {
+            promote('card-uptime', 'Checked every minute from Supabase, separately from the app\'s own servers, with alerts within minutes of a failure' +
+                (u.uptime_30d != null && u.checks_30d >= 1440 ? `. Uptime over the last 30 days: ${u.uptime_30d}%.` : '.'));
+        }
+    }).catch(() => {});
+
     fetch('/api/help/ai').then(r => r.ok ? r.json() : Promise.reject(r.status)).then(d => {
         const n = d.features.length;
         document.getElementById('ai-body').innerHTML = `

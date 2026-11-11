@@ -13,9 +13,10 @@
  */
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
-const { requireCompanyAccess, requireSuperAdmin } = require('../middleware/auth');
+const { requireCompanyAccess, requireSuperAdmin, requireSharedContentEditor } = require('../middleware/auth');
 const { isValidUUID } = require('../utils/sanitize');
 const { splitReportFor, skuKey } = require('../utils/report-groups');
+const { normalizeOptions: acctOptions, accountingExportFor } = require('../utils/accounting-export');
 
 const router = express.Router();
 const ISO_TS = /^\d{4}-\d{2}-\d{2}([T ][0-9:.]+(Z|[+-]\d{2}:?\d{2})?)?$/;
@@ -49,6 +50,35 @@ router.get('/companies/:companyId/reports/ppg-split', requireCompanyAccess, asyn
     }
 });
 
+/** GET /companies/:companyId/reports/accounting-export -- a customer's bills, for CHC to send or check. */
+router.get('/companies/:companyId/reports/accounting-export', requireCompanyAccess, async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { location_id, from, to } = req.query;
+        if (!isValidUUID(companyId)) return res.status(400).json({ error: 'Invalid company.' });
+        if (location_id && !isValidUUID(String(location_id))) return res.status(400).json({ error: 'Invalid shop.' });
+        if (from && !ISO_TS.test(String(from))) return res.status(400).json({ error: 'Invalid start date.' });
+        if (to && !ISO_TS.test(String(to))) return res.status(400).json({ error: 'Invalid end date.' });
+        const { data: company } = await supabaseAdmin.from('companies').select('id, name').eq('id', companyId).maybeSingle();
+        if (!company) return res.status(404).json({ error: 'Company not found.' });
+        const opts = acctOptions(req.query, { supplier: req.distributor && req.distributor.name });
+        if (opts.error) return res.status(400).json({ error: opts.error });
+        const out = await accountingExportFor(supabaseAdmin, {
+            companyId, locationId: location_id || null, from: from || null, to: to || null, options: opts.value,
+            label: `${company.name} ${String(from || '').slice(0, 10)} ${String(to || '').slice(0, 10)}`
+        });
+        res.set('Content-Type', 'text/csv; charset=utf-8');
+        res.set('Content-Disposition', `attachment; filename="${out.filename}"`);
+        res.set('X-Bill-Count', String(out.bills));
+        res.set('X-Skipped', JSON.stringify(out.skipped));
+        res.set('Access-Control-Expose-Headers', 'X-Bill-Count, X-Skipped, Content-Disposition');
+        res.send(out.csv);
+    } catch (err) {
+        console.error('Admin accounting export error:', err);
+        res.status(500).json({ error: 'Failed to build the accounting export.' });
+    }
+});
+
 router.get('/report-groups/overrides', requireSuperAdmin, async (req, res) => {
     const { data, error } = await supabaseAdmin.from('report_item_groups')
         .select('sku_key, sku, report_group, reason, updated_at').order('updated_at', { ascending: false }).limit(2000);
@@ -60,7 +90,7 @@ router.get('/report-groups/overrides', requireSuperAdmin, async (req, res) => {
     res.json({ overrides: data || [] });
 });
 
-router.put('/report-groups/overrides', requireSuperAdmin, async (req, res) => {
+router.put('/report-groups/overrides', requireSuperAdmin, requireSharedContentEditor, async (req, res) => {
     const b = req.body || {};
     const sku = String(b.sku == null ? '' : b.sku).replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 80);
     const key = skuKey(sku);
@@ -78,7 +108,7 @@ router.put('/report-groups/overrides', requireSuperAdmin, async (req, res) => {
     res.json({ override: row });
 });
 
-router.delete('/report-groups/overrides/:skuKey', requireSuperAdmin, async (req, res) => {
+router.delete('/report-groups/overrides/:skuKey', requireSuperAdmin, requireSharedContentEditor, async (req, res) => {
     const key = skuKey(req.params.skuKey);
     if (!key) return res.status(400).json({ error: 'Invalid part number.' });
     const { error } = await supabaseAdmin.from('report_item_groups').delete().eq('sku_key', key);

@@ -1,0 +1,35 @@
+name: Watchdog
+
+# Watches the watcher. Once an hour, from GitHub (outside both Railway and
+# Supabase): is the app ready, and has the uptime monitor inside Supabase
+# checked in the last 5 minutes? A failed run is GitHub's notification to the
+# repository's watchers -- turn on "Actions" notifications in the GitHub
+# mobile app to get it as a push.
+
+on:
+  schedule:
+    - cron: '41 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APP_URL: ${{ vars.APP_URL || 'https://chcsale.com' }}
+    steps:
+      - name: App and uptime monitor
+        run: |
+          for attempt in 1 2 3; do
+            body=$(curl -sS -m 20 -w '\n%{http_code}' "$APP_URL/api/health/ready" || true)
+            code=$(echo "$body" | tail -n1); json=$(echo "$body" | sed '$d')
+            if [ "$code" = "200" ] && echo "$json" | grep -q '"status":"ready"'; then break; fi
+            echo "Attempt $attempt: HTTP $code $json"; sleep 30
+          done
+          echo "HTTP $code: $json"
+          if [ "$code" != "200" ]; then echo "::error::$APP_URL is not ready (HTTP $code)"; exit 1; fi
+          if echo "$json" | grep -q '"uptime_monitor":"stale"'; then echo "::error::The uptime monitor inside Supabase has stopped checking"; exit 1; fi
+          echo "App ready; monitor: $(echo "$json" | sed -n 's/.*"uptime_monitor":"\([a-z]*\)".*/\1/p')" >> "$GITHUB_STEP_SUMMARY"

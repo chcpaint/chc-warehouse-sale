@@ -138,6 +138,9 @@
                 <button onclick="adminNav('audit')" data-nav="audit" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-audit">
                     <i class="fas fa-clipboard-list w-5"></i> Audit Log
                 </button>
+                <button onclick="adminNav('platform')" data-nav="platform" class="sidebar-link hidden w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-platform">
+                    <i class="fas fa-globe w-5"></i> Distributors
+                </button>
                 <div class="border-t my-2"></div>
                 <button onclick="adminNav('branding')" data-nav="branding" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-branding">
                     <i class="fas fa-paint-brush w-5"></i> Branding
@@ -1181,6 +1184,7 @@
                         <button id="rep-tab-rebate" role="tab" onclick="repShowTab('rebate')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Rebates</button>
                         <button id="rep-tab-brand" role="tab" onclick="repShowTab('brand')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Monthly brand</button>
                         <button id="rep-tab-ppg" role="tab" onclick="repShowTab('ppg')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">PPG vs sundries</button>
+                        <button id="rep-tab-uptime" role="tab" onclick="repShowTab('uptime')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Uptime</button>
                     </div>
                     <div id="rep-orders-pane">
                     <div class="flex flex-wrap gap-3 items-end mb-4">
@@ -1225,8 +1229,10 @@
                             <button onclick="downloadAdminReportCSV('items')" class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Item CSV</button>
                             <button onclick="downloadAdminReportPDF(false)" class="px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm"><i class="fas fa-file-pdf mr-1"></i>Purchase report PDF</button>
                             <button onclick="downloadAdminReportPDF(true)" class="px-3 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-sm"><i class="fas fa-print mr-1"></i>Print</button>
+                            <button onclick="openAdminAcctExport()" class="px-3 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-sm"><i class="fas fa-file-export mr-1"></i>Accounting export</button>
                         </div>
                     </div>
+                    <div id="admin-acx-panel" class="hidden mb-4"></div>
                     <p class="text-xs text-gray-400 mb-3">CSV files open directly in Google Sheets or Excel.</p>
 
                     <div id="rep-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
@@ -1293,6 +1299,22 @@
                             </tr></thead>
                             <tbody id="rebate-report-body"></tbody>
                         </table></div></div>
+                    </div>
+
+                    <div id="rep-uptime-pane" class="hidden">
+                        <p class="text-xs text-gray-500 mb-3">Checked every minute from Supabase, separately from the app's own servers. Two failures in a row send an alert; another goes out when it recovers.</p>
+                        <div id="uptime-body"><p class="text-sm text-gray-400">Loading&hellip;</p></div>
+                        <div id="uptime-settings" class="hidden bg-white rounded-xl shadow-sm border p-4 mt-4">
+                            <p class="font-semibold text-gray-700 text-sm mb-2">Who gets alerts</p>
+                            <div class="flex flex-wrap gap-3 items-end">
+                                <div class="flex-1 min-w-[220px]"><label for="uptime-emails" class="block text-xs font-semibold text-gray-500 mb-1">Email addresses (comma separated)</label>
+                                    <input id="uptime-emails" maxlength="600" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                                <div class="flex-1 min-w-[220px]"><label for="uptime-webhook" class="block text-xs font-semibold text-gray-500 mb-1">Slack, Teams or Discord webhook (optional)</label>
+                                    <input id="uptime-webhook" maxlength="500" placeholder="https://..." class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                                <button onclick="uptimeSave()" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">Save</button>
+                            </div>
+                            <p id="uptime-settings-note" class="text-xs text-gray-400 mt-2"></p>
+                        </div>
                     </div>
 
                     <div id="rep-ppg-pane" class="hidden">
@@ -1457,6 +1479,47 @@
                 </section>
 
                 <!-- Audit Log -->
+                <!-- refinishAI platform console: licensing distributors (platform_admin only) -->
+                <section id="section-platform" class="hidden fade-in">
+                    <p class="text-sm text-gray-500 mb-4">Every distributor licensed to use refinishAI. CHC is the founding distributor. A distributor's own super admins run their customers, staff, branches and catalogue in this same console, on their own web address.</p>
+                    <div id="pl-warning" class="hidden mb-4 rounded-lg px-4 py-3 text-sm bg-amber-50 text-amber-800 border border-amber-200"></div>
+                    <div id="pl-list" class="mb-6"></div>
+                    <div class="bg-white rounded-xl shadow-sm border p-5">
+                        <h3 id="pl-form-title" class="font-bold text-gray-800 mb-3">Onboard a distributor</h3>
+                        <input type="hidden" id="pl-id">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div><label for="pl-name" class="block text-xs font-semibold text-gray-500 mb-1">Name *</label><input id="pl-name" maxlength="120" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-short" class="block text-xs font-semibold text-gray-500 mb-1">Short name (shown to its shops)</label><input id="pl-short" maxlength="40" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-slug" class="block text-xs font-semibold text-gray-500 mb-1">Web name (new only)</label><input id="pl-slug" maxlength="80" placeholder="northwind" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-domain" class="block text-xs font-semibold text-gray-500 mb-1">Own domain (optional)</label><input id="pl-domain" maxlength="253" placeholder="orders.example.com" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-country" class="block text-xs font-semibold text-gray-500 mb-1">Country</label><select id="pl-country" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"><option value="CA">Canada</option><option value="US">United States</option></select></div>
+                            <div><label for="pl-contact" class="block text-xs font-semibold text-gray-500 mb-1">Main contact email</label><input id="pl-contact" type="email" maxlength="255" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-support" class="block text-xs font-semibold text-gray-500 mb-1">Support email for its shops</label><input id="pl-support" type="email" maxlength="255" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-billing" class="block text-xs font-semibold text-gray-500 mb-1">Billing contact email</label><input id="pl-billing" type="email" maxlength="255" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-phone" class="block text-xs font-semibold text-gray-500 mb-1">Phone</label><input id="pl-phone" maxlength="40" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                        </div>
+                        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-5 mb-2">Licence</p>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div><label for="pl-status" class="block text-xs font-semibold text-gray-500 mb-1">Status</label><select id="pl-status" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                <option value="trial">Trial</option><option value="active">Active</option><option value="past_due">Past due</option><option value="suspended">Suspended</option><option value="cancelled">Cancelled</option></select></div>
+                            <div><label for="pl-plan" class="block text-xs font-semibold text-gray-500 mb-1">Plan</label><input id="pl-plan" maxlength="40" placeholder="standard" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-term" class="block text-xs font-semibold text-gray-500 mb-1">Billed</label><select id="pl-term" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"><option value="annual">Annually</option><option value="monthly">Monthly</option></select></div>
+                            <div class="flex gap-2"><div class="flex-1"><label for="pl-fee" class="block text-xs font-semibold text-gray-500 mb-1">Fee per term</label><input id="pl-fee" type="number" min="0" step="0.01" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                                <div><label for="pl-currency" class="block text-xs font-semibold text-gray-500 mb-1">&nbsp;</label><select id="pl-currency" class="px-2 py-2 border rounded-lg text-sm bg-white"><option>CAD</option><option>USD</option></select></div></div>
+                            <div><label for="pl-renews" class="block text-xs font-semibold text-gray-500 mb-1">Renews on</label><input id="pl-renews" type="date" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-trial" class="block text-xs font-semibold text-gray-500 mb-1">Trial ends (blank = 30 days)</label><input id="pl-trial" type="date" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div><label for="pl-max" class="block text-xs font-semibold text-gray-500 mb-1">Customer limit (blank = none)</label><input id="pl-max" type="number" min="0" step="1" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                            <div class="col-span-2 md:col-span-4"><label for="pl-notes" class="block text-xs font-semibold text-gray-500 mb-1">Notes (private to refinishAI)</label><textarea id="pl-notes" rows="2" maxlength="2000" class="w-full px-3 py-2 border rounded-lg text-sm"></textarea></div>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-2">A suspended or cancelled licence, or a trial past its end date, pauses that distributor's console, shops and kiosks until it is set back to active. CHC can never be paused.</p>
+                        <div class="flex gap-2 mt-4">
+                            <button onclick="plSave()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm" id="pl-save">Onboard distributor</button>
+                            <button onclick="plResetForm()" class="px-4 py-2 border rounded-lg text-sm text-gray-600">Clear</button>
+                        </div>
+                    </div>
+                    <div id="pl-staff" class="hidden bg-white rounded-xl shadow-sm border p-5 mt-6"></div>
+                </section>
+
                 <section id="section-audit" class="hidden fade-in">
                     <div id="audit-log-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
                         <table class="w-full">
@@ -2762,6 +2825,13 @@
             return;
         }
 
+        // The refinishAI platform admin: the Distributors console only.
+        if (admin.user.role === 'platform_admin') {
+            document.querySelectorAll('.sidebar-link').forEach(el => el.classList.toggle('hidden', el.dataset.nav !== 'platform'));
+            adminNav('platform');
+            return;
+        }
+
         // Hide super-admin-only nav items
         if (admin.user.role !== 'super_admin') {
             document.getElementById('nav-admins').classList.add('hidden');
@@ -2821,7 +2891,7 @@
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products', pricing: 'Customer Pricing',
             library: 'Item Library', master: 'Master Table', kits: 'Kits',
-            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding', tax: 'Tax & Region', billing: 'Billing' };
+            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding', tax: 'Tax & Region', billing: 'Billing', platform: 'Distributors (refinishAI platform)' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
         if (section === 'dashboard') dbLoad();
@@ -2838,6 +2908,105 @@
         if (section === 'branding') loadBrandingInfo();
         if (section === 'tax') dtLoad();
         if (section === 'billing') blLoad();
+        if (section === 'platform') plLoad();
+    }
+
+    // ============================================================
+    // PLATFORM: distributors and their licences (platform_admin)
+    // ============================================================
+    let plData = [];
+    const PL_STATUS = { trial: ['Trial', 'bg-blue-100 text-blue-800'], active: ['Active', 'bg-green-100 text-green-800'], past_due: ['Past due', 'bg-amber-100 text-amber-800'],
+        suspended: ['Suspended', 'bg-red-100 text-red-800'], cancelled: ['Cancelled', 'bg-gray-200 text-gray-700'] };
+    const plMoney = (n, c) => `${c === 'USD' ? 'US$' : '$'}${Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    async function plLoad() {
+        const box = document.getElementById('pl-list');
+        box.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
+        try {
+            const r = await adminFetch('/platform/distributors'); const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Failed to load.');
+            plData = d.distributors || [];
+            const warn = document.getElementById('pl-warning');
+            const notes = [];
+            if (!d.licence_ready) notes.push('Run migration 066_distributor_licensing.sql in Supabase to record licence terms.');
+            if (!d.platform_domain) notes.push('No platform domain is set (PLATFORM_DOMAIN in Railway), so each new distributor needs its own domain before staff can be invited.');
+            warn.textContent = notes.join(' '); warn.classList.toggle('hidden', !notes.length);
+            box.innerHTML = `<div class="bg-white rounded-xl shadow-sm border overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+                <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr><th class="text-left px-4 py-2">Distributor</th><th class="text-left px-4 py-2">Licence</th>
+                <th class="text-right px-4 py-2">Fee</th><th class="text-left px-4 py-2">Renews / trial ends</th><th class="text-right px-4 py-2">Customers</th>
+                <th class="text-right px-4 py-2">Shops</th><th class="text-right px-4 py-2">Staff</th><th class="text-right px-4 py-2">Orders (30 days)</th><th></th></tr></thead><tbody>` +
+                plData.map(x => { const st = PL_STATUS[x.licence_status || 'active'] || PL_STATUS.active; const u = x.usage || {};
+                    return `<tr class="border-t align-top"><td class="px-4 py-2"><div class="font-semibold">${escA(x.name)}${x.is_default ? ' <span class="text-xs text-gray-400">(founding)</span>' : ''}</div>
+                        <div class="text-xs text-gray-400">${escA(x.address || '')}</div></td>
+                    <td class="px-4 py-2"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${st[1]}">${st[0]}</span><div class="text-xs text-gray-500 mt-1">${escA(x.licence_plan || '')}${x.licence_term ? ' &middot; ' + escA(x.licence_term) : ''}</div></td>
+                    <td class="px-4 py-2 text-right">${x.licence_fee != null ? plMoney(x.licence_fee, x.licence_currency) : '&mdash;'}</td>
+                    <td class="px-4 py-2">${escA(x.licence_status === 'trial' ? (x.trial_ends_on || '') : (x.licence_renews_on || ''))}</td>
+                    <td class="px-4 py-2 text-right">${u.companies || 0}${x.max_companies != null ? ' / ' + x.max_companies : ''}</td>
+                    <td class="px-4 py-2 text-right">${u.locations || 0}</td><td class="px-4 py-2 text-right">${u.staff || 0}</td>
+                    <td class="px-4 py-2 text-right">${u.orders_30d || 0}<div class="text-xs text-gray-400">${plMoney(u.dollars_30d)}</div></td>
+                    <td class="px-4 py-2 text-right whitespace-nowrap"><button onclick="plEdit('${x.id}')" class="text-blue-600 hover:text-blue-800 text-xs mr-3">Edit</button>
+                        <button onclick="plStaff('${x.id}')" class="text-blue-600 hover:text-blue-800 text-xs">Staff</button></td></tr>`; }).join('') +
+                '</tbody></table></div></div>';
+        } catch (e) { box.innerHTML = `<p class="text-sm text-red-600">${escA(e.message)}</p>`; }
+    }
+    const PL_FIELDS = { name: 'pl-name', short_name: 'pl-short', custom_domain: 'pl-domain', country: 'pl-country', contact_email: 'pl-contact', support_email: 'pl-support',
+        billing_contact_email: 'pl-billing', contact_phone: 'pl-phone', licence_status: 'pl-status', licence_plan: 'pl-plan', licence_term: 'pl-term', licence_fee: 'pl-fee',
+        licence_currency: 'pl-currency', licence_renews_on: 'pl-renews', trial_ends_on: 'pl-trial', max_companies: 'pl-max', licence_notes: 'pl-notes' };
+    function plResetForm() {
+        document.getElementById('pl-id').value = '';
+        Object.values(PL_FIELDS).forEach(id => { const el = document.getElementById(id); el.value = el.tagName === 'SELECT' ? el.options[0].value : ''; });
+        document.getElementById('pl-slug').value = ''; document.getElementById('pl-slug').disabled = false;
+        document.getElementById('pl-form-title').textContent = 'Onboard a distributor';
+        document.getElementById('pl-save').textContent = 'Onboard distributor';
+    }
+    function plEdit(id) {
+        const x = plData.find(d => d.id === id); if (!x) return;
+        document.getElementById('pl-id').value = id;
+        for (const [k, el] of Object.entries(PL_FIELDS)) document.getElementById(el).value = x[k] == null ? '' : x[k];
+        document.getElementById('pl-slug').value = x.slug; document.getElementById('pl-slug').disabled = true;
+        document.getElementById('pl-form-title').textContent = `Edit ${x.name}`;
+        document.getElementById('pl-save').textContent = 'Save changes';
+        document.getElementById('pl-form-title').scrollIntoView({ behavior: 'smooth' });
+    }
+    async function plSave() {
+        const id = document.getElementById('pl-id').value;
+        const body = {};
+        for (const [k, el] of Object.entries(PL_FIELDS)) {
+            const v = document.getElementById(el).value.trim();
+            if (k === 'licence_fee') body[k] = v === '' ? 0 : Number(v);
+            else if (k === 'max_companies') body[k] = v === '' ? null : Number(v);
+            else if (['licence_renews_on', 'trial_ends_on'].includes(k)) { if (v || id) body[k] = v || null; }
+            else body[k] = v;
+        }
+        if (!id) body.slug = document.getElementById('pl-slug').value.trim() || undefined;
+        if (!body.name) { alert('Enter the distributor name.'); return; }
+        const r = await adminFetch(id ? `/platform/distributors/${id}` : '/platform/distributors', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(d.error || 'Could not save.'); return; }
+        if (typeof adminToast === 'function') adminToast(id ? 'Distributor updated' : 'Distributor onboarded');
+        plResetForm(); plLoad();
+        if (!id && d.distributor) plStaff(d.distributor.id);
+    }
+    async function plStaff(id) {
+        const x = plData.find(d => d.id === id) || { name: 'the distributor', id };
+        const box = document.getElementById('pl-staff'); box.classList.remove('hidden');
+        box.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
+        const r = await adminFetch(`/platform/distributors/${id}/admins`); const d = await r.json().catch(() => ({}));
+        box.innerHTML = `<h3 class="font-bold text-gray-800 mb-1">${escA(x.name)}: staff</h3>
+            <p class="text-xs text-gray-500 mb-3">Invite the distributor's first super admin here. They set their own password from the email and then add the rest of their team, branches and customers themselves.</p>
+            ${(d.admins || []).length ? `<table class="w-full text-sm mb-4"><tbody>${d.admins.map(a => `<tr class="border-t"><td class="py-2">${escA(a.name)}</td><td class="py-2 text-gray-500">${escA(a.email)}</td><td class="py-2">${escA(a.role)}</td><td class="py-2 text-gray-500">${escA(a.status)}</td></tr>`).join('')}</tbody></table>` : '<p class="text-sm text-gray-400 mb-4">No staff yet.</p>'}
+            <div class="flex flex-wrap gap-2 items-end"><div><label for="pl-inv-name" class="block text-xs font-semibold text-gray-500 mb-1">Name</label><input id="pl-inv-name" maxlength="120" class="px-3 py-2 border rounded-lg text-sm"></div>
+            <div><label for="pl-inv-email" class="block text-xs font-semibold text-gray-500 mb-1">Email</label><input id="pl-inv-email" type="email" maxlength="255" class="px-3 py-2 border rounded-lg text-sm"></div>
+            <button onclick="plInvite('${id}')" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">Invite super admin</button></div>
+            <p id="pl-inv-result" class="text-sm mt-3"></p>`;
+    }
+    async function plInvite(id) {
+        const body = { name: document.getElementById('pl-inv-name').value.trim(), email: document.getElementById('pl-inv-email').value.trim() };
+        const r = await adminFetch(`/platform/distributors/${id}/admins`, { method: 'POST', body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(d.error || 'Could not invite.'); return; }
+        await plStaff(id);
+        document.getElementById('pl-inv-result').innerHTML = (d.email_sent ? 'Invitation emailed. ' : 'Email is not set up, so send this link yourself. ') +
+            `Invitation link (valid 7 days): <a class="text-blue-600 break-all" href="${escA(d.invite_url)}" target="_blank" rel="noopener">${escA(d.invite_url)}</a><br>They sign in at ${escA(d.sign_in_url)}.`;
     }
 
     // ============================================================
@@ -2907,7 +3076,7 @@
     // WEEKLY ADOPTION (Reports > Weekly adoption)
     // ============================================================
     function repShowTab(which) {
-        const panes = { orders: 'rep-orders-pane', adopt: 'rep-adopt-pane', rebate: 'rep-rebate-pane', brand: 'rep-brand-pane', ppg: 'rep-ppg-pane' };
+        const panes = { orders: 'rep-orders-pane', adopt: 'rep-adopt-pane', rebate: 'rep-rebate-pane', brand: 'rep-brand-pane', ppg: 'rep-ppg-pane', uptime: 'rep-uptime-pane' };
         const on = 'px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700';
         const off = 'px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700';
         Object.entries(panes).forEach(([k, id]) => {
@@ -2918,6 +3087,63 @@
         if (which === 'rebate') rebateReportLoad();
         if (which === 'brand') brandReportsLoad();
         if (which === 'ppg') ppgOpen();
+        if (which === 'uptime') uptimeLoad();
+    }
+
+    // ============================================================
+    // UPTIME (Reports > Uptime) -- results of the monitor in Supabase
+    // ============================================================
+    async function uptimeLoad() {
+        const box = document.getElementById('uptime-body');
+        const pct = v => v == null ? '<span class="text-gray-400">no data</span>' : `${Number(v).toFixed(Number(v) === 100 ? 0 : 2)}%`;
+        const ago = ts => { if (!ts) return 'never'; const m = Math.round((Date.now() - Date.parse(ts)) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.round(m / 60) + ' h ago'; };
+        try {
+            const r = await adminFetch('/uptime'); const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Failed to load.');
+            if (!d.installed) { box.innerHTML = `<p class="text-sm text-amber-700">${escA(d.message)}</p>`; return; }
+            const warn = d.monitor === 'ok' ? '' : `<p class="mb-3 rounded-lg px-4 py-3 text-sm bg-amber-50 text-amber-800 border border-amber-200">The monitor has not checked in the last 5 minutes${d.monitor === 'off' ? ' (no checks yet)' : ''}. If this lasts, check the "refinishai-uptime" job in Supabase > Integrations > Cron.</p>`;
+            box.innerHTML = warn + `<div class="bg-white rounded-xl shadow-sm border overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+                <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr><th class="text-left px-4 py-2">Page</th><th class="text-left px-4 py-2">Now</th>
+                <th class="text-right px-4 py-2">24 hours</th><th class="text-right px-4 py-2">7 days</th><th class="text-right px-4 py-2">30 days</th>
+                <th class="text-right px-4 py-2">Avg response</th><th class="text-right px-4 py-2">Last check</th></tr></thead><tbody>` +
+                d.targets.map(t => `<tr class="border-t"><td class="px-4 py-2"><div class="font-medium">${escA(t.name)}</div><div class="text-xs text-gray-400">${escA(t.url)}</div></td>
+                    <td class="px-4 py-2">${t.last_ok == null ? '<span class="text-gray-400">waiting</span>' : t.last_ok && !t.open_incident
+                        ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">Up</span>'
+                        : '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">Down</span>'}</td>
+                    <td class="px-4 py-2 text-right">${pct(t.uptime_24h)}</td><td class="px-4 py-2 text-right">${pct(t.uptime_7d)}</td><td class="px-4 py-2 text-right">${pct(t.uptime_30d)}</td>
+                    <td class="px-4 py-2 text-right">${t.avg_ms_24h ? t.avg_ms_24h + ' ms' : '&mdash;'}</td><td class="px-4 py-2 text-right text-gray-500">${ago(t.last_checked)}</td></tr>`).join('') +
+                `</tbody></table></div></div>
+                <p class="font-semibold text-gray-700 text-sm mt-5 mb-2">Incidents</p>` +
+                (d.incidents.length ? `<div class="bg-white rounded-xl shadow-sm border overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                    <th class="text-left px-4 py-2">Page</th><th class="text-left px-4 py-2">Started</th><th class="text-left px-4 py-2">Ended</th><th class="text-left px-4 py-2">First error</th></tr></thead><tbody>` +
+                    d.incidents.map(i => `<tr class="border-t"><td class="px-4 py-2">${escA(i.target)}</td><td class="px-4 py-2">${new Date(i.started_at).toLocaleString()}</td>
+                        <td class="px-4 py-2">${i.resolved_at ? new Date(i.resolved_at).toLocaleString() : '<span class="text-red-700 font-semibold">Ongoing</span>'}</td><td class="px-4 py-2 text-gray-600">${escA(i.first_error || '')}</td></tr>`).join('') +
+                    '</tbody></table></div></div>' : '<p class="text-sm text-gray-400">No incidents recorded.</p>') +
+                `<p class="font-semibold text-gray-700 text-sm mt-5 mb-2">Nightly backups and restore drills</p>` +
+                (d.backups == null ? '<p class="text-sm text-amber-700">Run migration 065_backup_runs.sql in Supabase to record backup results here.</p>'
+                    : d.backups.length ? `<div class="bg-white rounded-xl shadow-sm border overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                    <th class="text-left px-4 py-2">Night</th><th class="text-left px-4 py-2">Restore drill</th><th class="text-right px-4 py-2">Tables</th><th class="text-right px-4 py-2">Rows checked</th><th class="text-right px-4 py-2">Files</th><th class="text-left px-4 py-2"></th></tr></thead><tbody>` +
+                    d.backups.map(b => `<tr class="border-t"><td class="px-4 py-2">${new Date(b.run_at).toLocaleString()}</td>
+                        <td class="px-4 py-2">${b.status === 'passed' ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">Passed</span>' : '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">Failed</span>'}${b.note ? `<div class="text-xs text-gray-500">${escA(b.note)}</div>` : ''}</td>
+                        <td class="px-4 py-2 text-right">${b.tables ?? ''}</td><td class="px-4 py-2 text-right">${b.rows_checked != null ? Number(b.rows_checked).toLocaleString() : ''}</td><td class="px-4 py-2 text-right">${b.files ?? ''}</td>
+                        <td class="px-4 py-2">${b.run_url ? `<a class="text-blue-600 text-xs" href="${escA(b.run_url)}" target="_blank" rel="noopener">Run</a>` : ''}</td></tr>`).join('') +
+                    '</tbody></table></div></div>' : '<p class="text-sm text-gray-400">No backup has reported yet. Add the GitHub secrets in docs/OPERATIONS.md and run the backup workflow once.</p>');
+            document.getElementById('uptime-settings').classList.remove('hidden');
+            document.getElementById('uptime-emails').value = (d.settings.alert_emails || []).join(', ');
+            document.getElementById('uptime-webhook').placeholder = d.settings.webhook_set ? 'A webhook is set (enter a new one to replace it)' : 'https://...';
+            document.getElementById('uptime-settings-note').textContent = `Alerts are sent from ${d.settings.from_email} through SendGrid after ${d.settings.fail_threshold} failed checks in a row.`;
+        } catch (e) { box.innerHTML = `<p class="text-sm text-red-600">${escA(e.message || 'Failed to load.')}</p>`; }
+    }
+    async function uptimeSave() {
+        const body = { alert_emails: document.getElementById('uptime-emails').value };
+        const w = document.getElementById('uptime-webhook').value.trim();
+        if (w) body.webhook_url = w;
+        const r = await adminFetch('/uptime/settings', { method: 'PUT', body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(d.error || 'Could not save.'); return; }
+        document.getElementById('uptime-webhook').value = '';
+        if (typeof adminToast === 'function') adminToast('Alert settings saved');
+        uptimeLoad();
     }
 
     // ============================================================
@@ -3412,6 +3638,27 @@
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
         a.download = `CHC-report-${name}-${arSlug()}.csv`; a.click(); URL.revokeObjectURL(a.href);
     }
+    // A customer's bills for QuickBooks Online / Xero / CSV (shared panel: /accounting-export.js).
+    function openAdminAcctExport() {
+        const companyId = document.getElementById('rep-company').value;
+        if (!companyId) { alert('Choose a company first.'); return; }
+        if (!window.ACX) return;
+        ACX.toggle(document.getElementById('admin-acx-panel'), {
+            supplier: 'the distributor',
+            getFilters: () => {
+                const p = new URLSearchParams();
+                const shop = document.getElementById('rep-shop').value;
+                const { from, to } = arPeriodRange(document.getElementById('rep-period').value);
+                if (shop) p.set('location_id', shop);
+                if (from) p.set('from', from);
+                if (to) p.set('to', to);
+                return p;
+            },
+            fetchCsv: q => fetch(`${API}/companies/${encodeURIComponent(document.getElementById('rep-company').value)}/reports/accounting-export?${q}`,
+                { headers: { 'Authorization': `Bearer ${admin.token}` } })
+        });
+    }
+
     // The Purchase report PDF (shared with the shop console): summary, by
     // location, by order, by item, and each shop's items. See /purchase-report.js.
     function downloadAdminReportPDF(printIt) {
@@ -10413,6 +10660,7 @@
     <script src="/admin-look.js"></script>
     <script src="/ppg-split.js"></script>
     <script src="/purchase-report.js"></script>
+    <script src="/accounting-export.js"></script>
     <script src="/support-footer.js"></script>
     <script src="/help-content.js"></script>
     <script src="/help-bot.js"></script>

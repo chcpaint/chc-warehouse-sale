@@ -16,13 +16,14 @@
 
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
-const { requireSuperAdmin } = require('../middleware/auth');
+const { requireSuperAdmin, requireSharedContentEditor } = require('../middleware/auth');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
 const { suggestCrossoverAlternatives } = require('../utils/crossover-import');
 
 const router = express.Router();
 
 router.use(requireSuperAdmin);
+router.use(requireSharedContentEditor);   // other distributors read; only the platform team edits
 
 function text(v, max = 200) {
     return stripHtml(String(v === undefined || v === null ? '' : v)).trim().slice(0, max);

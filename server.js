@@ -50,6 +50,13 @@ app.use(helmet({
     crossOriginEmbedderPolicy: false
 }));
 
+// Browser features the console may use: the camera (barcode scanning) and
+// payments on its own pages; nothing else, and nothing for embedded content.
+app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(), payment=(self), usb=(), interest-cohort=()');
+    next();
+});
+
 // CORS
 app.use(cors({
     origin: process.env.NODE_ENV === 'production'
@@ -159,11 +166,13 @@ app.use('/assets', express.static(path.join(__dirname, 'public', 'assets')));
 // ok / not ok and a timing, never data.
 app.get('/api/health/ready', async (req, res) => {
     const { supabaseAdmin } = require('./utils/supabase');
-    const db = await require('./utils/health').checkDatabase(supabaseAdmin);
+    const health = require('./utils/health');
+    const db = await health.checkDatabase(supabaseAdmin);
     res.status(db.ok ? 200 : 503).json({
         status: db.ok ? 'ready' : 'unavailable',
         database: db.ok ? 'ok' : db.error,
         ms: db.ms,
+        uptime_monitor: db.ok ? await health.monitorStatus(supabaseAdmin) : 'unknown',
         timestamp: new Date().toISOString()
     });
 });
@@ -243,6 +252,21 @@ app.get('/store/:slug/*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'store.html'));
 });
 
+// Vulnerability disclosure (RFC 9116). Served explicitly: express.static skips
+// dot-folders, and the catch-all below would otherwise answer with a web page.
+app.get('/.well-known/security.txt', (req, res) => {
+    const expires = new Date(Date.now() + 180 * 864e5);
+    expires.setUTCHours(0, 0, 0, 0);
+    res.type('text/plain').set('Cache-Control', 'public, max-age=86400').send([
+        'Contact: mailto:adam@chcpaint.com',
+        `Expires: ${expires.toISOString()}`,
+        'Preferred-Languages: en',
+        `Canonical: ${(process.env.APP_URL || 'https://chcsale.com').replace(/\/$/, '')}/.well-known/security.txt`,
+        `Policy: ${(process.env.APP_URL || 'https://chcsale.com').replace(/\/$/, '')}/help#report`,
+        ''
+    ].join('\n'));
+});
+
 // Help: how-to answers, security and data protection, where AI is used.
 // Public on purpose: a buyer's IT team should be able to read it before signing in.
 app.get('/help', (req, res) => {
@@ -296,7 +320,7 @@ app.use((req, res) => {
 // ============================================================
 
 const server = app.listen(PORT, () => {
-    console.log(`\n🏭 CHC B2B Platform running on port ${PORT}`);
+    console.log(`\n🏭 refinishAI platform running on port ${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   Store: http://localhost:${PORT}/store/{company-slug}`);
     console.log(`   Admin: http://localhost:${PORT}/admin`);
@@ -306,6 +330,9 @@ const server = app.listen(PORT, () => {
     try {
         for (const w of require('./utils/config-check').configWarnings()) console.warn(`   CONFIG WARNING: ${w}`);
     } catch (_) { /* a check must never take the console down */ }
+
+    // Turn on the per-distributor order fence once migration 066 is in place.
+    require('./utils/order-scope').detectOrderDistributorColumn().catch(() => {});
 
     // Scheduled work — currently the refinishAI low-stock digest, which goes
     // out in the morning of the shop's own time zone. Runs in this process

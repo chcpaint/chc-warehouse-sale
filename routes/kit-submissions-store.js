@@ -29,6 +29,7 @@
 
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
+const { libraryTable } = require('../utils/library-scope');
 const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
 const { moduleSettings, moduleEnabled } = require('../utils/modules');
@@ -295,7 +296,7 @@ router.get('/parts', async (req, res) => {
         if (req.autoMapping) {
             let filter = `sku.ilike.%${q}%,name.ilike.%${q}%`;
             if (qKey) filter += `,sku_key.ilike.%${qKey}%`;
-            const lib = await supabaseAdmin.from('item_library')
+            const lib = await libraryTable(req)
                 .select('sku, name, brand, unit').or(filter).order('sku').limit(12);
             if (lib.error) throw lib.error;
             for (const p of lib.data || []) {
@@ -360,7 +361,7 @@ router.post('/my-kits', async (req, res) => {
         if (req.autoMapping) {
             const missing = wanted.filter(w => !prodByKey.has(w.key)).map(w => w.key);
             if (missing.length) {
-                const { data: lib, error: lErr } = await supabaseAdmin.from('item_library')
+                const { data: lib, error: lErr } = await libraryTable(req)
                     .select('sku, sku_key, unit').in('sku_key', missing);
                 if (lErr) throw lErr;
                 libByKey = new Map((lib || []).map(r => [r.sku_key, r]));
@@ -561,7 +562,7 @@ router.put('/my-kits/:kitId', async (req, res) => {
             if (req.autoMapping) {
                 const missing = added.filter(a => !prodByKey.has(a.key)).map(a => a.key);
                 if (missing.length) {
-                    const { data: lib, error: lErr } = await supabaseAdmin.from('item_library').select('sku, sku_key').in('sku_key', missing);
+                    const { data: lib, error: lErr } = await libraryTable(req).select('sku, sku_key').in('sku_key', missing);
                     if (lErr) throw lErr;
                     libByKey = new Map((lib || []).map(r => [r.sku_key, r]));
                 }

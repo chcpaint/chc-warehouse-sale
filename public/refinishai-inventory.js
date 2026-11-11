@@ -64,7 +64,7 @@
         "                            <div class=\"font-semibold text-gray-800 text-sm\">",
         "                                refinish<span class=\"text-blue-500\">AI</span> Inventory",
         "                            </div>",
-        "                            <div class=\"text-[11px] text-gray-400\">by CHC Paint &amp; Auto Body Supplies</div>",
+        "                            <div class=\"text-[11px] text-gray-400\">from <span class=\"dist-name\">CHC Paint &amp; Auto Body Supplies</span></div>",
         "                        </div>",
         "                    </div>",
         "                    <div class=\"flex items-center gap-2\">",
@@ -805,6 +805,7 @@
         if (!host) return false;
         const holder = document.createElement('div');
         holder.innerHTML = RAI.markup;
+        if (typeof applyDistLabels === 'function') applyDistLabels();
         while (holder.firstChild) host.appendChild(holder.firstChild);
 
         const actorEl = document.getElementById('inv-actor');
@@ -2177,7 +2178,7 @@
                     </button>
                     <button onclick="RAI.approveReplenishment('${o.id}')"
                         class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium">
-                        <i class="fas fa-paper-plane mr-1"></i> Approve &amp; send to CHC
+                        <i class="fas fa-paper-plane mr-1"></i> Approve &amp; send to ${RAI.esc(typeof distShort === 'function' ? distShort() : 'CHC')}
                     </button>
                 </div>
             </div>

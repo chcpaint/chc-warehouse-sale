@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>CHC B2B Platform</title>
+    <title>refinishAI</title>
     <!-- Home-screen install for the shop floor, used by the optional refinishAI
          Inventory module. iOS ignores the web manifest and reads these tags, so
          both paths are covered. The manifest itself is built at runtime (see
@@ -600,9 +600,11 @@
                         <button onclick="downloadReportCSV('items')" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"><i class="fas fa-file-csv mr-1"></i>Item summary CSV</button>
                         <button onclick="downloadReportPDF(false)" class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm"><i class="fas fa-file-pdf mr-1"></i>Purchase report PDF</button>
                         <button onclick="downloadReportPDF(true)" class="px-3 py-1.5 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-sm"><i class="fas fa-print mr-1"></i>Print</button>
+                        <button onclick="openAcctExport()" class="px-3 py-1.5 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-sm"><i class="fas fa-file-export mr-1"></i>Accounting export</button>
                         <span class="text-xs text-gray-400 ml-1">CSV files open directly in Google Sheets or Excel.</span>
                     </div>
                 </div>
+                <div id="acx-panel" class="hidden mb-4"></div>
 
                 <div id="rep-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
 
@@ -712,10 +714,10 @@
                 <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
                     <i class="fas fa-arrow-left mr-1"></i>Back to Products
                 </button>
-                <h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-address-book mr-2"></i>Contact CHC</h2>
-                <p class="text-gray-500 mb-5">Reach CHC head office or your servicing branch.</p>
+                <h2 class="text-2xl font-bold text-gray-800 mb-1"><i class="fas fa-address-book mr-2"></i>Contact <span class="dist-short">CHC</span></h2>
+                <p class="text-gray-500 mb-5">Reach <span class="dist-short">CHC</span> head office or your servicing branch.</p>
 
-                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Send CHC a Message</h3>
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Send <span class="dist-short">CHC</span> a Message</h3>
                 <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
                     <p class="text-sm text-gray-500 mb-3">Not about a specific order — a product to quote that isn't in the catalogue, a heads-up that you're closing early, a general question. Goes straight to your servicing branch.</p>
                     <div class="flex flex-col sm:flex-row items-start gap-2">
@@ -950,6 +952,22 @@
     }
 
     // ============================================================
+    // WHO SUPPLIES THIS SHOP (the distributor; CHC for chcsale.com)
+    // ============================================================
+    function distShort() {
+        const d = state.distributor;
+        // Its short name; else the first word of its name ("CHC Paint & Auto Body Supplies" -> "CHC").
+        return (d && (d.short_name || String(d.name || '').split(/\s+/)[0])) || 'CHC';
+    }
+    function applyDistLabels() {
+        document.querySelectorAll('.dist-short').forEach(el => { el.textContent = distShort(); });
+        const full = (state.distributor && state.distributor.name) || 'CHC Paint & Auto Body Supplies';
+        document.querySelectorAll('.dist-name').forEach(el => { el.textContent = full; });
+        const note = document.getElementById('contact-note-text');
+        if (note) note.placeholder = `Type a message for ${distShort()}...`;
+    }
+
+    // ============================================================
     // AUTH
     // ============================================================
     async function loadCompanyInfo() {
@@ -961,6 +979,8 @@
             }
             const data = await resp.json();
             const company = data.company;
+            state.distributor = data.distributor || null;
+            applyDistLabels();
 
             document.getElementById('login-company-name').textContent = company.name;
             if (company.logo_url) {
@@ -1202,7 +1222,7 @@
     function enterStore() {
         if (!state.location || !state.location.id) {
             locationStepMessage(locationsLoaded && allLocations.length === 0
-                ? 'No shops are set up for this account yet. Please contact CHC and we will add yours.'
+                ? `No shops are set up for this account yet. Please contact ${distShort()} and we will add yours.`
                 : 'Please choose your location from the list to continue.');
             return;
         }
@@ -1359,7 +1379,7 @@
             if (allLocations.length === 0) {
                 document.getElementById('location-search').placeholder = 'Enter your location';
                 document.getElementById('location-chevron').style.display = 'none';
-                if (state.companyUser) locationStepMessage('No shops are set up for this account yet. Please contact CHC and we will add yours.');
+                if (state.companyUser) locationStepMessage(`No shops are set up for this account yet. Please contact ${distShort()} and we will add yours.`);
                 return;
             }
 
@@ -1490,7 +1510,7 @@
         { group: 'Account', items: [
             { tab: 'reports',    label: 'Reports',       icon: 'fa-chart-line' },
             { tab: 'billing',    label: 'Plans & billing', icon: 'fa-credit-card' },
-            { tab: 'contact',    label: 'Contact CHC',   icon: 'fa-address-book' }
+            { tab: 'contact',    get label() { return 'Contact ' + distShort(); }, icon: 'fa-address-book' }
         ]}
     ];
 
@@ -2057,8 +2077,26 @@
         const csv = rows.map(r => r.map(repCsvCell).join(',')).join('\n');
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-        a.download = `CHC-report-${name}-${reportSlugLabel()}.csv`; a.click(); URL.revokeObjectURL(a.href);
+        a.download = `report-${name}-${reportSlugLabel()}.csv`; a.click(); URL.revokeObjectURL(a.href);
     }
+    // Accounting export (QuickBooks Online / Xero / CSV); see /accounting-export.js.
+    function openAcctExport() {
+        if (!window.ACX) return;
+        ACX.toggle(document.getElementById('acx-panel'), {
+            supplier: (state.distributor && state.distributor.name) || 'CHC Paint & Auto Body Supplies',
+            getFilters: () => {
+                const p = new URLSearchParams();
+                const shop = document.getElementById('rep-shop').value;
+                const { from, to } = periodRange(document.getElementById('rep-period').value);
+                if (shop) p.set('location_id', shop);
+                if (from) p.set('from', from);
+                if (to) p.set('to', to);
+                return p;
+            },
+            fetchCsv: q => apiFetch(`/store/${state.slug}/reports/accounting-export?${q}`)
+        });
+    }
+
     // The Purchase report PDF: summary, by location, by order, by item, and each
     // shop's items. Same orders and filters as the screen; see /purchase-report.js.
     function downloadReportPDF(printIt) {
@@ -2069,6 +2107,7 @@
         const company = (state.company && state.company.name) || '';
         PurchaseReport.downloadPurchasePdf(report, {
             title: 'Purchase report', company, shop: shopName, period: repState.periodLabel,
+            supplier: (state.distributor && state.distributor.name) || undefined,
             fileBase: ['Purchase-report', company, shopName, repState.periodLabel].filter(Boolean).join('-').replace(/[^a-z0-9]+/gi, '-')
         }, printIt ? 'print' : 'save');
     }
@@ -3290,10 +3329,10 @@
                 input.value = '';
                 input.placeholder = poConfig.next_example
                     ? `${poConfig.next_example} — assigned when you submit`
-                    : 'Assigned by CHC when you submit';
+                    : `Assigned by ${distShort()} when you submit`;
                 hint.textContent = poConfig.configured
-                    ? 'CHC assigns this number, so it is never reused. It appears on your confirmation.'
-                    : 'Purchase order numbering is not set up for this account yet — contact CHC before ordering.';
+                    ? `${distShort()} assigns this number, so it is never reused. It appears on your confirmation.`
+                    : `Purchase order numbering is not set up for this account yet — contact ${distShort()} before ordering.`;
                 hint.className = poConfig.configured
                     ? 'text-xs text-blue-700 mt-1'
                     : 'text-xs text-amber-700 mt-1';
@@ -3368,7 +3407,7 @@
         const qnum = 'Q-' + now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + '-' + Math.floor(1000+Math.random()*9000);
         doc.setFontSize(20); doc.setTextColor(30,64,175); doc.text('QUOTE', 14, 20);
         doc.setFontSize(10); doc.setTextColor(90,90,90);
-        doc.text('CHC Paint & Auto Body Supplies', 14, 27);
+        doc.text((state.distributor && state.distributor.name) || 'CHC Paint & Auto Body Supplies', 14, 27);
         doc.text('Quote #: ' + qnum, 140, 18);
         doc.text('Date: ' + now.toLocaleDateString(), 140, 24);
         doc.setTextColor(20,20,20); doc.setFontSize(11);
@@ -3664,7 +3703,7 @@
                 const notesHtml = notesLog.map(n => `
                     <div class="p-2 rounded-lg ${n.from === 'staff' ? 'bg-blue-50' : 'bg-gray-50'} mb-2">
                         <div class="text-xs text-gray-500 flex justify-between">
-                            <span class="font-semibold">${n.from === 'staff' ? 'CHC' : escapeHtml(n.author || 'You')}</span>
+                            <span class="font-semibold">${n.from === 'staff' ? escapeHtml(distShort()) : escapeHtml(n.author || 'You')}</span>
                             <span>${new Date(n.created_at).toLocaleString()}</span>
                         </div>
                         <div class="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap">${escapeHtml(n.text)}</div>
@@ -3774,7 +3813,7 @@
                 notesWrap.innerHTML = (o.notes_log || []).map(n => `
                     <div class="p-2 rounded-lg ${n.from === 'staff' ? 'bg-blue-50' : 'bg-gray-50'} mb-2">
                         <div class="text-xs text-gray-500 flex justify-between">
-                            <span class="font-semibold">${n.from === 'staff' ? 'CHC' : escapeHtml(n.author || 'You')}</span>
+                            <span class="font-semibold">${n.from === 'staff' ? escapeHtml(distShort()) : escapeHtml(n.author || 'You')}</span>
                             <span>${new Date(n.created_at).toLocaleString()}</span>
                         </div>
                         <div class="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap">${escapeHtml(n.text)}</div>
@@ -3802,7 +3841,7 @@
                 ? notes.map(n => `
                     <div class="p-2 rounded-lg ${n.author_type === 'staff' ? 'bg-blue-50' : 'bg-gray-50'}">
                         <div class="text-xs text-gray-500 flex justify-between">
-                            <span class="font-semibold">${n.author_type === 'staff' ? 'CHC' : escapeHtml(n.author_name || 'You')}</span>
+                            <span class="font-semibold">${n.author_type === 'staff' ? escapeHtml(distShort()) : escapeHtml(n.author_name || 'You')}</span>
                             <span>${new Date(n.created_at).toLocaleString()}</span>
                         </div>
                         <div class="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap">${escapeHtml(n.text)}</div>
@@ -3977,6 +4016,7 @@
     <script src="/insights.js"></script>
     <script src="/ppg-split.js"></script>
     <script src="/purchase-report.js"></script>
+    <script src="/accounting-export.js"></script>
     <script src="/support-footer.js"></script>
     <script src="/help-content.js"></script>
     <script src="/help-bot.js"></script>

@@ -147,7 +147,7 @@
         doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(...NAVY);
         doc.text(meta.title || 'Purchase report', M, y + 8);
         doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...MUTED);
-        doc.text('CHC Paint & Auto Body Supplies | refinishAI', W - M, y + 2, { align: 'right' });
+        doc.text(`${meta.supplier || 'CHC Paint & Auto Body Supplies'} | refinishAI`, W - M, y + 2, { align: 'right' });
         doc.text('Generated ' + new Date().toLocaleString('en-CA'), W - M, y + 14, { align: 'right' });
         y += 26;
         doc.setFontSize(10); doc.setTextColor(30, 30, 30);

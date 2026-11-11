@@ -183,6 +183,21 @@ function requireSuperAdmin(req, res, next) {
     next();
 }
 
+/**
+ * Shared refinishAI reference content (master repair kits, the crossover
+ * sheet, PPG / sundries corrections) is read by every distributor but kept by
+ * one editor: the platform admin, or a super admin of the default distributor
+ * (CHC, which built it). Another licensed distributor's staff can read it and
+ * cannot change it for everyone. Reads pass straight through.
+ */
+function requireSharedContentEditor(req, res, next) {
+    if (req.method === 'GET' || req.method === 'HEAD') return next();
+    const role = req.admin && req.admin.role;
+    if (role === 'platform_admin') return next();
+    if (role === 'super_admin' && req.distributor && req.distributor.is_default) return next();
+    return res.status(403).json({ error: 'This is shared refinishAI reference content. Only the platform team can change it.' });
+}
+
 /** Require platform_admin -- the only role that reaches across distributors. */
 function requirePlatformAdmin(req, res, next) {
     if (!req.admin || req.admin.role !== 'platform_admin') {
@@ -436,6 +451,7 @@ module.exports = {
     requireAdminAuth,
     requireSuperAdmin,
     requirePlatformAdmin,
+    requireSharedContentEditor,
     requireFullAdmin,
     requireCompanyAccess,
     restrictOrderDesk,

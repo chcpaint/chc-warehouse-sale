@@ -54,6 +54,7 @@
 
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
+const { libraryTable } = require('../utils/library-scope');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
 const { searchTerm } = require('../utils/search-term');
 const { priceVerdict } = require('../utils/price-rules');
@@ -106,11 +107,11 @@ function requirePricingAccess(req, res, next) {
  * Library facts for a set of SKUs: reference list price, and whether the part
  * is a PPG one (and so locked). Keyed by sku_key.
  */
-async function libraryFor(skus) {
+async function libraryFor(skus, req) {
     const keys = [...new Set(skus.map(skuKeyOf).filter(Boolean))];
     const out = new Map();
     for (let i = 0; i < keys.length; i += 200) {
-        const { data } = await supabaseAdmin.from('item_library')
+        const { data } = await libraryTable(req)
             .select('sku_key, list_price, brand')
             .in('sku_key', keys.slice(i, i + 200));
         for (const r of data || []) {
@@ -319,7 +320,7 @@ router.get('/companies/:companyId/products', requirePricingAccess, async (req, r
         if (error) throw error;
 
         const products = data || [];
-        const lib = await libraryFor(products.map(p => p.sku));
+        const lib = await libraryFor(products.map(p => p.sku), req);
         for (const p of products) {
             const l = lib.get(skuKeyOf(p.sku));
             p.list_price = l ? l.list_price : null;
@@ -381,7 +382,7 @@ router.put('/companies/:companyId/products/:productId/price', requirePricingAcce
             return res.json({ product, unchanged: true, old_price: oldPrice, new_price: newPrice });
         }
 
-        const lib = (await libraryFor([product.sku])).get(skuKeyOf(product.sku));
+        const lib = (await libraryFor([product.sku], req)).get(skuKeyOf(product.sku));
         const masterPrice = lib && lib.ppg && lib.list_price ? lib.list_price : null;
 
         // PPG: one list price everywhere.
@@ -505,7 +506,7 @@ router.post('/companies/:companyId/bulk', requirePricingAccess, async (req, res)
             return res.status(400).json({ error: `That matches more than ${MAX_BULK_ITEMS.toLocaleString('en-US')} items. Narrow it by brand or category.` });
         }
 
-        const lib = await libraryFor(products.map(p => p.sku));
+        const lib = await libraryFor(products.map(p => p.sku), req);
         const plan = planBulk(products, lib, percent, { includePPG, includeOutliers });
         const changes = plan.changes;
 

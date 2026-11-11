@@ -31,6 +31,7 @@
 
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
+const { libraryTableForCompany } = require('../utils/library-scope');
 const { isValidUUID } = require('../utils/sanitize');
 const { round4 } = require('../utils/inventory');
 
@@ -104,7 +105,7 @@ async function loadAutoSources(companyId, kitItems, mapByItem, products) {
         supabaseAdmin.from('products')
             .select('id, sku, name, brand, category, price, price_on_request, is_active')
             .eq('company_id', companyId).in('sku', skus),
-        supabaseAdmin.from('item_library')
+        (await libraryTableForCompany(companyId))
             .select('sku_key, name, brand, category, list_price').in('sku_key', keys)
     ]);
     const ownByKey = new Map();

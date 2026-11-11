@@ -10,6 +10,7 @@ const { clientSettings } = require('../utils/billing');
 const { resolveFees, loadFeeRules, groupIdForUser, publicRulesFor, feeLinesOf } = require('../utils/fee-rules');
 const { rebateReportFor } = require('../utils/rebates');
 const { splitReportFor, stripDollars } = require('../utils/report-groups');
+const { normalizeOptions: acctOptions, accountingExportFor } = require('../utils/accounting-export');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
 const { resolveOrderRecipients, validEmails } = require('../utils/recipients');
@@ -115,7 +116,13 @@ router.get('/:slug/info', async (req, res) => {
             return res.status(404).json({ error: 'Company not found.' });
         }
 
-        res.json({ company: { ...company, settings: clientSettings(company.settings) } });
+        // Who supplies this shop: shown in labels such as "Contact CHC", so a
+        // licensed distributor's shops see their own distributor's name.
+        const d = req.distributor || null;
+        res.json({
+            company: { ...company, settings: clientSettings(company.settings) },
+            distributor: d ? { name: d.name, short_name: d.short_name || null, support_email: d.support_email || null } : null
+        });
     } catch (err) {
         console.error('Company info error:', err);
         res.status(500).json({ error: 'Failed to load company info.' });
@@ -1528,6 +1535,44 @@ router.get('/:slug/reports/ppg-split', requireCompanyAuth, async (req, res) => {
     } catch (err) {
         console.error('PPG split report error:', err);
         res.status(500).json({ error: 'Failed to load the PPG and sundries report.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/reports/accounting-export?format=qbo|xero|csv&from&to&location_id&...
+ * The shop's shipped orders as supplier bills for QuickBooks Online, Xero or
+ * any accounting package (utils/accounting-export.js). Same access rules as the
+ * other reports; not available where pricing is hidden (there would be no
+ * amounts to export).
+ */
+router.get('/:slug/reports/accounting-export', requireCompanyAuth, async (req, res) => {
+    try {
+        let { location_id, from, to } = req.query;
+        if (from && !ISO_TS.test(String(from))) return res.status(400).json({ error: 'Invalid start date.' });
+        if (to && !ISO_TS.test(String(to))) return res.status(400).json({ error: 'Invalid end date.' });
+        const { data: company } = await supabaseAdmin.from('companies').select('name, settings').eq('id', req.company.id).maybeSingle();
+        const settings = company && company.settings;
+        if (moduleEnabled(settings, 'restricted_reports') && !req.companyUser) {
+            return res.status(403).json({ error: 'Reports are available to people with their own account. Please sign in with your account.', code: 'reports_need_account' });
+        }
+        if (hidePricingEnabled(settings)) return res.status(403).json({ error: 'Prices are hidden for this account, so there are no amounts to export.' });
+        if (req.companyUser && req.companyUser.location_id) location_id = req.companyUser.location_id;
+        if (location_id && !isValidUUID(String(location_id))) return res.status(400).json({ error: 'Invalid shop.' });
+        const opts = acctOptions(req.query, { supplier: req.distributor && req.distributor.name });
+        if (opts.error) return res.status(400).json({ error: opts.error });
+        const out = await accountingExportFor(supabaseAdmin, {
+            companyId: req.company.id, locationId: location_id || null, from: from || null, to: to || null,
+            options: opts.value, label: `${(company && company.name) || 'shop'} ${String(from || '').slice(0, 10)} ${String(to || '').slice(0, 10)}`
+        });
+        res.set('Content-Type', 'text/csv; charset=utf-8');
+        res.set('Content-Disposition', `attachment; filename="${out.filename}"`);
+        res.set('X-Bill-Count', String(out.bills));
+        res.set('X-Skipped', JSON.stringify(out.skipped));
+        res.set('Access-Control-Expose-Headers', 'X-Bill-Count, X-Skipped, Content-Disposition');
+        res.send(out.csv);
+    } catch (err) {
+        console.error('Accounting export error:', err);
+        res.status(500).json({ error: 'Failed to build the accounting export.' });
     }
 });
 

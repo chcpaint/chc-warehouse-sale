@@ -1,82 +1,90 @@
-# Operations runbook: backups, restore drill, monitoring
+# Operations runbook: backups, restore, monitoring
 
-Written 11 Nov 2026. Nothing here is automatic yet; each step has an owner and a
-"done when". Facts about Supabase plans come from its backups documentation on
-that date; re-check them before relying on a figure.
+Updated 11 Nov 2026.
 
-## 1. Know what you have
+## 1. What protects the data
 
-Open Supabase > Project Settings > Billing and write down the plan.
+| Layer | What | Where it lives | Kept |
+| --- | --- | --- | --- |
+| Supabase daily backups | Whole database, taken by Supabase (Pro plan) | Supabase | 7 days |
+| Nightly off-site backup | Database (public schema, every app table, view, function, trigger, policy and row) **and every stored file** (invoices, images, logos, ShopSafe attachments), encrypted with AES-256 | GitHub (workflow artifact), plus an optional S3-compatible bucket in another account | 30 days |
+| Nightly restore drill | The backup just taken is restored into a throwaway Postgres and every table's row count is checked against the count taken at backup time | GitHub Actions | every night |
 
-| Plan | Automatic backups (per Supabase docs) |
+Workflow: `.github/workflows/backup.yml` (2:17 a.m. Toronto). Scripts: `scripts/backup/`. Each night's drill result is recorded in `backup_runs` (migration 065) and shown in Reports > Uptime and on the Help page.
+
+**Targets today:** lose at most one day of changes (recovery point), back within 4 hours (recovery time).
+Supabase's point-in-time recovery add-on would cut the recovery point to minutes; it is about
+US$100 a month for 7 days of history (Supabase pricing, Nov 2026). Decision: not enabled yet;
+revisit when the first licensed distributor or a customer contract needs a tighter recovery point.
+
+### One-time setup (repository secrets)
+
+GitHub > the repository > Settings > Secrets and variables > Actions > New repository secret:
+
+| Secret | Where to get it |
 | --- | --- |
-| Free | None. Export it yourself. |
-| Pro | Daily, last 7 days kept |
-| Team | Daily, last 14 days kept |
-| Enterprise | Daily, up to 30 days kept |
+| `SUPABASE_DB_URL` | Supabase > Connect > **Session pooler** connection string, with the database password filled in. (The direct connection is IPv6-only and GitHub's runners cannot reach it.) |
+| `SUPABASE_URL` | Supabase > Project Settings > API > Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase > Project Settings > API > `service_role` key |
+| `BACKUP_PASSPHRASE` | Make a long random one (24+ characters). Keep a copy offline (password manager). **Without it no backup can be opened.** |
 
-Point-in-time recovery (PITR) is a paid add-on (7, 14 or 28 days). It restores to
-a chosen second, and turning it on replaces the daily backups. Files in Supabase
-Storage (uploaded invoices, promotion images, logos) are **not** in either kind of
-backup; only their database rows are.
+Optional second copy in another account (Cloudflare R2's free tier works): `BACKUP_S3_BUCKET`,
+`BACKUP_S3_ENDPOINT`, `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY`.
 
-Proposed targets (change them, but write them down): lose no more than 15 minutes
-of orders and stock movements; be back within 4 hours.
-Only PITR can meet the first one.
+Then Actions > "Nightly backup and restore drill" > Run workflow, and confirm both jobs are green
+and the summary says **Restore drill: PASSED**. In the GitHub mobile app, turn on notifications for
+Actions so a failed night reaches you as a push.
 
-Done when: the plan, PITR on or off, and the chosen targets are written at the top
-of this file.
+### Restoring for real
 
-## 2. A copy that lives outside Supabase
+Never restore over production. Restore into a **new** Supabase project, check it, then point the app at it.
 
-A nightly logical dump to storage you control protects against a mistaken
-project deletion (which also deletes Supabase's own backups).
+1. Actions > the night you want > Artifacts: download `chc-backup-YYYY-MM-DD`.
+2. Decrypt and unpack (Terminal):
 
-    pg_dump "$SUPABASE_DB_URL" --format=custom --no-owner --file=chc-$(date +%F).dump
+       gpg --decrypt chc-backup-YYYY-MM-DD.tar.gz.gpg > backup.tar.gz
+       mkdir restore && tar -xzf backup.tar.gz -C restore
 
-Run it from a scheduled job (GitHub Actions on a schedule, with `SUPABASE_DB_URL`
-as a repository secret, or any server you own), keep 30 days, and copy the dump
-to a bucket in a different account. The connection string is a credential: it
-goes in a secret store, never in the repository.
+3. Create a new Supabase project (same region), then:
 
-Also copy the Storage buckets (the Supabase CLI or an S3-compatible client can
-list and download them).
+       pg_restore --dbname="<new project's session pooler URL>" --no-owner --no-privileges --clean --if-exists restore/db.dump
 
-Done when: two nights of dumps exist off Supabase and one has been opened.
+4. Stored files: `SUPABASE_URL=<new> SUPABASE_SERVICE_ROLE_KEY=<new> node scripts/backup/storage.js upload restore/storage`
+5. Re-create what is not in a backup: Supabase Vault secrets (the SendGrid key for uptime alerts) and
+   migration 064's schedule (run `migrations/064_uptime_monitor.sql` again).
+6. In Railway, change `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` to the new project, and redeploy.
+7. Sign in as a test shop, place a test order, and compare row counts with `restore/manifest.json`.
 
-## 3. The restore drill (do this once, then every quarter)
+For losing recent minutes only (not the whole project), Supabase's own daily backups
+(Project > Database > Backups) are quicker.
 
-Never practise on production. Restore to a **new** project.
+## 2. Watching it
 
-1. Restore the latest backup (or a PITR time) into a new Supabase project.
-2. Point a local copy of the console at it (copy `.env`, change the Supabase keys).
-3. Sign in as a test shop and place a test order.
-4. Check the stock ledger agrees with on-hand. Every row returned must be 0 (zero corrections needed):
+| Check | How often | From | Alerts |
+| --- | --- | --- | --- |
+| Uptime monitor (migration 064) | every minute | inside Supabase (pg_cron + pg_net), separate from Railway | email via SendGrid to the alert list (default adam@chcpaint.com) and an optional Slack/Teams/Discord webhook, after 2 failures in a row; again on recovery |
+| Watchdog (`.github/workflows/watchdog.yml`) | hourly | GitHub | a failed run (GitHub notification / mobile push) if the app is not ready or the monitor has stopped |
 
-       select public.recompute_inventory_on_hand(company_id)
-         from public.companies;
+Pages watched: the health check (`/api/health/ready`, which answers 200 only when the app can reach
+the database), the shop sign-in page, the admin console and the help page. Add or remove pages in
+`public.uptime_targets`. Results: admin console > Reports > Uptime (24 h, 7 day and 30 day uptime, incidents,
+alert list).
 
-   (Run it in the restored copy only; it rewrites on-hand from the ledger.)
-5. Compare row counts of `orders`, `products`, `stock_movements`, `audit_log`
-   between production and the restore, within the gap you expected.
-6. Write down: minutes from "start" to "a shop can order", and anything surprising.
+After running migration 064, add the SendGrid key to Vault once (SQL editor):
 
-Done when: steps 1 to 6 are done once and the time taken is written here.
+    select vault.create_secret('<SendGrid API key>', 'sendgrid_api_key', 'Uptime alert email');
 
-## 4. Watching it
+The From address (`uptime_settings.from_email`, default promo@chcpaint.com) must be a verified sender in SendGrid.
 
-- Uptime monitor on `https://chcsale.com/api/health/ready`. It answers 200 only
-  when the server can reach the database, and 503 otherwise. Alert to digital@,
-  not to a personal inbox.
-- Every error response carries a `request_id`, also printed in the Railway log
-  line for that request. Ask a user for it and search the log.
-- On boot the server prints `CONFIG WARNING:` lines for weak or missing settings.
-  A healthy boot prints none.
+Other signals:
+
+- Every error response carries a `request_id`, also printed in the Railway log line for that request.
+- On boot the server prints `CONFIG WARNING:` lines for weak or missing settings. A healthy boot prints none.
 - Add an error tracker (Sentry or similar) next; not done yet.
 
-## 5. Before any schema change
+## 3. Before any schema change
 
 1. Run it on the staging project first (not created yet).
-2. Take a manual backup the same day.
+2. Run the backup workflow by hand the same day (Actions > Run workflow).
 3. Run it in the SQL editor in one paste; the numbered files in `migrations/`
    are written to be safe to run twice.

@@ -16,7 +16,7 @@
 const express = require('express');
 const XLSX = require('xlsx');
 const { supabaseAdmin } = require('../utils/supabase');
-const { requireSuperAdmin } = require('../middleware/auth');
+const { requireSuperAdmin, requireSharedContentEditor } = require('../middleware/auth');
 const { catalogUpload } = require('../middleware/upload');
 const { stripHtml } = require('../utils/sanitize');
 const { parseCrossoverWorkbook } = require('../utils/crossover-import');
@@ -25,6 +25,7 @@ const { searchTerm } = require('../utils/search-term');
 const router = express.Router();
 
 router.use(requireSuperAdmin);
+router.use(requireSharedContentEditor);   // other distributors read; only the platform team edits
 
 function text(v, max = 200) {
     return stripHtml(String(v === undefined || v === null ? '' : v)).trim().slice(0, max);

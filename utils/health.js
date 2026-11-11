@@ -28,4 +28,22 @@ async function checkDatabase(supabase, timeoutMs = 3000) {
     return { ...result, ms: Date.now() - started };
 }
 
-module.exports = { checkDatabase };
+/**
+ * Is the uptime monitor (migration 064, inside Supabase) still running?
+ * 'ok' when its last check is under 5 minutes old, 'stale' when older, 'off'
+ * when it is not installed. Lets an outside watchdog notice the watcher
+ * stopping. Never throws and never affects the readiness answer.
+ */
+async function monitorStatus(supabase, now = Date.now()) {
+    try {
+        const { data, error } = await supabase.from('uptime_checks').select('checked_at').order('checked_at', { ascending: false }).limit(1);
+        if (error) return 'off';
+        const last = data && data[0] && Date.parse(data[0].checked_at);
+        if (!last) return 'off';
+        return now - last < 5 * 60 * 1000 ? 'ok' : 'stale';
+    } catch (_) {
+        return 'off';
+    }
+}
+
+module.exports = { checkDatabase, monitorStatus };

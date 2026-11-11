@@ -35,6 +35,7 @@
 
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
+const { libraryTable } = require('../utils/library-scope');
 const { requireCompanyAccess } = require('../middleware/auth');
 const { stripHtml } = require('../utils/sanitize');
 const { LINES, termsForLabels, rowInLine } = require('../utils/product-lines');
@@ -156,8 +157,7 @@ router.get('/vendors', async (req, res) => {
         // Page through the library: one select stops at the database's 1,000-row cap.
         const data = [];
         for (let from = 0; ; from += 1000) {
-            const { data: page, error } = await supabaseAdmin
-                .from('item_library')
+            const { data: page, error } = await libraryTable(req)
                 .select('vendor_code, brand, category, name, sku')
                 .order('id')
                 .range(from, from + 999);
@@ -243,8 +243,7 @@ router.post('/add', async (req, res) => {
             });
         }
 
-        const { data: libRows, error: libErr } = await supabaseAdmin
-            .from('item_library')
+        const { data: libRows, error: libErr } = await libraryTable(req)
             .select('id, sku, sku_key, name, brand, vendor_code, barcode, unit, case_qty, list_price')
             .in('id', ids);
         if (libErr) throw libErr;

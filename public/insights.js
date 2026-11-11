@@ -1,7 +1,7 @@
 /**
  * public/insights.js -- the Insights button and panel on the Reports screen.
  *
- * Shown only where CHC has switched the Insights module on (the server checks
+ * Shown only where the distributor has switched the Insights module on (the server checks
  * again on every request). Uses the store's own globals: state, apiFetch.
  *
  * Nothing is sent anywhere until the person presses "Get insights", and the
@@ -131,14 +131,14 @@
                     <div class="text-right">
                         <button id="insights-run" type="button" onclick="INS.run()" ${canRun ? '' : 'disabled'}
                             class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold px-5 py-3 rounded-lg">Get insights</button>
-                        <p class="text-xs text-gray-500 mt-2">${status.configured ? `${esc(status.remaining_today)} left today · for ${esc(scope)}` : 'Not set up on the server yet. Ask CHC.'}</p>
+                        <p class="text-xs text-gray-500 mt-2">${status.configured ? `${esc(status.remaining_today)} left today · for ${esc(scope)}` : 'Not set up on the server yet. Ask your distributor.'}</p>
                     </div>
                 </div>
                 <p id="insights-error" role="alert" class="hidden mt-3 text-sm text-red-700"></p>
                 <div class="mt-4 rounded-lg bg-gray-50 border p-4 text-sm text-gray-700 space-y-2">
                     <p><strong>How it works.</strong> Pressing the button makes one request to Claude, an AI model by Anthropic. It reads a summary of your account and answers once. It cannot see or change anything else in the console.</p>
                     <p><strong>What is sent.</strong> ${esc(d.sends || '')}</p>
-                    <p><strong>Logged.</strong> Each use is recorded (when, which account, the summary sent and the answer) so CHC can show exactly how AI was used.</p>
+                    <p><strong>Logged.</strong> Each use is recorded (when, which account, the summary sent and the answer) so refinishAI can show exactly how AI was used.</p>
                     <p><strong>Where AI is used.</strong> ${aiWhere(status.ai_features)} Nothing else in the software calls an AI model.</p>
                 </div>
             </div>`;

@@ -30,6 +30,7 @@ const supabaseProxy = new Proxy({}, {
 const stubs = {
     [path.join(ROOT, 'utils/supabase.js')]: { supabaseAdmin: supabaseProxy },
     [path.join(ROOT, 'middleware/auth.js')]: {
+        requireSharedContentEditor: (req, res, next) => next(),
         requireSuperAdmin: (req, res, next) => {
             if (authAdmin.role !== 'super_admin') return res.status(403).json({ error: 'Super admin access required.' });
             req.admin = authAdmin; next();
