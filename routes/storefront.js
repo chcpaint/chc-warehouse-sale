@@ -1506,6 +1506,8 @@ router.use('/:slug/kit-submissions', require('./kit-submissions-store'));
 // Company-owner management of their own customer users (Customer-users module).
 router.use('/:slug/users', require('./company-users-store'));
 router.use('/:slug/billing', require('./billing-store'));
+// Insights (AI) on the Reports screen. Off unless CHC switches the module on; see routes/insights-store.js.
+router.use('/:slug/insights', require('./insights-store'));
 
 // People & activity for the company's own owner (the `activity` module): who
 // ordered, how much each person spends, who signed in, and named groups.

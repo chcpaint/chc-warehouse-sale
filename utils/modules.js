@@ -144,6 +144,17 @@ const MODULES = {
         }
     },
 
+    insights: {
+        name: 'insights',
+        label: 'Insights (AI)',
+        blurb: 'An Insights button on the shop\u2019s Reports screen: one call to Claude reads the shop\u2019s own numbers and suggests what is going well, what may be worth acting on and what may be worth a closer look. No names or contact details are sent. Every use is logged.',
+        requires: [],
+        released: true,
+        defaults: {
+            enabled: false
+        }
+    },
+
     new_look: {
         name: 'new_look',
         label: 'New look (preview)',

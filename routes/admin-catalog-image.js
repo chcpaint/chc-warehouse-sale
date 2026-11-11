@@ -19,6 +19,7 @@ const express = require('express');
 const multer = require('multer');
 const { supabaseAdmin } = require('../utils/supabase');
 const { readPriceImage, ImageReadError, MAX_IMAGE_BYTES } = require('../utils/price-image');
+const { logAiUse } = require('../utils/ai-usage');
 
 const router = express.Router({ mergeParams: true });
 
@@ -66,6 +67,12 @@ router.post('/', (req, res, next) => {
                 ip_address: req.ip
             });
         } catch (e) { console.error('Audit log write failed:', e); }
+        await logAiUse(supabaseAdmin, {
+            feature: 'price_screenshot', company_id: req.params.companyId, distributor_id: req.distributor ? req.distributor.id : null,
+            actor_type: 'admin', actor_id: req.admin.id, model: result.model, status: 'ok', request_id: req.id,
+            input_summary: { picture_bytes: req.file.size, hint_given: !!(req.body && req.body.hint) },
+            output: { items: result.items.length, dropped: result.dropped }
+        });
 
         res.json({ items: result.items, dropped: result.dropped, notes: result.notes });
     } catch (err) {

@@ -199,6 +199,10 @@ router.use('/kits', require('./inventory-kits-master'));
 // a new one. Super-admin only, enforced inside that router.
 router.use('/crossover', require('./crossover-reference-admin'));
 
+// Where AI is used, and every time it was (utils/ai-usage.js). Not on the
+// order-desk allow-list; the usage log is super-admin only inside the router.
+router.use('/ai', require('./ai-admin'));
+
 /**
  * GET /api/admin/stats
  */

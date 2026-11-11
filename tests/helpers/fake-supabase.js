@@ -239,6 +239,8 @@ const KNOWN_COLUMNS = {
         'id', 'company_id', 'user_id', 'email', 'name', 'event', 'ip', 'user_agent', 'created_at'
     ]),
     audit_log: new Set(['id', 'admin_id', 'action', 'entity_type', 'entity_id', 'details', 'ip_address', 'created_at']),
+    // migration 062: one row per AI call (utils/ai-usage.js)
+    ai_usage_log: new Set(['id', 'created_at', 'feature', 'company_id', 'distributor_id', 'location_id', 'actor_type', 'actor_id', 'provider', 'model', 'status', 'error_code', 'input_tokens', 'output_tokens', 'latency_ms', 'request_id', 'input_summary', 'output']),
     // Added by migration 043: the shared storefront cart, one row per
     // (company_id, product_id) -- see that migration for why price is
     // deliberately not a column here.
@@ -487,7 +489,7 @@ function createFakeSupabase(seed = {}) {
         replenishment_orders: [], replenishment_order_lines: [], inventory_uploads: [],
         inventory_count_sessions: [], inventory_count_lines: [], inventory_transfers: [],
         inventory_drivers: [], kiosk_devices: [], kiosk_badges: [], kiosk_order_access: [],
-        inventory_alert_log: [], orders: [], promotions: [], audit_log: [],
+        inventory_alert_log: [], orders: [], promotions: [], audit_log: [], ai_usage_log: [],
         repair_kits: [], kit_items: [], company_kit_access: [],
         kit_product_map: [], kit_consumptions: [], kit_submissions: [], kit_submission_counters: [], order_receipts: [], order_receiving_closures: [],
         kit_item_alternatives: [], product_crossover_reference: [],

@@ -552,7 +552,15 @@
                 <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
                     <i class="fas fa-arrow-left mr-1"></i>Back to Products
                 </button>
-                <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-chart-line mr-2"></i>Reports</h2>
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800"><i class="fas fa-chart-line mr-2"></i>Reports</h2>
+                    <!-- Insights (AI): shown only where CHC switched the module on; see /insights.js -->
+                    <button id="insights-btn" type="button" onclick="INS.toggle()"
+                        class="hidden bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg">
+                        <i class="fas fa-lightbulb mr-1"></i>Insights
+                    </button>
+                </div>
+                <div id="insights-panel" class="hidden mb-4" aria-live="polite"></div>
                 <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
                     <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
                         <div>
@@ -1288,6 +1296,7 @@
         }
 
         applyReportAccess();
+        if (window.INS) window.INS.init(state.company);
 
         // Inventory is opt-in per company; initInventory() reveals the tab only
         // when the company has it switched on.
@@ -3968,5 +3977,6 @@
     }
     </script>
     <script src="/new-look.js"></script>
+    <script src="/insights.js"></script>
 </body>
 </html>
