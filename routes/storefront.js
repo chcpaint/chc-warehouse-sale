@@ -2,6 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireCompanyAuth } = require('../middleware/auth');
 const { stripHtml, sanitizeObject, isValidUUID } = require('../utils/sanitize');
+const { searchTerm } = require('../utils/search-term');
 const { sendOrderNotification, sendOrderNoteAdded, sendContactNote } = require('../utils/email');
 const { resolveOrderPo, poSettings, formatPo } = require('../utils/po');
 const { taxSettings, computeTax } = require('../utils/tax');
@@ -156,7 +157,8 @@ router.get('/:slug/products', requireCompanyAuth, async (req, res) => {
         if (line) query = query.or(orFilterFor(line));
         else if (brand) query = query.eq('brand', brand);
         if (effectiveCategory) query = query.eq('category', effectiveCategory);
-        if (search) query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%,brand.ilike.%${search}%`);
+        const term = searchTerm(search);
+        if (term) query = query.or(`name.ilike.%${term}%,sku.ilike.%${term}%,brand.ilike.%${term}%`);
 
         // Pagination
         const offset = (parseInt(page) - 1) * parseInt(limit);

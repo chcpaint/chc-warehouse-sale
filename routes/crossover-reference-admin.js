@@ -20,6 +20,7 @@ const { requireSuperAdmin } = require('../middleware/auth');
 const { catalogUpload } = require('../middleware/upload');
 const { stripHtml } = require('../utils/sanitize');
 const { parseCrossoverWorkbook } = require('../utils/crossover-import');
+const { searchTerm } = require('../utils/search-term');
 
 const router = express.Router();
 
@@ -49,7 +50,7 @@ router.get('/search', async (req, res) => {
 
         if (brand) query = query.eq('alt_brand', brand);
         if (q) {
-            const like = `%${q.replace(/[%_]/g, '')}%`;
+            const like = `%${searchTerm(q).replace(/[%_]/g, '')}%`;
             query = query.or(`base_part_number.ilike.${like},base_name.ilike.${like},alt_part_number.ilike.${like},alt_name.ilike.${like}`);
         }
 

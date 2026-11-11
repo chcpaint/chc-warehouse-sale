@@ -28,7 +28,7 @@ function identityOf(req) {
     const h = req.headers && req.headers.authorization;
     if (h && /^Bearer\s+\S+/.test(h) && process.env.JWT_SECRET) {
         try {
-            const d = jwt.verify(h.replace(/^Bearer\s+/, ''), process.env.JWT_SECRET);
+            const d = jwt.verify(h.replace(/^Bearer\s+/, ''), process.env.JWT_SECRET, { algorithms: ['HS256'] });
             const who = d.admin_id || d.user_id || d.company_id;
             if (d.type && who) id = `${d.type}:${who}`;
         } catch (_) { /* expired / forged: treated as anonymous */ }

@@ -55,6 +55,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
+const { searchTerm } = require('../utils/search-term');
 const { priceVerdict } = require('../utils/price-rules');
 const { applyBrandFilter, brandOptions: lineBrandOptions } = require('../utils/product-lines');
 
@@ -158,8 +159,9 @@ function applyScope(query, scope) {
     // Preview and apply both come through here, so they always cover the same items.
     if (scope.brand) query = applyBrandFilter(query, scope.brand);
     if (scope.category) query = query.eq('category', scope.category);
-    if (scope.search) {
-        query = query.or(`name.ilike.%${scope.search}%,sku.ilike.%${scope.search}%,brand.ilike.%${scope.search}%`);
+    const term = searchTerm(scope.search);
+    if (term) {
+        query = query.or(`name.ilike.%${term}%,sku.ilike.%${term}%,brand.ilike.%${term}%`);
     }
     return query;
 }

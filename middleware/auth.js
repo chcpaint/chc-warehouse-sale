@@ -63,7 +63,7 @@ function requireCompanyAuth(req, res, next) {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
 
         if (decoded.type !== 'company' && decoded.type !== 'company_user') {
             return res.status(403).json({ error: 'Invalid token type.' });
@@ -133,7 +133,7 @@ async function requireAdminAuth(req, res, next) {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
         if (decoded.type !== 'admin') {
             return res.status(403).json({ error: 'Invalid token type.' });
         }

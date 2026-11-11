@@ -14,7 +14,6 @@
     "@sendgrid/mail": "^8.1.6",
     "@supabase/supabase-js": "^2.49.1",
     "bcrypt": "^6.0.0",
-    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.3.1",
@@ -23,12 +22,14 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
-    "nodemailer": "^6.9.8",
     "pdfkit": "^0.15.2",
     "stripe": "^17.7.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "supertest": "^7.3.0"
+  },
+  "overrides": {
+    "qs": "^6.16.2"
   }
 }

@@ -48,6 +48,7 @@ const { detectSymbology } = require('../utils/inventory');   // values the produ
 const { requireSuperAdmin } = require('../middleware/auth');
 const { catalogUpload } = require('../middleware/upload');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
+const { searchTerm } = require('../utils/search-term');
 
 const router = express.Router();
 
@@ -463,7 +464,8 @@ router.get('/', async (req, res) => {
             // A scanned barcode, a part number in any spelling, or words from
             // the name all arrive in the same box — so try all three rather
             // than making the user pick a search mode.
-            q = q.or(`sku_key.ilike.%${key}%,barcode.ilike.%${term}%,name.ilike.%${term}%`);
+            const safe = searchTerm(term);
+            q = q.or(`sku_key.ilike.%${key}%,barcode.ilike.%${safe}%,name.ilike.%${safe}%`);
         }
         if (String(req.query.missing_barcode) === 'true') q = q.is('barcode', null);
         if (clean(req.query.category)) q = q.eq('category', clean(req.query.category));

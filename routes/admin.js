@@ -12,6 +12,7 @@ const { detectSymbology } = require('../utils/inventory');   // lower-case value
 const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAdmin, restrictOrderDesk, requirePasswordCurrent, requireOrderAccess } = require('../middleware/auth');
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
+const { searchTerm } = require('../utils/search-term');
 const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed, sendOrderStatusUpdate, sendOrderNoteAdded } = require('../utils/email');
 const { orderScopeIds, applyOrderScope, orderInScope, staffLocationIds, isHeadOffice } = require('../utils/order-scope');
@@ -971,7 +972,8 @@ router.get('/companies/:companyId/products', requireCompanyAccess, async (req, r
         // choosing one shows every item in the line, as it does on the storefront.
         if (brand) query = applyBrandFilter(query, brand);
         if (category) query = query.eq('category', category);
-        if (search) query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
+        const term = searchTerm(search);
+        if (term) query = query.or(`name.ilike.%${term}%,sku.ilike.%${term}%`);
 
         const offset = (parseInt(page) - 1) * parseInt(limit);
         query = query.range(offset, offset + parseInt(limit) - 1);
@@ -1214,7 +1216,8 @@ router.post('/companies/:companyId/products/bulk-delete', requireCompanyAccess, 
             if (filters) {
                 if (filters.brand) query = applyBrandFilter(query, filters.brand);
                 if (filters.category) query = query.eq('category', filters.category);
-                if (filters.search) query = query.or(`name.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`);
+                const term = searchTerm(filters.search);
+                if (term) query = query.or(`name.ilike.%${term}%,sku.ilike.%${term}%`);
             }
 
             const { data, error } = await query.select('id');
