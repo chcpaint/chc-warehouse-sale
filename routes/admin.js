@@ -153,6 +153,8 @@ router.use('/companies/:companyId/modules', require('./modules-admin'));
 router.use('/companies/:companyId/po', require('./po-admin'));
 router.use('/companies/:companyId/notes', require('./contact-notes-admin'));
 router.use('/companies/:companyId/tax', require('./tax-admin'));
+// PPG paint lines vs sundries: the report per company, and CHC's item corrections.
+router.use('/', require('./report-groups-admin'));
 router.use('/distributor-tax', require('./distributor-tax-admin'));
 router.use('/billing', require('./billing-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));

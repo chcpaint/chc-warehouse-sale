@@ -47,6 +47,10 @@ function missingTable(err) {
     return /company_fee_rules|company_rebate_rules|relation .* does not exist|schema cache/i.test((err && err.message) || '');
 }
 const NEEDS_MIGRATION = 'Fee and rebate rules are not set up in the database yet. Run migration 047_fee_rules_and_rebates.sql in Supabase first.';
+const NEEDS_063 = 'Rebates on PPG paint lines or sundries need migration 063_report_item_groups.sql. Run it in Supabase first.';
+// A database without 063 refuses the two group scopes with a check violation.
+const needsGroupScopes = (err, value) => !!value && (value.applies_to === 'ppg_paint' || value.applies_to === 'sundries') &&
+    (err && (err.code === '23514' || /applies_to|rebate_selected_needs_scope/i.test(err.message || '')));
 
 /** GET /  everything the screen needs in one read. */
 router.get('/', async (req, res) => {
@@ -100,7 +104,7 @@ router.post('/fee-rules', requireFullAdmin, async (req, res) => {
 
         const { data, error: dbErr } = await supabaseAdmin.from('company_fee_rules')
             .insert({ company_id: company.id, ...value }).select().single();
-        if (dbErr) { if (missingTable(dbErr)) return res.status(409).json({ error: NEEDS_MIGRATION }); throw dbErr; }
+        if (dbErr) { if (missingTable(dbErr)) return res.status(409).json({ error: NEEDS_MIGRATION }); if (needsGroupScopes(dbErr, value)) return res.status(409).json({ error: NEEDS_063 }); throw dbErr; }
         await logAction(req.admin.id, 'fee_rule_created', 'company', company.id, { rule: value }, req.ip);
         res.status(201).json({ message: `${value.label} added for ${company.name}.`, rule: data });
     } catch (err) {
@@ -176,7 +180,7 @@ router.post('/rebate-rules', requireFullAdmin, async (req, res) => {
         if (error) return res.status(400).json({ error });
         const { data, error: dbErr } = await supabaseAdmin.from('company_rebate_rules')
             .insert({ company_id: company.id, ...value }).select().single();
-        if (dbErr) { if (missingTable(dbErr)) return res.status(409).json({ error: NEEDS_MIGRATION }); throw dbErr; }
+        if (dbErr) { if (missingTable(dbErr)) return res.status(409).json({ error: NEEDS_MIGRATION }); if (needsGroupScopes(dbErr, value)) return res.status(409).json({ error: NEEDS_063 }); throw dbErr; }
         await logAction(req.admin.id, 'rebate_rule_created', 'company', company.id, { rule: value }, req.ip);
         res.status(201).json({ message: `${value.label} added for ${company.name}. It now shows in their reports.`, rule: data });
     } catch (err) {

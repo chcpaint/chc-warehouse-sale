@@ -1180,6 +1180,7 @@
                         <button id="rep-tab-adopt" role="tab" onclick="repShowTab('adopt')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Weekly adoption</button>
                         <button id="rep-tab-rebate" role="tab" onclick="repShowTab('rebate')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Rebates</button>
                         <button id="rep-tab-brand" role="tab" onclick="repShowTab('brand')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">Monthly brand</button>
+                        <button id="rep-tab-ppg" role="tab" onclick="repShowTab('ppg')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700">PPG vs sundries</button>
                     </div>
                     <div id="rep-orders-pane">
                     <div class="flex flex-wrap gap-3 items-end mb-4">
@@ -1292,6 +1293,48 @@
                             </tr></thead>
                             <tbody id="rebate-report-body"></tbody>
                         </table></div></div>
+                    </div>
+
+                    <div id="rep-ppg-pane" class="hidden">
+                        <div class="flex flex-wrap gap-3 items-end mb-3">
+                            <div>
+                                <label for="ppg-company" class="block text-xs font-semibold text-gray-500 mb-1">Company</label>
+                                <select id="ppg-company" onchange="ppgCompanyChange()" class="px-3 py-2 border rounded-lg text-sm bg-white min-w-[180px]"></select>
+                            </div>
+                            <div>
+                                <label for="ppg-shop" class="block text-xs font-semibold text-gray-500 mb-1">Shop</label>
+                                <select id="ppg-shop" onchange="ppgLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white min-w-[160px]"><option value="">All shops</option></select>
+                            </div>
+                            <div>
+                                <label for="ppg-period" class="block text-xs font-semibold text-gray-500 mb-1">Period</label>
+                                <select id="ppg-period" onchange="ppgLoad()" class="px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="this_month">This month</option>
+                                    <option value="last_month">Last month</option>
+                                    <option value="this_quarter">This quarter</option>
+                                    <option value="this_year" selected>This year</option>
+                                    <option value="last_year">Last year</option>
+                                    <option value="all">All time</option>
+                                </select>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-3">PPG paint lines (Envirobase / EHP, Shopline, OneChoice, Deltron, Delfleet, Omni and other PPG paint) against sundries (everything else, including PPG paint suits, masking paper, cups, cans and other general items), per shop. The customer's owner sees the same split on their Reports screen.</p>
+                        <div id="ppg-admin-split" class="mb-4"></div>
+                        <div id="ppg-corrections" class="hidden bg-white rounded-xl shadow-sm border overflow-hidden">
+                            <div class="px-4 py-3 border-b bg-gray-50 flex flex-wrap gap-2 justify-between items-center">
+                                <span class="font-semibold text-gray-700 text-sm">Corrections (super admin)</span>
+                                <span class="text-xs text-gray-400">A correction moves a part number for every customer, in reports and in PPG or sundries rebates.</span>
+                            </div>
+                            <div class="flex flex-wrap gap-2 items-end px-4 py-3 border-b">
+                                <div><label for="ppg-fix-sku" class="block text-xs font-semibold text-gray-500 mb-1">Part #</label>
+                                    <input id="ppg-fix-sku" maxlength="80" class="px-3 py-2 border rounded-lg text-sm w-40"></div>
+                                <div><label for="ppg-fix-group" class="block text-xs font-semibold text-gray-500 mb-1">Count it as</label>
+                                    <select id="ppg-fix-group" class="px-3 py-2 border rounded-lg text-sm bg-white"><option value="ppg">PPG paint lines</option><option value="sundries">Sundries</option></select></div>
+                                <div class="flex-1 min-w-[160px]"><label for="ppg-fix-reason" class="block text-xs font-semibold text-gray-500 mb-1">Why (optional)</label>
+                                    <input id="ppg-fix-reason" maxlength="200" class="px-3 py-2 border rounded-lg text-sm w-full"></div>
+                                <button onclick="ppgFixFromForm()" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">Save correction</button>
+                            </div>
+                            <div id="ppg-corrections-list" class="text-sm"></div>
+                        </div>
                     </div>
 
                     <div id="rep-brand-pane" class="hidden">
@@ -2864,7 +2907,7 @@
     // WEEKLY ADOPTION (Reports > Weekly adoption)
     // ============================================================
     function repShowTab(which) {
-        const panes = { orders: 'rep-orders-pane', adopt: 'rep-adopt-pane', rebate: 'rep-rebate-pane', brand: 'rep-brand-pane' };
+        const panes = { orders: 'rep-orders-pane', adopt: 'rep-adopt-pane', rebate: 'rep-rebate-pane', brand: 'rep-brand-pane', ppg: 'rep-ppg-pane' };
         const on = 'px-4 py-2 text-sm font-semibold border-b-2 border-blue-700 text-blue-700';
         const off = 'px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700';
         Object.entries(panes).forEach(([k, id]) => {
@@ -2874,6 +2917,97 @@
         if (which === 'adopt') adoptLoad();
         if (which === 'rebate') rebateReportLoad();
         if (which === 'brand') brandReportsLoad();
+        if (which === 'ppg') ppgOpen();
+    }
+
+    // ============================================================
+    // PPG PAINT LINES VS SUNDRIES (Reports > PPG vs sundries)
+    // Renderer shared with the shop console: /ppg-split.js
+    // ============================================================
+    const ppgIsSuper = () => !!(admin.user && admin.user.role === 'super_admin');
+    async function ppgOpen() {
+        const sel = document.getElementById('ppg-company');
+        if (!sel.options.length) {
+            let list = admin.companies || [];
+            if (!list.length) {
+                try { const r = await adminFetch('/companies'); const d = await r.json(); list = d.companies || []; } catch (_) { list = []; }
+            }
+            list = list.slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+            sel.innerHTML = '<option value="">Choose a company</option>' + list.map(c => `<option value="${escA(c.id)}">${escA(c.name)}</option>`).join('');
+        }
+        document.getElementById('ppg-corrections').classList.toggle('hidden', !ppgIsSuper());
+        if (ppgIsSuper()) ppgCorrectionsLoad();
+        ppgLoad();
+    }
+    async function ppgCompanyChange() {
+        const companyId = document.getElementById('ppg-company').value;
+        const shop = document.getElementById('ppg-shop');
+        shop.innerHTML = '<option value="">All shops</option>';
+        if (companyId) {
+            try {
+                const r = await adminFetch(`/companies/${companyId}/locations`); const d = await r.json();
+                shop.innerHTML += (d.locations || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))
+                    .map(l => `<option value="${escA(l.id)}">${escA(l.name)}</option>`).join('');
+            } catch (_) { /* All shops only */ }
+        }
+        ppgLoad();
+    }
+    async function ppgLoad() {
+        const el = document.getElementById('ppg-admin-split');
+        const companyId = document.getElementById('ppg-company').value;
+        if (!window.PPGS) return;
+        if (!companyId) { PPGS.message(el, 'Choose a company to see its PPG paint lines and sundries by shop.'); return; }
+        const { from, to, label } = arPeriodRange(document.getElementById('ppg-period').value);
+        const params = new URLSearchParams();
+        const shopSel = document.getElementById('ppg-shop');
+        if (shopSel.value) params.set('location_id', shopSel.value);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        PPGS.message(el, 'Loading…');
+        try {
+            const r = await adminFetch(`/companies/${companyId}/reports/ppg-split?${params}`);
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Failed to load.');
+            const cSel = document.getElementById('ppg-company');
+            PPGS.render(el, d, {
+                periodLabel: label,
+                shopLabel: (cSel.options[cSel.selectedIndex] || {}).text + ' · ' + (shopSel.options[shopSel.selectedIndex] || {}).text,
+                onCorrect: ppgIsSuper() ? (sku, group) => ppgFix(sku, group, '') : null
+            });
+        } catch (e) { PPGS.message(el, e.message || 'Failed to load.'); }
+    }
+    async function ppgFix(sku, group, reason) {
+        const r = await adminFetch('/report-groups/overrides', { method: 'PUT', body: JSON.stringify({ sku, group, reason }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(d.error || 'Could not save the correction.'); return; }
+        await ppgCorrectionsLoad();
+        await ppgLoad();
+    }
+    function ppgFixFromForm() {
+        const sku = document.getElementById('ppg-fix-sku').value.trim();
+        if (!sku) { alert('Enter the part number.'); return; }
+        ppgFix(sku, document.getElementById('ppg-fix-group').value, document.getElementById('ppg-fix-reason').value.trim())
+            .then(() => { document.getElementById('ppg-fix-sku').value = ''; document.getElementById('ppg-fix-reason').value = ''; });
+    }
+    async function ppgCorrectionsLoad() {
+        const box = document.getElementById('ppg-corrections-list');
+        try {
+            const r = await adminFetch('/report-groups/overrides'); const d = await r.json();
+            if (d.needs_migration) { box.innerHTML = `<p class="px-4 py-3 text-amber-700">${escA(d.needs_migration)}</p>`; return; }
+            const rows = d.overrides || [];
+            box.innerHTML = rows.length ? `<div class="overflow-x-auto"><table class="w-full"><thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr>
+                <th class="text-left px-4 py-2">Part #</th><th class="text-left px-4 py-2">Counted as</th><th class="text-left px-4 py-2">Why</th><th class="text-left px-4 py-2">Changed</th><th></th></tr></thead><tbody>` +
+                rows.map(o => `<tr class="border-t"><td class="px-4 py-2 font-mono">${escA(o.sku)}</td><td class="px-4 py-2">${o.report_group === 'ppg' ? 'PPG paint lines' : 'Sundries'}</td>
+                    <td class="px-4 py-2 text-gray-600">${escA(o.reason || '')}</td><td class="px-4 py-2 text-gray-500">${new Date(o.updated_at).toLocaleDateString()}</td>
+                    <td class="px-4 py-2 text-right"><button onclick="ppgUnfix('${escA(o.sku_key)}')" class="text-xs text-gray-500 hover:text-red-600">Back to the rule</button></td></tr>`).join('') +
+                '</tbody></table></div>' : '<p class="px-4 py-3 text-gray-400">No corrections. Every item is sorted by the rule.</p>';
+        } catch (_) { box.innerHTML = '<p class="px-4 py-3 text-red-500">Could not load corrections.</p>'; }
+    }
+    async function ppgUnfix(key) {
+        const r = await adminFetch(`/report-groups/overrides/${encodeURIComponent(key)}`, { method: 'DELETE' });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Could not remove the correction.'); return; }
+        await ppgCorrectionsLoad();
+        await ppgLoad();
     }
 
     // ============================================================
@@ -5008,6 +5142,8 @@
         document.getElementById('rebate-rules-list').innerHTML = d.rebate_rules.map(r => {
             const scope = r.applies_to === 'selected'
                 ? [(r.categories || []).length ? 'categories: ' + r.categories.join(', ') : '', (r.brands || []).length ? 'brands: ' + r.brands.join(', ') : ''].filter(Boolean).join('; ')
+                : r.applies_to === 'ppg_paint' ? 'PPG paint lines only (PPG general items such as paint suits excluded)'
+                : r.applies_to === 'sundries' ? 'sundries only (everything that is not a PPG paint line)'
                 : 'all items purchased';
             const dates = (r.starts_on || r.ends_on) ? ` · ${r.starts_on || 'start'} to ${r.ends_on || 'no end date'}` : '';
             return `
@@ -5143,6 +5279,8 @@
                 <div><label for="rf-applies" class="block text-xs font-semibold text-gray-500 mb-1">Applies to</label>
                     <select id="rf-applies" onchange="rebateFormScope()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                         <option value="all" ${v.applies_to === 'all' ? 'selected' : ''}>All items purchased</option>
+                        <option value="ppg_paint" ${v.applies_to === 'ppg_paint' ? 'selected' : ''}>PPG paint lines only</option>
+                        <option value="sundries" ${v.applies_to === 'sundries' ? 'selected' : ''}>Sundries only (not PPG paint)</option>
                         <option value="selected" ${v.applies_to === 'selected' ? 'selected' : ''}>Selected categories and/or brands</option></select></div>
                 <div><label for="rf-from" class="block text-xs font-semibold text-gray-500 mb-1">Starts (optional)</label>
                     <input id="rf-from" type="date" value="${escA(v.starts_on || '')}" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
@@ -10283,6 +10421,7 @@
     }
     </script>
     <script src="/admin-look.js"></script>
+    <script src="/ppg-split.js"></script>
     <script src="/support-footer.js"></script>
     <script src="/help-content.js"></script>
     <script src="/help-bot.js"></script>

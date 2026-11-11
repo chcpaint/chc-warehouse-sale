@@ -30,6 +30,8 @@
 
 const TZ = 'America/Toronto';
 const FREQUENCIES = ['monthly', 'quarterly', 'annual'];
+const SCOPES = ['all', 'selected', 'ppg_paint', 'sundries'];
+const { classify, loadOverrides } = require('./report-groups');
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const cents = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -71,8 +73,8 @@ function normalizeRebateRule(input) {
     const percent = Number(b.percent);
     if (!Number.isFinite(percent) || percent <= 0) return { error: 'Enter a rebate percent greater than zero.' };
     if (percent > 100) return { error: 'A rebate can not be more than 100%.' };
-    const applies_to = b.applies_to === 'selected' ? 'selected' : (b.applies_to === 'all' || !b.applies_to ? 'all' : null);
-    if (!applies_to) return { error: 'Choose whether the rebate covers everything or selected categories and brands.' };
+    const applies_to = SCOPES.includes(b.applies_to) ? b.applies_to : (!b.applies_to ? 'all' : null);
+    if (!applies_to) return { error: 'Choose whether the rebate covers everything, PPG paint lines, sundries, or selected categories and brands.' };
     const categories = applies_to === 'selected' ? cleanList(b.categories) : [];
     const brands = applies_to === 'selected' ? cleanList(b.brands) : [];
     if (applies_to === 'selected' && !categories.length && !brands.length) {
@@ -96,7 +98,19 @@ function normalizeRebateRule(input) {
 
 const inEffect = (rule, date) => (!rule.starts_on || date >= String(rule.starts_on)) && (!rule.ends_on || date <= String(rule.ends_on));
 
-function lineMatches(rule, item) {
+/**
+ * Does this line count toward the rule?
+ *   'all'        every line
+ *   'ppg_paint'  PPG paint lines only (PPG general items such as paint suits are not paint)
+ *   'sundries'   everything that is not a PPG paint line
+ *   'selected'   the chosen categories and brands
+ * item: { brand, category, name, sku }; overrides: Map(skuKey -> group) from report_item_groups.
+ */
+function lineMatches(rule, item, overrides) {
+    if (rule.applies_to === 'ppg_paint' || rule.applies_to === 'sundries') {
+        const g = classify(item, overrides).group;
+        return rule.applies_to === 'ppg_paint' ? g === 'ppg' : g === 'sundries';
+    }
     if (rule.applies_to !== 'selected') return true;
     const cats = (rule.categories || []).map(fold);
     const brands = (rule.brands || []).map(fold);
@@ -111,7 +125,7 @@ function lineMatches(rule, item) {
  *   now       injectable clock, for "is this period finished?"
  * Returns { rows, totals, rules_active } with one row per (rule, period), newest period first.
  */
-function computeRebates({ orders, rules, itemInfo, now = new Date() }) {
+function computeRebates({ orders, rules, itemInfo, overrides, now = new Date() }) {
     const active = (rules || []).filter(r => r && r.is_active !== false);
     const info = itemInfo instanceof Map ? itemInfo : new Map();
     const today = torontoDate(now).date;
@@ -128,12 +142,12 @@ function computeRebates({ orders, rules, itemInfo, now = new Date() }) {
             const spend = Number(it && it.subtotal);
             if (!it || it.price_on_request || !(spend > 0)) continue;
             const known = info.get(it.product_id) || {};
-            const line = { brand: it.brand || known.brand || '', category: it.category || known.category || '' };
+            const line = { brand: it.brand || known.brand || '', category: it.category || known.category || '', name: it.name || '', sku: it.sku || '' };
 
             // Highest matching percent wins; on a tie the older rule wins, so the answer is stable.
             let winner = null;
             for (const r of inScope) {
-                if (!lineMatches(r, line)) continue;
+                if (!lineMatches(r, line, overrides)) continue;
                 if (!winner || Number(r.percent) > Number(winner.percent)) winner = r;
             }
             if (!winner) continue;
@@ -233,11 +247,13 @@ async function rebateReportFor(supabase, { companyId, from, to, locationId, now 
     if (!rules.length) return { rules, rows: [], totals: { eligible_spend: 0, rebate: 0 }, rules_active: 0 };
     const orders = await fetchOrdersForRebate(supabase, { companyId, from, to, locationId });
     const itemInfo = await loadItemInfo(supabase, companyId, orders);
-    return { rules, ...computeRebates({ orders, rules, itemInfo, now }) };
+    const overrides = rules.some(r => r.applies_to === 'ppg_paint' || r.applies_to === 'sundries')
+        ? await loadOverrides(supabase) : new Map();
+    return { rules, ...computeRebates({ orders, rules, itemInfo, overrides, now }) };
 }
 
 module.exports = {
-    fetchOrdersForRebate, rebateReportFor,
+    SCOPES, fetchOrdersForRebate, rebateReportFor,
     FREQUENCIES, TZ, torontoDate, periodOf, normalizeRebateRule, lineMatches, inEffect,
     computeRebates, loadRebateRules, loadItemInfo
 };

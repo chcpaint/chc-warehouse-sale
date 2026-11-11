@@ -9,6 +9,7 @@ const { taxSettings, computeTax } = require('../utils/tax');
 const { clientSettings } = require('../utils/billing');
 const { resolveFees, loadFeeRules, groupIdForUser, publicRulesFor, feeLinesOf } = require('../utils/fee-rules');
 const { rebateReportFor } = require('../utils/rebates');
+const { splitReportFor, stripDollars } = require('../utils/report-groups');
 const { paymentsEnabled, publicPaymentConfig, getStripe } = require('../utils/payments');
 const { barcodeVariants, canonicalBarcode } = require('../utils/inventory');
 const { resolveOrderRecipients, validEmails } = require('../utils/recipients');
@@ -1495,6 +1496,38 @@ router.get('/:slug/reports/rebate', requireCompanyAuth, async (req, res) => {
     } catch (err) {
         console.error('Rebate report error:', err);
         res.status(500).json({ error: 'Failed to load the rebate report.' });
+    }
+});
+
+/**
+ * GET /api/store/:slug/reports/ppg-split?location_id&from&to
+ * PPG paint lines vs sundries: totals, by shop, by month, by item, and PPG by
+ * line. Same access rules as the other reports: with "Reports for signed-in
+ * accounts only" the shared code gets nothing, and a person tied to a shop
+ * sees that shop only, whatever is in the query string. Shops that hide
+ * pricing get units only.
+ */
+const ISO_TS = /^\d{4}-\d{2}-\d{2}([T ][0-9:.]+(Z|[+-]\d{2}:?\d{2})?)?$/;
+router.get('/:slug/reports/ppg-split', requireCompanyAuth, async (req, res) => {
+    try {
+        let { location_id, from, to } = req.query;
+        if (from && !ISO_TS.test(String(from))) return res.status(400).json({ error: 'Invalid start date.' });
+        if (to && !ISO_TS.test(String(to))) return res.status(400).json({ error: 'Invalid end date.' });
+        const { data: company } = await supabaseAdmin.from('companies').select('settings').eq('id', req.company.id).maybeSingle();
+        const settings = company && company.settings;
+        if (moduleEnabled(settings, 'restricted_reports') && !req.companyUser) {
+            return res.status(403).json({ error: 'Reports are available to people with their own account. Please sign in with your account.', code: 'reports_need_account' });
+        }
+        if (req.companyUser && req.companyUser.location_id) location_id = req.companyUser.location_id;
+        if (location_id && !isValidUUID(String(location_id))) return res.status(400).json({ error: 'Invalid shop.' });
+
+        const report = await splitReportFor(supabaseAdmin, {
+            companyId: req.company.id, locationId: location_id || null, from: from || null, to: to || null
+        });
+        res.json(hidePricingEnabled(settings) ? stripDollars(report) : report);
+    } catch (err) {
+        console.error('PPG split report error:', err);
+        res.status(500).json({ error: 'Failed to load the PPG and sundries report.' });
     }
 });
 

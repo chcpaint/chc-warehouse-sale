@@ -606,6 +606,9 @@
 
                 <div id="rep-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
 
+                <!-- PPG paint lines vs sundries, by shop / month / item; see /ppg-split.js -->
+                <div id="ppg-split" class="mb-4"></div>
+
                 <div id="rep-rebate" class="hidden bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
                     <div class="px-4 py-3 border-b bg-green-50 flex flex-wrap justify-between items-center gap-2">
                         <span class="font-semibold text-green-800 text-sm"><i class="fas fa-piggy-bank mr-1"></i>Rebate</span>
@@ -1905,6 +1908,7 @@
         if (to) params.set('to', to);
         document.getElementById('rep-orders-body').innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-gray-400"><i class="fas fa-spinner fa-spin"></i></td></tr>';
         loadRebateReport(params);
+        if (window.PPGS) window.PPGS.loadStore(params, label);
         try {
             const resp = await apiFetch(`/store/${state.slug}/reports/orders?${params}`);
             const data = await resp.json();
@@ -1932,6 +1936,8 @@
     }
 
     function rebateScopeText(r) {
+        if (r.applies_to === 'ppg_paint') return 'PPG paint lines (PPG general items such as paint suits are not included)';
+        if (r.applies_to === 'sundries') return 'sundries (everything that is not a PPG paint line)';
         if (r.applies_to !== 'selected') return 'all items purchased';
         const parts = [];
         if ((r.categories || []).length) parts.push('categories: ' + r.categories.join(', '));
@@ -3981,6 +3987,7 @@
     </script>
     <script src="/new-look.js"></script>
     <script src="/insights.js"></script>
+    <script src="/ppg-split.js"></script>
     <script src="/support-footer.js"></script>
     <script src="/help-content.js"></script>
     <script src="/help-bot.js"></script>

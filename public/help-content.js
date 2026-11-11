@@ -98,6 +98,14 @@ window.RAI_HELP = {
                   a: 'Open Reports. Choose the shop and the period to see spending, orders and items, and export them.' },
                 { q: 'What is Insights?', k: 'insights ai advice suggestions analysis claude',
                   a: 'Insights (on the Reports screen, where CHC has switched it on) reads a summary of your own numbers and suggests what is going well, what may be worth acting on, and what may be worth a closer look. It is advice only and changes nothing. You can see exactly what was sent.' },
+                { q: 'How do I see PPG paint versus sundries?', k: 'ppg sundries split paint envirobase enviro ehp shopline onechoice deltron delfleet omni by shop compare',
+                  a: 'Open Reports. The PPG paint lines vs sundries card splits your item dollars in two: PPG paint lines (Envirobase / EHP, Shopline, OneChoice, Deltron, Delfleet, Omni and other PPG paint) and sundries (everything else). Pick a shop or All shops and a period at the top, then view it by shop, by month, by item or PPG by line, and download any view as a CSV.' },
+                { q: 'Are paint suits and other PPG general items counted as PPG?', k: 'paint suit masking paper cups cans general items ppg sundries excluded rebate',
+                  a: 'No. PPG-branded general items that are not paint, such as paint suits, masking paper, mixing cups and sticks, cans and lids, spray-out cards and shop equipment, count as sundries, in reports and in PPG rebates. If an item looks to be in the wrong group, tell CHC and they can correct it.' },
+                { q: 'Which dates and dollars do the reports use?', k: 'dates dollars before tax order date cancelled basis',
+                  a: 'Reports use the order date and item dollars before tax, delivery fee and fuel surcharge. Cancelled orders are not counted. Items still to be priced count as units until they are priced.' },
+                { q: 'How is our rebate worked out?', k: 'rebate earned percent monthly quarterly eligible spend',
+                  a: 'Where CHC has set up a rebate, Reports shows it: the rate, what it covers (everything, PPG paint lines, sundries, or chosen brands and categories), and what you have earned each period on item dollars before tax. It is paid separately; nothing is taken off your orders.' },
                 { q: 'Why can\'t I see Reports?', k: 'reports missing hidden cannot see',
                   a: 'Some shops limit Reports to people with their own login. Sign in with your own account, or ask your owner to invite you.' }
             ]
@@ -111,6 +119,31 @@ window.RAI_HELP = {
                   a: 'An owner view, where switched on, of who ordered, how much each person spent and who signed in.' },
                 { q: 'Where do I manage our subscription?', k: 'billing plans subscription pay',
                   a: 'If your shop is on a paid plan, open Plans & billing. Many shops use the console at no charge.' }
+            ]
+        },
+        {
+            id: 'security', title: 'Security, privacy and AI', audience: 'shop',
+            items: [
+                { q: 'Is our data encrypted?', k: 'encrypted encryption secure https at rest transit data safe',
+                  a: 'Yes. Every page and request uses HTTPS, browsers are told to use HTTPS only, and the database and stored files are encrypted on disk by our database host, Supabase.' },
+                { q: 'Can another shop see our orders or prices?', k: 'other shop see our data separate isolation privacy customer',
+                  a: 'No. Our server checks every request against the signed-in company and location, so one shop cannot read another shop\'s orders, stock or prices.' },
+                { q: 'How are passwords protected?', k: 'password stored hashed bcrypt safe',
+                  a: 'Passwords are never stored. Only a one-way hash (bcrypt) is kept, so nobody, CHC included, can read one. Reset links expire, sign-ins end after 12 to 24 hours, and repeated failed sign-ins are slowed down and then blocked.' },
+                { q: 'Where is our data kept and is it backed up?', k: 'data location where stored backup backups country canada us',
+                  a: 'In the United States (US West), with Supabase for the database and Railway for the app. The database is backed up automatically by Supabase. Scheduled restore drills are being put in place.' },
+                { q: 'Is there a record of changes?', k: 'audit trail record changes history who changed',
+                  a: 'Yes. Changes CHC staff make to customers, prices, users and settings are recorded with who, what and when, and every stock movement records who made it.' },
+                { q: 'Where does the software use AI?', k: 'ai artificial intelligence where used llm claude anthropic',
+                  a: 'In two places only: Insights on the Reports screen (where CHC has switched it on), and price-screenshot reading in CHC\'s own console. Each use is one call, is logged, and cannot change any data. The Help page lists exactly what each one sends.' },
+                { q: 'What does Insights send to the AI?', k: 'insights send data privacy what is sent personal',
+                  a: 'A summary of your own numbers: order counts and spend, top items and categories, stock levels and kit totals. No names, emails, phone numbers, addresses, PO, repair-order or claim numbers, VINs or notes, and no dollar figures if your shop has pricing hidden.' },
+                { q: 'Is this help assistant AI?', k: 'assistant chatbot bot ai help button how does it work',
+                  a: 'No. It searches this written guide on your own device and sends nothing anywhere. If it cannot find an answer it gives you the email for the CHC team.' },
+                { q: 'Where is the full help guide?', k: 'help page guide security documentation link menu',
+                  a: 'Press "Help, security & AI" at the foot of the left menu. It opens the full guide: how-to answers, security and data protection, and where AI is used.' },
+                { q: 'Who do I contact for help?', k: 'contact support email help person phone',
+                  a: 'For how-to questions, email info@chcpaint.com. For problems with the software itself, or security questions from your IT team, email Adam Berube at adam@chcpaint.com. The support link is at the bottom of every page.' }
             ]
         },
         {
@@ -132,6 +165,12 @@ window.RAI_HELP = {
                   a: 'The Item Library is CHC\'s reference catalogue that customer lists draw from. The Master Table is where the library is maintained and pushed to customers, barcodes included.' },
                 { q: 'How do I give a customer a feature for free?', k: 'comp free billing entitlement',
                   a: 'Open Billing and comp the module for that customer, with a reason and, ideally, a review date.' },
+                { q: 'How do I see a customer\'s PPG paint versus sundries by shop?', k: 'ppg sundries split report shop customer owner',
+                  a: 'Open Reports, then the PPG vs sundries tab. Choose the company, a shop or All shops, and the period. View it by shop, month, item or PPG line and download a CSV. The customer\'s owner sees the same split on their own Reports screen.' },
+                { q: 'An item is in the wrong group. How do I fix it?', k: 'ppg sundries wrong group correction override move item',
+                  a: 'A super admin can fix it on Reports, PPG vs sundries: press "Move to sundries" or "Move to PPG" on the item, or enter the part number under Corrections. A correction applies to every customer and to PPG or sundries rebates, and is written to the audit log. "Back to the rule" undoes it.' },
+                { q: 'How do I pay a rebate on PPG paint only?', k: 'rebate ppg paint only sundries scope set up',
+                  a: 'Open Companies, press the % button on the customer, and add a rebate. Under Applies to choose PPG paint lines only (PPG general items such as paint suits are left out) or Sundries only.' },
                 { q: 'How do I see what staff changed?', k: 'audit log changes who did',
                   a: 'Open Audit Log. Every staff change to customers, prices, users and settings is recorded.' },
                 { q: 'How do I report on AI use?', k: 'ai usage report export log',
