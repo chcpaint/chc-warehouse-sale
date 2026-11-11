@@ -17,6 +17,9 @@ const PORT = process.env.PORT || 3000;
 // Trust proxy for Railway (required for rate limiting and correct IP detection)
 app.set('trust proxy', 1);
 
+// A short id on every request, echoed in X-Request-Id and in error logs.
+app.use(require('./utils/request-id').requestId);
+
 // ============================================================
 // SECURITY MIDDLEWARE
 // ============================================================
@@ -150,6 +153,21 @@ app.use('/assets', express.static(path.join(__dirname, 'public', 'assets')));
 // API ROUTES
 // ============================================================
 
+// Readiness: the server is up AND can reach the database. Point the uptime
+// monitor at this one. Registered before the tenant lookup on purpose, so it
+// reports the database itself rather than a cached answer. Returns only
+// ok / not ok and a timing, never data.
+app.get('/api/health/ready', async (req, res) => {
+    const { supabaseAdmin } = require('./utils/supabase');
+    const db = await require('./utils/health').checkDatabase(supabaseAdmin);
+    res.status(db.ok ? 200 : 503).json({
+        status: db.ok ? 'ready' : 'unavailable',
+        database: db.ok ? 'ok' : db.error,
+        ms: db.ms,
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Every API request resolves to the distributor (CHC today; others once
 // onboarded) whose domain/subdomain it arrived on, before it reaches auth
 // or any route. See utils/tenant.js for the resolution order and the
@@ -249,11 +267,12 @@ app.use((err, req, res, next) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err);
+    console.error(`Unhandled error [request ${req.id || 'n/a'}] ${req.method} ${req.originalUrl.split('?')[0]}:`, err);
     res.status(500).json({
         error: process.env.NODE_ENV === 'production'
             ? 'An unexpected error occurred.'
-            : err.message
+            : err.message,
+        request_id: req.id || undefined
     });
 });
 
@@ -275,6 +294,11 @@ const server = app.listen(PORT, () => {
     console.log(`   Store: http://localhost:${PORT}/store/{company-slug}`);
     console.log(`   Admin: http://localhost:${PORT}/admin`);
     console.log(`   API:   http://localhost:${PORT}/api/health\n`);
+
+    // Plain-English warnings about the environment. Never stops the server.
+    try {
+        for (const w of require('./utils/config-check').configWarnings()) console.warn(`   CONFIG WARNING: ${w}`);
+    } catch (_) { /* a check must never take the console down */ }
 
     // Scheduled work — currently the refinishAI low-stock digest, which goes
     // out in the morning of the shop's own time zone. Runs in this process

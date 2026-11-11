@@ -526,6 +526,17 @@ function createFakeSupabase(seed = {}) {
             row.is_active = true;
         }
 
+        // Reproduce uq_stock_movements_kiosk_session (migration 060): one kiosk
+        // basket can post a given product only once, even if the same request
+        // arrives twice at the same instant. Checked before the trigger below,
+        // because a unique violation rolls the whole insert back.
+        if (table === 'stock_movements' && row.source_doc_type === 'kiosk_scan') {
+            const clash = (db.stock_movements || []).find(m =>
+                m.source_doc_type === 'kiosk_scan' && m.company_id === row.company_id &&
+                m.source_doc_id === row.source_doc_id && m.product_id === row.product_id);
+            if (clash) { const e = new Error('duplicate key value violates unique constraint'); e.code = '23505'; throw e; }
+        }
+
         // Reproduce the apply_stock_movement trigger: on-hand is the running sum
         // of the ledger, and the resulting balance is stamped on the movement.
         if (table === 'stock_movements') {

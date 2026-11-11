@@ -586,6 +586,15 @@ router.post('/scan-out', async (req, res) => {
                 .select('id, qty_change, on_hand_after')
                 .single();
 
+            // The same basket arrived twice at once (a double tap, a retry that
+            // overlapped the first try). The database allows one posting per
+            // basket and product (migration 060), so the second is told it is
+            // already done, exactly like a sequential retry.
+            if (error && error.code === '23505') {
+                results.push({ product_id: product.id, name: product.name, sku: product.sku, ok: true, duplicate: true });
+                continue;
+            }
+
             if (error) {
                 console.error('Kiosk movement insert failed:', error);
                 results.push({ product_id: product.id, name: product.name, sku: product.sku, ok: false, error: 'Could not record this item. Try again.' });

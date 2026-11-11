@@ -1,0 +1,43 @@
+name: CI
+
+# Runs the whole test suite on every push and every pull request, so a change
+# that breaks ordering, stock or sign-in is caught before it reaches Railway.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tests
+        run: node --test tests/*.test.js
+
+  audit:
+    # Known-vulnerable dependencies. Reported on every run but does not block a
+    # merge, so an unrelated advisory never stops an urgent fix.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm audit --omit=dev --audit-level=high

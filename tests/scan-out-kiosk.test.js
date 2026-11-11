@@ -417,6 +417,32 @@ test('a retry with the same session never posts a line twice', async () => {
     assert.equal(onHand(P_MASK), 8);
 });
 
+test('the same basket arriving twice at the same instant posts once, and both calls succeed', async () => {
+    fake = seed();
+    // Make each request yield to the event loop between its "already posted?"
+    // check and its insert, so both really are in flight together, the way two
+    // taps on a slow tablet are. Without this the fake finishes one request
+    // before the other starts and the race never happens.
+    const realFrom = fake.from.bind(fake);
+    const slow = (q) => new Proxy(q, {
+        get: (t, p) => {
+            const v = t[p];
+            if (typeof v !== 'function') return v;
+            if (p === 'maybeSingle') return async (...a) => { await new Promise(r => setImmediate(r)); return v.apply(t, a); };
+            return (...a) => { const out = v.apply(t, a); return out && typeof out.maybeSingle === 'function' ? slow(out) : out; };
+        }
+    });
+    fake.from = (table) => (table === 'products' ? slow(realFrom(table)) : realFrom(table));
+    const body = { session_id: SESSION, badge_code: BADGE_CODE, items: [{ product_id: P_MASK, quantity: 2 }] };
+    const [r1, r2] = await Promise.all([post('/api/kiosk/scan-out', body), post('/api/kiosk/scan-out', body)]);
+    assert.equal(r1.status, 201);
+    assert.equal(r2.status, 201);
+    assert.equal(movements().length, 1, 'one movement, not two');
+    assert.equal(onHand(P_MASK), 8, 'stock went down once');
+    const flags = [...r1.body.results, ...r2.body.results].map(r => !!r.duplicate).sort();
+    assert.deepEqual(flags, [false, true], 'one call posted, the other was told it was already done');
+});
+
 test('repeat scans of one product are merged into one line', async () => {
     fake = seed();
     const r = await post('/api/kiosk/scan-out', {
