@@ -1,0 +1,3 @@
+Archivo (Copyright 2016 The Archivo Project Authors) and IBM Plex Sans / IBM Plex Mono
+(Copyright 2017 IBM Corp.) are licensed under the SIL Open Font License, Version 1.1.
+Full licence text: https://openfontlicense.org/open-font-license-official-text/

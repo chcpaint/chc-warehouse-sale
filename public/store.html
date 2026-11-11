@@ -15,6 +15,7 @@
     <link rel="apple-touch-icon" href="/assets/refinishai-icon.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/field-outlines.css">
+    <link rel="stylesheet" href="/new-look.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -325,6 +326,9 @@
 
         <!-- MAIN CONTENT -->
         <main class="max-w-7xl mx-auto px-4 py-6">
+
+            <!-- ============ TODAY (new look only; filled by /new-look.js) ============ -->
+            <section id="tab-today" class="hidden" aria-label="Today"></section>
 
             <!-- ============ PRODUCTS TAB ============ -->
             <section id="tab-products" class="fade-in">
@@ -1288,6 +1292,10 @@
         // Inventory is opt-in per company; initInventory() reveals the tab only
         // when the company has it switched on.
         initInventory();
+
+        // The new look is opt-in per company too (the "New look" module). With
+        // it off this does nothing; see public/new-look.js.
+        if (window.NL) window.NL.apply(state.company);
     }
 
     let allLocations = [];
@@ -1704,6 +1712,7 @@
         if (tab === 'kitadd' && window.KITSUB) window.KITSUB.showAdd();
         if (tab === 'kitedit' && window.KITSUB) window.KITSUB.showEdit();
         if (tab === 'contact') loadContactNotes();
+        if (tab === 'today' && window.NL) window.NL.renderToday();
 
         // Landing back on Products -- from the drawer, "Continue shopping" in
         // the cart, or "Back to cart" then away again -- should drop the
@@ -3958,5 +3967,6 @@
         return div.innerHTML;
     }
     </script>
+    <script src="/new-look.js"></script>
 </body>
 </html>

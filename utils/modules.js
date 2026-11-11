@@ -144,6 +144,17 @@ const MODULES = {
         }
     },
 
+    new_look: {
+        name: 'new_look',
+        label: 'New look (preview)',
+        blurb: 'The redesigned refinishAI screens: a permanent menu with the refinishAI logo and a Today screen that opens on what needs doing. Turn on for one customer at a time; off changes nothing.',
+        requires: [],
+        released: true,
+        defaults: {
+            enabled: false
+        }
+    },
+
     hide_pricing: {
         name: 'hide_pricing',
         label: 'Hide pricing (packing slip mode)',

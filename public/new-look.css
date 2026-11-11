@@ -1,0 +1,183 @@
+/* ============================================================================
+   refinishAI new look (phase 1)
+
+   Everything here is scoped to body.nl, which new-look.js adds only when the
+   company has the "New look" module switched on. With it off, not one rule
+   below applies and the console looks and behaves exactly as before.
+
+   Design: refinishAI Console Redesign canvas, Nov 2026.
+   ========================================================================== */
+@import url('/assets/fonts/fonts.css');
+
+body.nl {
+    --nl-ground: #F4F6F9;
+    --nl-panel: #FFFFFF;
+    --nl-line: #DFE4EC;
+    --nl-line-soft: #EEF1F5;
+    --nl-ink: #0E1A2B;
+    --nl-ink-2: #4A5A70;
+    --nl-navy: #0E1A2B;
+    --nl-navy-2: #1D2D45;
+    --nl-navy-line: #22344F;
+    --nl-nav-text: #C9D3E1;
+    --nl-nav-label: #8494AB;
+    --nl-blue: #1747D6;
+    --nl-blue-dark: #0F35A8;
+    --nl-blue-tint: #E8EEFD;
+    --nl-orange: #C2410C;
+    --nl-orange-tint: #FFF1E8;
+    --nl-amber: #8A5A00;
+    --nl-amber-tint: #FFF6DB;
+    --nl-red: #B42318;
+    --nl-red-tint: #FDECEA;
+    --nl-green: #0F7A4F;
+    --nl-green-tint: #E6F4EE;
+    --nl-sidebar: 248px;
+
+    background: var(--nl-ground) !important;
+    color: var(--nl-ink);
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+body.nl h1, body.nl h2, body.nl h3, body.nl .nl-display {
+    font-family: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
+    letter-spacing: -0.01em;
+}
+body.nl .font-mono, body.nl code, body.nl .nl-mono {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* ---------- Header ---------- */
+body.nl #app > header {
+    background: var(--nl-panel);
+    box-shadow: none;
+    border-bottom: 1px solid var(--nl-line);
+}
+body.nl #app > header img[alt="CHC Paint"] { display: none; }
+body.nl #header-logo-divider { display: none !important; }
+body.nl #header-company-name { font-family: 'Archivo', sans-serif; font-weight: 700; color: var(--nl-ink); }
+
+/* ---------- Menu: dark, with the refinishAI logo ---------- */
+body.nl .drawer { background: var(--nl-navy); color: var(--nl-nav-text); }
+body.nl .nl-brand { padding: 16px 14px 4px; }
+body.nl .nl-brand a, body.nl .nl-brand div {
+    display: flex; align-items: center; background: #FFFFFF; border-radius: 12px; padding: 10px 12px;
+}
+body.nl .nl-brand img { display: block; width: 100%; max-width: 196px; height: auto; }
+body.nl .drawer-head { border-bottom-color: var(--nl-navy-line); }
+body.nl #drawer-company { color: #FFFFFF !important; }
+body.nl #drawer-location { color: var(--nl-nav-label) !important; }
+body.nl .drawer-search { background: var(--nl-navy-2); }
+body.nl .drawer-search input { color: #FFFFFF; }
+body.nl .drawer-search input::placeholder { color: var(--nl-nav-label); }
+body.nl .drawer-group > .grp-btn { color: var(--nl-nav-label); }
+body.nl .drawer-link { color: var(--nl-nav-text); min-height: 44px; }
+body.nl .drawer-link .ico { color: var(--nl-nav-label); }
+body.nl .drawer-link:hover { background: var(--nl-navy-2); color: #FFFFFF; }
+body.nl .drawer-link[aria-current="page"] {
+    background: var(--nl-navy-2); color: #FFFFFF; box-shadow: inset 3px 0 0 #4C7DFF;
+}
+body.nl .drawer-link[aria-current="page"] .ico { color: #FFFFFF; }
+body.nl .drawer-link:focus-visible { outline-color: #4C7DFF; }
+body.nl .count.c-blue { background: var(--nl-blue); }
+body.nl .count.c-amber { background: var(--nl-orange); }
+body.nl .drawer-foot { border-top-color: var(--nl-navy-line); }
+body.nl .drawer-foot button { color: var(--nl-nav-text) !important; }
+
+/* Desktop: the menu stays open on the left; the old tab row goes. */
+@media (min-width: 1024px) {
+    body.nl #drawer {
+        display: flex !important;
+        transform: none !important;
+        box-shadow: none;
+        width: var(--nl-sidebar);
+        z-index: 40;
+    }
+    body.nl #drawer-backdrop { display: none !important; }
+    body.nl #drawer .drawer-head button[aria-label="Close menu"] { display: none; }
+    body.nl #drawer-btn { display: none; }
+    body.nl #nav-tabs { display: none !important; }
+    body.nl #app { margin-left: var(--nl-sidebar); }
+    body.nl #app > header { z-index: 30; }
+}
+
+/* ---------- Colour and shape of the existing screens ---------- */
+body.nl .bg-blue-600, body.nl .bg-blue-700 { background-color: var(--nl-blue) !important; }
+body.nl .hover\:bg-blue-700:hover, body.nl .hover\:bg-blue-800:hover { background-color: var(--nl-blue-dark) !important; }
+body.nl .text-blue-600, body.nl .text-blue-700 { color: var(--nl-blue) !important; }
+body.nl .bg-blue-50 { background-color: var(--nl-blue-tint) !important; }
+body.nl .focus\:ring-blue-500:focus { --tw-ring-color: var(--nl-blue) !important; }
+body.nl main .bg-white.rounded-lg,
+body.nl main .bg-white.rounded-xl {
+    border: 1px solid var(--nl-line);
+    border-radius: 14px;
+    box-shadow: none;
+}
+body.nl main input[type="text"], body.nl main input[type="search"], body.nl main input[type="number"],
+body.nl main input[type="email"], body.nl main select, body.nl main textarea {
+    border-radius: 10px;
+}
+body.nl main button { border-radius: 10px; }
+body.nl .tab-active { border-bottom-color: var(--nl-blue); color: var(--nl-blue); }
+
+/* ---------- Today ---------- */
+body.nl .nl-today { display: flex; flex-direction: column; gap: 24px; }
+body.nl .nl-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+body.nl .nl-kicker { margin: 0; font-size: 13px; color: var(--nl-ink-2); }
+body.nl .nl-head h1 { margin: 4px 0 0; font-size: 30px; font-weight: 800; line-height: 1.15; text-wrap: balance; }
+body.nl .nl-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+body.nl .nl-btn {
+    display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px;
+    border-radius: 10px; border: 1px solid #C9D2DE; background: var(--nl-panel); color: var(--nl-ink);
+    font: inherit; font-weight: 600; cursor: pointer; text-decoration: none;
+}
+body.nl .nl-btn:hover { border-color: var(--nl-ink-2); }
+body.nl .nl-btn.primary { background: var(--nl-blue); border-color: var(--nl-blue); color: #FFFFFF; }
+body.nl .nl-btn.primary:hover { background: var(--nl-blue-dark); }
+body.nl .nl-btn:focus-visible, body.nl .nl-link:focus-visible { outline: 2px solid var(--nl-blue); outline-offset: 2px; }
+
+body.nl .nl-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+body.nl .nl-card {
+    background: var(--nl-panel); border: 1px solid var(--nl-line); border-radius: 14px; padding: 18px;
+    display: flex; flex-direction: column; gap: 10px; min-height: 172px;
+}
+body.nl .nl-card .nl-num { font-family: 'Archivo', sans-serif; font-size: 34px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+body.nl .nl-card p { margin: 0; color: var(--nl-ink-2); }
+body.nl .nl-card .nl-link { margin-top: auto; }
+body.nl .nl-chip { align-self: flex-start; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+body.nl .nl-chip.orange { color: var(--nl-orange); background: var(--nl-orange-tint); }
+body.nl .nl-chip.blue { color: var(--nl-blue); background: var(--nl-blue-tint); }
+body.nl .nl-chip.amber { color: var(--nl-amber); background: var(--nl-amber-tint); }
+body.nl .nl-chip.red { color: var(--nl-red); background: var(--nl-red-tint); }
+body.nl .nl-chip.green { color: var(--nl-green); background: var(--nl-green-tint); }
+body.nl .nl-chip.grey { color: var(--nl-ink-2); background: var(--nl-line-soft); }
+body.nl .nl-link {
+    background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--nl-blue);
+    cursor: pointer; text-align: left; min-height: 32px;
+}
+body.nl .nl-link:hover { color: var(--nl-blue-dark); text-decoration: underline; }
+
+body.nl .nl-cols { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+body.nl .nl-panel { background: var(--nl-panel); border: 1px solid var(--nl-line); border-radius: 14px; overflow: hidden; min-width: 0; }
+body.nl .nl-panel.wide { flex: 3 1 520px; }
+body.nl .nl-panel.narrow { flex: 2 1 320px; }
+body.nl .nl-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--nl-line); }
+body.nl .nl-panel-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+body.nl .nl-panel-foot { padding: 14px 18px; border-top: 1px solid var(--nl-line); background: #F8FAFC; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 13px; color: var(--nl-ink-2); }
+body.nl .nl-scroll { overflow-x: auto; }
+body.nl .nl-table { width: 100%; min-width: 560px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+body.nl .nl-table th { white-space: nowrap; text-align: left; font-size: 12px; font-weight: 600; color: var(--nl-ink-2); padding: 10px 8px; }
+body.nl .nl-table td { padding: 12px 8px; border-top: 1px solid var(--nl-line-soft); vertical-align: middle; }
+body.nl .nl-table th:first-child, body.nl .nl-table td:first-child { padding-left: 18px; }
+body.nl .nl-table th:last-child, body.nl .nl-table td:last-child { padding-right: 18px; }
+body.nl .nl-table .num { text-align: right; }
+body.nl .nl-item { font-weight: 600; }
+body.nl .nl-sku { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: var(--nl-ink-2); }
+body.nl .nl-list { list-style: none; margin: 0; padding: 0; }
+body.nl .nl-list li { display: flex; justify-content: space-between; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--nl-line-soft); }
+body.nl .nl-list li:first-child { border-top: 0; }
+body.nl .nl-empty { padding: 22px 18px; color: var(--nl-ink-2); }
+body.nl .nl-skel { height: 172px; border-radius: 14px; background: var(--nl-line-soft); }
+
+@media (prefers-reduced-motion: reduce) {
+    body.nl * { animation: none !important; transition: none !important; }
+}
