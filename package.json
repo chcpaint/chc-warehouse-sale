@@ -23,7 +23,7 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "pdfkit": "^0.15.2",
-    "stripe": "^17.7.0",
+    "stripe": "^23.1.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
