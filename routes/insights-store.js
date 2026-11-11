@@ -89,7 +89,10 @@ router.get('/', async (req, res) => {
                 generated_at: last[0].created_at, model: last[0].model,
                 insights: last[0].output, snapshot: last[0].input_summary
             } : null,
-            disclosure: DISCLOSURE
+            disclosure: DISCLOSURE,
+            // Every place the software uses AI, from the one register, so the
+            // shop's screen can never say less than the truth.
+            ai_features: AI_FEATURES.map(f => ({ name: f.name, plain: f.plain }))
         });
     } catch (err) {
         console.error('Insights status error:', err);

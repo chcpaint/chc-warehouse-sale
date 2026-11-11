@@ -204,6 +204,7 @@ test('a run: one call, the answer returned, and the call logged with what was se
     const status = await request(app).get('/api/store/concord/insights');
     assert.equal(status.body.last.insights.headline, GOOD.headline);
     assert.match(status.body.disclosure.sends, /No names, emails/);
+    assert.deepEqual(status.body.ai_features.map(f => f.name), ['Insights', 'Price screenshot reading'], 'the shop is told about both AI features');
 });
 
 test('a person tied to one shop only ever gets that shop, whatever they ask for', async () => {

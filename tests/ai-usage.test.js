@@ -47,6 +47,7 @@ test('no AI feature can change data, and each says what it sends', () => {
         assert.equal(f.can_change_data, false, f.key);
         assert.ok(f.sends && f.sends.length > 20, f.key);
         assert.equal(f.calls_per_use, 1, f.key);
+        assert.ok(f.plain && !/[.]$/.test(f.plain), `${f.key} needs a plain one-line description`);
     }
 });
 

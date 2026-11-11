@@ -14,6 +14,7 @@ const AI_FEATURES = [
     {
         key: 'insights',
         name: 'Insights',
+        plain: 'Insights, on the Reports screen, for shops where CHC has switched it on',
         where: 'Shop console, Reports screen, Insights button',
         who: 'People at a shop who can see Reports, only where CHC has switched Insights on for that customer',
         provider: 'Anthropic (Claude)',
@@ -27,6 +28,7 @@ const AI_FEATURES = [
     {
         key: 'price_screenshot',
         name: 'Price screenshot reading',
+        plain: 'price-screenshot reading, in CHC\'s admin console, used by CHC staff to load supplier price updates',
         where: 'CHC admin console, catalogue import',
         who: 'CHC staff only. Never shops or the kiosk.',
         provider: 'Anthropic (Claude)',

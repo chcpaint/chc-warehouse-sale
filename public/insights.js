@@ -72,6 +72,13 @@
         } finally { busy = false; }
     };
 
+    function aiWhere(list) {
+        const f = Array.isArray(list) ? list : [];
+        if (!f.length) return 'Insights, on this screen.';
+        const n = ['', 'one place', 'two places', 'three places', 'four places'][f.length] || `${f.length} places`;
+        return `The software uses AI in ${n}: ` + f.map(x => esc(x.plain || x.name)).join('; and ') + '.';
+    }
+
     function box(inner) { return `<div class="bg-white rounded-xl border p-5">${inner}</div>`; }
 
     function points(list, tone) {
@@ -132,7 +139,7 @@
                     <p><strong>How it works.</strong> Pressing the button makes one request to Claude, an AI model by Anthropic. It reads a summary of your account and answers once. It cannot see or change anything else in the console.</p>
                     <p><strong>What is sent.</strong> ${esc(d.sends || '')}</p>
                     <p><strong>Logged.</strong> Each use is recorded (when, which account, the summary sent and the answer) so CHC can show exactly how AI was used.</p>
-                    <p><strong>Only here.</strong> Insights is the only part of your console that uses AI.</p>
+                    <p><strong>Where AI is used.</strong> ${aiWhere(status.ai_features)} Nothing else in the software calls an AI model.</p>
                 </div>
             </div>`;
     }
