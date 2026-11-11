@@ -94,3 +94,14 @@ test('the admin console loads its new look, and every rule is scoped so classic 
     const js = fs.readFileSync(path.join(__dirname, '../public/admin-look.js'), 'utf8');
     assert.ok(!/fetch\(|XMLHttpRequest/.test(js), 'the look makes no requests');
 });
+
+test('every page but the kiosk carries the support footer, and it opens an email', () => {
+    for (const p of ['public/store.html', 'admin/index.html', 'public/index.html', 'public/set-password.html']) {
+        assert.match(fs.readFileSync(path.join(__dirname, '..', p), 'utf8'), /<script src="\/support-footer.js"><\/script>/, p);
+    }
+    assert.ok(!/support-footer/.test(fs.readFileSync(path.join(__dirname, '../public/kiosk.html'), 'utf8')), 'the kiosk stays locked to scanning');
+    const js = fs.readFileSync(path.join(__dirname, '../public/support-footer.js'), 'utf8');
+    assert.match(js, /mailto:\$\{EMAIL\}/);
+    assert.match(js, /RefinishAI 2026 · Support: Adam Berube/);
+    assert.match(js, /adam@chcpaint\.com/);
+});
