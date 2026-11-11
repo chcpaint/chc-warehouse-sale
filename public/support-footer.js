@@ -19,12 +19,14 @@
         ['#app', 'flow', 'light'],
         ['#login-screen', 'overlay', 'dark'],
         ['#admin-main', 'flow', 'light'],
-        ['#admin-login', 'overlay', 'dark']
+        ['#admin-login', 'overlay', 'dark'],
+        ['#help-page', 'flow', 'light']
     ];
 
-    function make(tone) {
+    function make(tone, mode) {
         const f = document.createElement('footer');
         f.className = 'rai-support-footer';
+        f.dataset.mode = mode;
         f.setAttribute('role', 'contentinfo');
         const a = document.createElement('a');
         a.href = `mailto:${EMAIL}?subject=${encodeURIComponent(SUBJECT)}`;
@@ -45,7 +47,7 @@
         for (const [sel, mode, tone] of MOUNTS) {
             const host = document.querySelector(sel);
             if (!host) continue;
-            const f = make(tone);
+            const f = make(tone, mode);
             if (mode === 'overlay') {
                 if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
                 f.style.position = 'absolute';
@@ -56,7 +58,7 @@
         }
         if (!placed) {
             const dark = document.body.className.includes('from-blue-900');
-            const f = make(dark ? 'dark' : 'light');
+            const f = make(dark ? 'dark' : 'light', 'fixed');
             f.style.position = 'fixed';
             f.style.left = '0'; f.style.right = '0'; f.style.bottom = '0';
             document.body.appendChild(f);

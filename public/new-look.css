@@ -81,7 +81,7 @@ body.nl .drawer-link:focus-visible { outline-color: #4C7DFF; }
 body.nl .count.c-blue { background: var(--nl-blue); }
 body.nl .count.c-amber { background: var(--nl-orange); }
 body.nl .drawer-foot { border-top-color: var(--nl-navy-line); }
-body.nl .drawer-foot button { color: var(--nl-nav-text) !important; }
+body.nl .drawer-foot button, body.nl .drawer-foot a { color: var(--nl-nav-text) !important; text-decoration: none; }
 
 /* Desktop: the menu stays open on the left; the old tab row goes. */
 @media (min-width: 1024px) {

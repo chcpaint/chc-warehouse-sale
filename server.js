@@ -178,6 +178,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/store', require('./routes/shopsafe-launch'));
 app.use('/api/store', storefrontRoutes);
 app.use('/api/kiosk', require('./routes/kiosk'));
+app.use('/api/help', require('./routes/help'));
 app.use('/api/admin', adminRoutes);
 
 // Health check
@@ -240,6 +241,12 @@ app.get('/store/:slug', (req, res) => {
 
 app.get('/store/:slug/*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'store.html'));
+});
+
+// Help: how-to answers, security and data protection, where AI is used.
+// Public on purpose: a buyer's IT team should be able to read it before signing in.
+app.get('/help', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'help.html'));
 });
 
 // Landing page
