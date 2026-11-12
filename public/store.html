@@ -1673,7 +1673,9 @@
             document.getElementById('header-company-name')?.textContent || 'Your shop';
         const loc = (typeof selectedLocation !== 'undefined' && selectedLocation && selectedLocation.name)
             ? selectedLocation.name : (localStorage.getItem('chc_location_name') || '');
-        document.getElementById('drawer-location').textContent = loc;
+        // Single-shop accounts are often named the same as their shop: say it once.
+        const sameName = String(loc).trim().toLowerCase() === String(document.getElementById('drawer-company').textContent).trim().toLowerCase();
+        document.getElementById('drawer-location').textContent = sameName ? '' : loc;
 
         buildDrawer();
         d.hidden = false; b.hidden = false;
@@ -2880,7 +2882,8 @@
 
     function updateCartBadge() {
         const badge = document.getElementById('cart-badge');
-        const count = state.cart.reduce((sum, c) => sum + c.quantity, 0);
+        // Items = total quantity; the Today screen uses the same count (NL.cartItemCount).
+        const count = state.cart.reduce((sum, c) => sum + (Number(c.quantity) || 0), 0);
         if (count > 0) {
             badge.textContent = count;
             badge.classList.remove('hidden');

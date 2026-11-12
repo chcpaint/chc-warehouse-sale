@@ -105,3 +105,39 @@ test('every page but the kiosk carries the support footer, and it opens an email
     assert.match(js, /RefinishAI 2026 · Support: Adam Berube/);
     assert.match(js, /adam@chcpaint\.com/);
 });
+
+test('Today counts cart items the same way as the cart icon and the menu badge (total quantity)', () => {
+    const { NL } = loadNewLook();
+    const cart = [{ quantity: 2 }, { quantity: 1 }, { quantity: 4 }, { quantity: 1 }, { quantity: 1 }, { quantity: 1 }, { quantity: 1 }];
+    assert.equal(NL.cartItemCount(cart), 11);   // 7 products, 11 items: the number shown is 11 everywhere
+    assert.equal(NL.cartItemCount([]), 0);
+    assert.equal(NL.cartItemCount(null), 0);
+    assert.equal(NL.cartItemCount([{ quantity: '3' }, { quantity: null }]), 3);
+    const store = fs.readFileSync(path.join(__dirname, '../public/store.html'), 'utf8');
+    assert.match(store, /const count = state\.cart\.reduce\(\(sum, c\) => sum \+ \(Number\(c\.quantity\) \|\| 0\), 0\);/);
+    const js = fs.readFileSync(path.join(__dirname, '../public/new-look.js'), 'utf8');
+    assert.doesNotMatch(js, /'line', 'lines'/, 'the cart card never counts lines');
+});
+
+test('the shop name is shown once when it matches the company name', () => {
+    const { NL } = loadNewLook();
+    assert.equal(NL.shopLabel('Concord Collision Center', 'Concord Collision Center'), '');
+    assert.equal(NL.shopLabel('Concord Collision Center', ' concord  collision center '), '');
+    assert.equal(NL.shopLabel('York Mills Group', 'North7'), 'North7');
+    assert.equal(NL.shopLabel('Acme', ''), '');
+    const store = fs.readFileSync(path.join(__dirname, '../public/store.html'), 'utf8');
+    assert.match(store, /textContent = sameName \? '' : loc;/);
+});
+
+test('the Today headline counts what needs attention and names each one', () => {
+    const { NL } = loadNewLook();
+    assert.deepEqual({ ...NL.todayHeadline([]) }, { title: "You're all caught up", sub: 'Nothing needs your attention right now.' });
+    const one = NL.todayHeadline([{ label: 'Send your cart (11 items)' }]);
+    assert.equal(one.title, '1 thing needs your attention');
+    assert.equal(one.sub, 'Send your cart (11 items)');
+    const two = NL.todayHeadline([{ label: 'Approve 2 reorders' }, { label: 'Send your cart (11 items)' }]);
+    assert.equal(two.title, '2 things need your attention');
+    assert.equal(two.sub, 'Approve 2 reorders · Send your cart (11 items)');
+    const js = fs.readFileSync(path.join(__dirname, '../public/new-look.js'), 'utf8');
+    assert.doesNotMatch(js, /needs you today|No orders waiting at CHC|With CHC now|straight to CHC/);
+});

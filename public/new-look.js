@@ -44,6 +44,34 @@
     }
     function plural(n, one, many) { return n === 1 ? one : many; }
 
+    /** Items in the cart = the sum of quantities, the same number as the cart
+     *  icon and the menu badge. One definition so no two places disagree. */
+    NL.cartItemCount = function (cart) {
+        return (Array.isArray(cart) ? cart : []).reduce((sum, c) => sum + (Number(c && c.quantity) || 0), 0);
+    };
+
+    /** The shop's name only when it says something the company name does not
+     *  (a single-shop account is often named the same as its shop). */
+    NL.shopLabel = function (companyName, shopName) {
+        const norm = v => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        return shopName && norm(shopName) !== norm(companyName) ? String(shopName).trim() : '';
+    };
+
+    /** Headline for Today: how many things need the user, then what they are. */
+    NL.todayHeadline = function (actions) {
+        const n = (actions || []).length;
+        if (!n) return { title: "You're all caught up", sub: 'Nothing needs your attention right now.' };
+        return {
+            title: `${n} ${plural(n, 'thing needs', 'things need')} your attention`,
+            sub: actions.map(a => a.label).join(' · ')
+        };
+    };
+
+    function distName() {
+        try { if (typeof distShort === 'function') return distShort(); } catch (_) { /* fall through */ }
+        return 'your distributor';
+    }
+
     NL.isOn = function () { return document.body.classList.contains('nl'); };
 
     /**
@@ -102,7 +130,9 @@
         const c = document.getElementById('drawer-company');
         const l = document.getElementById('drawer-location');
         if (c && typeof state !== 'undefined' && state.company) c.textContent = state.company.name || '';
-        if (l && typeof state !== 'undefined' && state.location) l.textContent = state.location.name || '';
+        if (l && typeof state !== 'undefined' && state.location) {
+            l.textContent = NL.shopLabel(state.company && state.company.name, state.location.name);
+        }
     }
     function rebuildMenu() {
         if (!NL.isOn() || typeof buildDrawer !== 'function') return;
@@ -139,10 +169,13 @@
         const loc = state.location || {};
         const invOn = moduleOn(company, 'inventory') && !!loc.id;
         const today = new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' });
+        const shop = NL.shopLabel(company.name, loc.name);
+        const kicker = `${esc(today)} · ${esc(company.name)}${shop ? ' · ' + esc(shop) : ''}`;
+        const dist = distName();
 
         host.innerHTML = `
             <div class="nl-today">
-                <div class="nl-head"><div><p class="nl-kicker">${esc(today)} · ${esc(company.name)}${loc.name ? ' · ' + esc(loc.name) : ''}</p>
+                <div class="nl-head"><div><p class="nl-kicker">${kicker}</p>
                 <h1>Loading today…</h1></div></div>
                 <div class="nl-cards"><div class="nl-skel"></div><div class="nl-skel"></div><div class="nl-skel"></div></div>
             </div>`;
@@ -167,7 +200,7 @@
         const mine = orders.filter(o => !loc.id || !o.location_id || o.location_id === loc.id);
         const onTheWay = mine.filter(o => o.status === 'out_on_delivery');
         const inProgress = mine.filter(o => o.status === 'pending' || o.status === 'processing');
-        const cartLines = Array.isArray(state.cart) ? state.cart.length : 0;
+        const cartItems = NL.cartItemCount(state.cart);
         const s = summaryRes && summaryRes.summary;
         const pendingReorders = summaryRes ? Number(summaryRes.pending_replenishment || 0) : 0;
         const belowMin = s ? Number(s.low || 0) + Number(s.out || 0) : 0;
@@ -180,7 +213,8 @@
                 text: belowMin
                     ? `${Number(s.out || 0)} out and ${Number(s.low || 0)} low at this shop.`
                     : `Everything tracked here is at or above its minimum.`,
-                link: ['inventory', 'Open stock'], needs: belowMin > 0
+                link: ['inventory', 'Open stock'],
+                action: belowMin ? `Restock ${belowMin} ${plural(belowMin, 'item', 'items')} below minimum` : null
             });
             cards.push({
                 chip: pendingReorders ? ['grey', 'Waiting on you'] : ['grey', 'Reorders'],
@@ -188,35 +222,42 @@
                 text: pendingReorders
                     ? 'Drafted from the shelf. Check it, then approve or change it.'
                     : 'Drafts appear here when items drop below their minimum.',
-                link: ['inventory', pendingReorders ? 'Review and approve' : 'Open stock'], needs: pendingReorders > 0
+                link: ['inventory', pendingReorders ? 'Review and approve' : 'Open stock'],
+                action: pendingReorders ? `Approve ${pendingReorders} ${plural(pendingReorders, 'reorder', 'reorders')}` : null
             });
         }
         cards.push({
             chip: ['blue', 'Out for delivery'],
             num: `${onTheWay.length} ${plural(onTheWay.length, 'order', 'orders')}`,
             text: onTheWay.length
-                ? (invOn ? 'Scan them in as they arrive; damaged or short lines go straight to CHC.' : 'On the truck now.')
+                ? (invOn ? `Scan them in as they arrive; damaged or short lines go straight to ${dist}.` : 'On the truck now.')
                 : 'Nothing on the road right now.',
-            link: [invOn ? 'inventory' : 'orders', invOn ? 'Receive' : 'Track orders'], needs: onTheWay.length > 0
+            link: [invOn ? 'inventory' : 'orders', invOn ? 'Receive' : 'Track orders'],
+            action: onTheWay.length
+                ? `${invOn ? 'Receive' : 'Watch for'} ${onTheWay.length} ${plural(onTheWay.length, 'order', 'orders')} on the way`
+                : null
         });
         cards.push({
             chip: ['amber', 'In progress'],
             num: `${inProgress.length} ${plural(inProgress.length, 'order', 'orders')}`,
-            text: inProgress.length ? 'With CHC now, being picked or waiting to start.' : 'No orders waiting at CHC.',
-            link: ['orders', 'Order history'], needs: false
+            text: inProgress.length ? `With ${dist} now, being picked or waiting to start.` : `No orders waiting at ${dist}.`,
+            link: ['orders', 'Order history'], action: null
         });
-        if (cartLines) {
+        if (cartItems) {
             cards.push({
                 chip: ['blue', 'Cart'],
-                num: `${cartLines} ${plural(cartLines, 'line', 'lines')}`,
+                num: `${cartItems} ${plural(cartItems, 'item', 'items')}`,
                 text: 'Shared with everyone signed in to this account.',
-                link: ['cart', 'Open cart'], needs: true
+                link: ['cart', 'Open cart'],
+                action: `Send your cart (${cartItems} ${plural(cartItems, 'item', 'items')})`
             });
         }
 
-        const needing = cards.filter(c => c.needs).length;
-        const headline = needing === 0 ? 'Nothing needs you right now'
-            : needing === 1 ? 'One thing needs you today' : `${['', '', 'Two', 'Three', 'Four', 'Five'][needing] || needing} things need you today`;
+        const actions = cards.filter(c => c.action).map(c => ({ label: c.action, tab: c.link[0] }));
+        const head = NL.todayHeadline(actions);
+        const subHtml = actions.length
+            ? `<p class="nl-sub">${actions.map(a => `<button type="button" class="nl-link" data-nl-tab="${esc(a.tab)}">${esc(a.label)}</button>`).join('<span aria-hidden="true"> · </span>')}</p>`
+            : `<p class="nl-sub">${esc(head.sub)}</p>`;
 
         const cardHtml = cards.map(c => `
             <article class="nl-card">
@@ -265,7 +306,7 @@
         host.innerHTML = `
             <div class="nl-today">
                 <div class="nl-head">
-                    <div><p class="nl-kicker">${esc(today)} · ${esc(company.name)}${loc.name ? ' · ' + esc(loc.name) : ''}</p><h1>${esc(headline)}</h1></div>
+                    <div><p class="nl-kicker">${kicker}</p><h1>${esc(head.title)}</h1>${subHtml}</div>
                     <div class="nl-actions">
                         ${invOn ? '<button type="button" class="nl-btn" data-nl-tab="inventory">Scan or count stock</button>' : ''}
                         <button type="button" class="nl-btn primary" data-nl-tab="products">New order</button>
