@@ -79,7 +79,9 @@ const RETIRED = 'aaaaaaa4-4444-4444-8444-444444444444'; // inactive product
 const NOW = new Date();
 const thisYear = NOW.getFullYear();
 const iso = (y, m, d) => new Date(y, m, d, 12, 0, 0).toISOString();
-const RECENT = iso(thisYear, NOW.getMonth(), Math.min(NOW.getDate(), 28));
+// Earlier today (or the 28th): never in the future, which a period ending "now" would leave out
+// (noon today is still ahead of the clock before 12:00, and the tests failed every morning).
+const RECENT = new Date(Math.min(Date.parse(iso(thisYear, NOW.getMonth(), Math.min(NOW.getDate(), 28))), NOW.getTime() - 60 * 1000)).toISOString();
 const LAST_YEAR = iso(thisYear - 1, 5, 15);
 
 function line(sku, name, qty, price) {

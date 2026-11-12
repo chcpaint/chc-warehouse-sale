@@ -230,3 +230,19 @@ test('the shop console names its own distributor, not CHC, in labels', () => {
     assert.match(html, /state\.distributor = data\.distributor \|\| null;/);
     assert.ok(!/'Assigned by CHC when you submit'/.test(html));
 });
+
+test('web names kept for refinishAI (www, app, api...) cannot be given to a distributor', async () => {
+    reset();
+    const app = withAdmin(distributorsAdmin, '/api/admin/platform/distributors', PLATFORM);
+    for (const slug of ['www', 'app', 'api', 'support']) {
+        const r = await request(app).post('/api/admin/platform/distributors').set('Host', 'chcsale.com').send({ name: 'Someone', slug });
+        assert.equal(r.status, 400, slug);
+    }
+    const ok = await request(app).post('/api/admin/platform/distributors').set('Host', 'chcsale.com').send({ name: 'Maritime Refinish', slug: 'maritime' });
+    assert.equal(ok.status, 201);
+    const prev = process.env.PLATFORM_DOMAIN;
+    process.env.PLATFORM_DOMAIN = 'refinishai.com';
+    assert.equal(ok.body.distributor.slug, 'maritime');
+    assert.equal(appBaseUrl({ is_default: false, custom_domain: null, slug: 'maritime' }), 'https://maritime.refinishai.com');
+    if (prev === undefined) delete process.env.PLATFORM_DOMAIN; else process.env.PLATFORM_DOMAIN = prev;
+});

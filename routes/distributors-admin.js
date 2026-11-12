@@ -30,6 +30,11 @@ const router = express.Router();
 router.use(requirePlatformAdmin);
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/;
+// Web names a distributor can never take: they become <name>.refinishai.com
+// (PLATFORM_DOMAIN), and these are kept for refinishAI's own site and services.
+const RESERVED_SLUGS = new Set(['www', 'app', 'admin', 'api', 'mail', 'email', 'smtp', 'imap', 'mx', 'status', 'help', 'support',
+    'docs', 'security', 'blog', 'news', 'shop', 'store', 'portal', 'platform', 'console', 'dashboard', 'login', 'auth', 'sso',
+    'cdn', 'assets', 'static', 'files', 'ftp', 'demo', 'staging', 'test', 'dev', 'preview', 'sandbox', 'refinishai', 'billing', 'pay']);
 const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
 const STATUSES = ['trial', 'active', 'past_due', 'suspended', 'cancelled'];
 const TERMS = ['monthly', 'annual'];
@@ -189,6 +194,7 @@ router.post('/', async (req, res) => {
         if (!name) return res.status(400).json({ error: 'A distributor name is required.' });
         const slug = normalizeSlug(body.slug || name);
         if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'That name did not produce a usable web name. Enter one: lowercase letters, numbers and hyphens.' });
+        if (RESERVED_SLUGS.has(slug)) return res.status(400).json({ error: `"${slug}" is kept for refinishAI's own use. Choose another web name.` });
         const customDomain = normalizeDomain(body.custom_domain);
         if (customDomain && !DOMAIN_RE.test(customDomain)) return res.status(400).json({ error: 'That is not a valid domain (for example orders.example.com).' });
         const contactEmail = body.contact_email ? String(body.contact_email).trim().toLowerCase() : null;
@@ -343,3 +349,4 @@ router.post('/:id/admins', async (req, res) => {
 
 module.exports = router;
 module.exports.licenceFields = licenceFields;
+module.exports.RESERVED_SLUGS = RESERVED_SLUGS;

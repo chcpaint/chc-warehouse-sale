@@ -45,9 +45,24 @@ console is the record of what each distributor owes and when it renews.
 3. Choose how distributors get their web address:
    - **Their own domain** (e.g. `orders.theirco.com`): they add a CNAME to the Railway app, and you add
      the domain in Railway > the service > Settings > Domains. No other setup.
-   - **A refinishAI platform domain** (e.g. `theirco.refinishai.app`): buy the domain once, point a
-     wildcard DNS record at Railway, add it in Railway, and set `PLATFORM_DOMAIN` in Railway's variables.
-   `chcsale.com` stays CHC's address permanently.
+   - **A refinishAI address** (`theirco.refinishai.com`): set up once (below), then every new
+     distributor works the moment it is onboarded.
+
+### refinishai.com, once
+
+The refinishAI website keeps `refinishai.com` and `www.refinishai.com`; only the subdomains point at the app.
+
+1. Railway > the app service > Settings > Public Networking > + Custom Domain: `*.refinishai.com`.
+2. Railway shows two CNAME records (`*` and `_acme-challenge`) and one TXT record. Add all three at the
+   DNS provider for refinishai.com exactly as shown. On Cloudflare: the `_acme-challenge` and Railway
+   verification records grey-cloud (not proxied), SSL/TLS set to Full.
+3. When Railway shows the green check, add the variable `PLATFORM_DOMAIN=refinishai.com` in Railway.
+4. Railway's Hobby plan allows 2 custom domains per service; chcsale.com uses one. If the wildcard is
+   refused, remove an unused domain or move the project to the Pro plan.
+
+Names kept for refinishAI itself (www, app, api, admin, mail, support, status, help, docs and similar)
+cannot be given to a distributor. Any of them, or the bare domain, reaching the app opens CHC's console.
+`chcsale.com` stays CHC's address permanently.
 
 ## Onboarding a distributor
 
