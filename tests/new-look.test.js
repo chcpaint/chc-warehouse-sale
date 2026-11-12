@@ -141,3 +141,15 @@ test('the Today headline counts what needs attention and names each one', () => 
     const js = fs.readFileSync(path.join(__dirname, '../public/new-look.js'), 'utf8');
     assert.doesNotMatch(js, /needs you today|No orders waiting at CHC|With CHC now|straight to CHC/);
 });
+
+test('inventory screens name the software refinishAI and the shop\'s own distributor, never CHC by default', () => {
+    const inv = fs.readFileSync(path.join(__dirname, '../public/refinishai-inventory.js'), 'utf8');
+    assert.doesNotMatch(inv, /from <span class=\\"dist-name\\">/, 'no "from <distributor>" under the refinishAI Inventory logo');
+    // Every customer-facing mention goes through the shop's distributor, not a hard-coded CHC.
+    const code = inv.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert.doesNotMatch(code, /(to|at|Ask|once|ask) CHC\b|CHC (seeds|can build|order)/);
+    assert.match(inv, /RAI\.dist = function/);
+    // Labels are applied after the markup is in the page, or they never reach it.
+    const mount = inv.indexOf('holder.innerHTML = RAI.markup;');
+    assert.ok(inv.indexOf('applyDistLabels()', mount) > inv.indexOf('host.appendChild(holder.firstChild)', mount));
+});

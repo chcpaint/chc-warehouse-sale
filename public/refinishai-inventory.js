@@ -35,6 +35,12 @@
     };
 
     /** Escape before interpolating into innerHTML. */
+    /** The shop's distributor ("CHC" for CHC's shops). The software itself is refinishAI. */
+    RAI.dist = function () {
+        try { if (typeof distShort === 'function') return distShort(); } catch (e) { /* fall through */ }
+        return 'your distributor';
+    };
+
     RAI.esc = function (text) {
         if (text === null || text === undefined) return '';
         const div = document.createElement('div');
@@ -55,8 +61,8 @@
         "                <!-- Who is scanning. Storefront sessions carry no user identity,",
         "                     so this name is what attributes every movement in the ledger. -->",
         "                <div class=\"bg-white rounded-xl shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3\">",
-        "                    <!-- RefinishAI is CHC's digital brand; the mark is drawn for a light",
-        "                         ground, which is what this strip is. -->",
+        "                    <!-- The software is refinishAI for every distributor's shops: no",
+        "                         distributor name here. The mark is drawn for a light ground. -->",
         "                    <div class=\"flex items-center gap-2 pr-3 border-r\">",
         "                        <img src=\"/assets/refinishai-mark.png\" alt=\"RefinishAI\"",
         "                            class=\"h-8 w-8 object-contain\" onerror=\"this.style.display='none'\">",
@@ -64,7 +70,6 @@
         "                            <div class=\"font-semibold text-gray-800 text-sm\">",
         "                                refinish<span class=\"text-blue-500\">AI</span> Inventory",
         "                            </div>",
-        "                            <div class=\"text-[11px] text-gray-400\">from <span class=\"dist-name\">CHC Paint &amp; Auto Body Supplies</span></div>",
         "                        </div>",
         "                    </div>",
         "                    <div class=\"flex items-center gap-2\">",
@@ -275,7 +280,7 @@
         "                    <div class=\"bg-white rounded-xl shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3\">",
         "                        <p class=\"text-sm text-gray-600 flex-1\">",
         "                            Items that have reached their shelf minimum are queued here. Review the quantities,",
-        "                            then approve to send the order to CHC.",
+        "                            then approve to send the order to <span class=\"dist-short\">your distributor</span>.",
         "                        </p>",
         "                        <button onclick=\"RAI.refreshReplenishment()\" class=\"px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700\">",
         "                            <i class=\"fas fa-rotate mr-1\"></i> Rebuild from stock levels",
@@ -805,8 +810,9 @@
         if (!host) return false;
         const holder = document.createElement('div');
         holder.innerHTML = RAI.markup;
-        if (typeof applyDistLabels === 'function') applyDistLabels();
         while (holder.firstChild) host.appendChild(holder.firstChild);
+        // After the markup is in the page, so the distributor's name reaches it.
+        if (typeof applyDistLabels === 'function') applyDistLabels();
 
         const actorEl = document.getElementById('inv-actor');
         if (actorEl) {
@@ -840,7 +846,7 @@
     RAI.DELIVERIES_MARKUP = [
         '<div id="inv-view-receive" class="hidden">',
         '  <div class="bg-white rounded-xl shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3">',
-        '    <p class="text-sm text-gray-600 flex-1 min-w-[14rem]">Count what arrives against your CHC order. Damaged units are recorded but never added to stock, and anything missing stays on file when you close the delivery.</p>',
+        '    <p class="text-sm text-gray-600 flex-1 min-w-[14rem]">Count what arrives against your <span class="dist-short">distributor</span> order. Damaged units are recorded but never added to stock, and anything missing stays on file when you close the delivery.</p>',
         '    <button type="button" onclick="RAI.loadDeliveries()" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700"><i class="fas fa-rotate mr-1"></i> Refresh</button>',
         '  </div>',
         '  <div id="inv-dlv-list"></div>',
@@ -856,6 +862,7 @@
         const holder = document.createElement('div');
         holder.innerHTML = RAI.DELIVERIES_MARKUP;
         anchor.parentNode.insertBefore(holder.firstElementChild, anchor);
+        if (typeof applyDistLabels === 'function') applyDistLabels();
 
         // The tab button sits between Reorder and Kits.
         const kitsBtn = document.querySelector('.inv-view-btn[data-invview="kits"]');
@@ -906,7 +913,7 @@
                 list.innerHTML = `<div class="bg-white rounded-xl shadow-sm p-10 text-center">
                     <i class="fas fa-truck text-4xl text-gray-300 mb-3"></i>
                     <div class="text-gray-600">No deliveries are expected right now.</div>
-                    <div class="text-sm text-gray-400 mt-1">Orders appear here once CHC is processing them.</div></div>`;
+                    <div class="text-sm text-gray-400 mt-1">Orders appear here once ${RAI.esc(RAI.dist())} is processing them.</div></div>`;
             } else {
                 list.innerHTML = '<div class="bg-white rounded-xl shadow-sm divide-y">' + inv.deliveries.map(o => {
                     const done = o.fully_received || o.closed_short;
@@ -1666,7 +1673,7 @@
                 RAI.renderScanResult(`<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4">
                     <div class="font-semibold">${RAI.esc(data.error || 'Not found')}</div>
                     <div class="text-sm mt-1">Scanned: <code>${RAI.esc(code)}</code></div>
-                    <div class="text-sm mt-2">Ask CHC to add this barcode to the item, or search for it under Stock.</div>
+                    <div class="text-sm mt-2">Ask ${RAI.esc(RAI.dist())} to add this barcode to the item, or search for it under Stock.</div>
                 </div>`);
                 return;
             }
@@ -2019,7 +2026,7 @@
             inv.stock = data.levels || [];
             if (!inv.stock.length) {
                 body.innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">
-                    No items yet. CHC seeds your stock list from the master product file.</td></tr>`;
+                    No items yet. ${RAI.esc(RAI.dist())} seeds your stock list from the master product file.</td></tr>`;
                 return;
             }
 
@@ -2178,7 +2185,7 @@
                     </button>
                     <button onclick="RAI.approveReplenishment('${o.id}')"
                         class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium">
-                        <i class="fas fa-paper-plane mr-1"></i> Approve &amp; send to ${RAI.esc(typeof distShort === 'function' ? distShort() : 'CHC')}
+                        <i class="fas fa-paper-plane mr-1"></i> Approve &amp; send to ${RAI.esc(RAI.dist())}
                     </button>
                 </div>
             </div>
@@ -2203,7 +2210,7 @@
         if (!po.trim()) { alert('A PO number is required.'); return; }
         if (!name.trim()) { alert('Enter your name.'); return; }
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { alert('Enter a valid email address.'); return; }
-        if (!confirm('Approve this reorder and send it to CHC?')) return;
+        if (!confirm(`Approve this reorder and send it to ${RAI.dist()}?`)) return;
 
         const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/replenishment/${orderId}/approve`, {
             method: 'POST',
@@ -2214,7 +2221,7 @@
         const data = await resp.json();
         if (!resp.ok) { alert(data.error || 'Could not approve that reorder.'); return; }
 
-        alert(`Order ${data.order.order_number || ''} sent to CHC.`);
+        alert(`Order ${data.order.order_number || ''} sent to ${RAI.dist()}.`);
         RAI.loadReplenishment();
         RAI.loadInvSummary();
         RAI.ctx.onOrderPlaced();
@@ -3371,7 +3378,7 @@
                 host.innerHTML =
                     '<div class="col-span-full bg-white rounded-xl shadow-sm p-6 text-center">' +
                     '<p class="text-gray-600">No kits are set up for your shop yet.</p>' +
-                    '<p class="text-sm text-gray-400 mt-1">CHC can build these from the jobs you do most.</p>' +
+                    '<p class="text-sm text-gray-400 mt-1">' + RAI.esc(RAI.dist()) + ' can build these from the jobs you do most.</p>' +
                     '</div>';
                 RAI.loadKitHistory();
                 return;
@@ -3397,7 +3404,7 @@
                     <p class="text-sm mt-2 ${ready ? 'text-gray-600' : 'text-amber-700'}">
                         ${ready
                             ? `About ${RAI.money(kit.estimated_cost)} of materials`
-                            : `${kit.unresolved_count} item${kit.unresolved_count === 1 ? '' : 's'} not matched to your catalogue — ask CHC to finish this one`}
+                            : `${kit.unresolved_count} item${kit.unresolved_count === 1 ? '' : 's'} not matched to your catalogue — ask ${RAI.esc(RAI.dist())} to finish this one`}
                     </p>
                 </button>`;
             }).join('');
