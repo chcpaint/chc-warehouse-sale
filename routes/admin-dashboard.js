@@ -224,7 +224,7 @@ router.get('/', async (req, res) => {
         // ---------------------------------------------------------------
         const { rows: orders, truncated: ordersTruncated } = await readAll(() => {
             let q = supabaseAdmin.from('orders')
-                .select('id, company_id, total, status, created_at, items')
+                .select('id, order_number, company_id, total, status, created_at, items')
                 .not('status', 'in', `(${NON_SALE_STATUSES.join(',')})`);
             if (scopeIds) q = q.in('company_id', scopeIds);
             if (range.from) q = q.gte('created_at', range.from);
@@ -290,6 +290,7 @@ router.get('/', async (req, res) => {
         const monthly = new Map();    // YYYY-MM -> { month, sales, orders }
         const daily = new Map();      // YYYY-MM-DD -> { day, sales, orders }
         let salesTotal = 0, unpricedLines = 0, unitsOrdered = 0;
+        const unpricedList = [];      // which lines, so the note can name them
 
         for (const { order: o, lines } of parsedLines) {
             const b = forCompany(o.company_id);
@@ -328,7 +329,13 @@ router.get('/', async (req, res) => {
                 // real units and no dollars, and it is counted as such.
                 const priced = line.unit_price !== null && line.unit_price !== undefined && !line.price_on_request;
                 const dollars = priced ? num(line.unit_price) * qty : 0;
-                if (!priced) { unpricedLines += 1; b.unpriced_lines += 1; }
+                if (!priced) {
+                    unpricedLines += 1; b.unpriced_lines += 1;
+                    if (unpricedList.length < 10) unpricedList.push({
+                        order_number: o.order_number || null, company_name: b.company_name,
+                        sku: ownSku, name: line.name || ownSku, quantity: qty
+                    });
+                }
 
                 unitsOrdered += qty;
                 b.units_ordered += qty;
@@ -463,6 +470,7 @@ router.get('/', async (req, res) => {
                 average_order: saleOrders.length ? round2(salesTotal / saleOrders.length) : 0,
                 units_ordered: round2(unitsOrdered),
                 unpriced_lines: unpricedLines,
+                unpriced_list: unpricedList,
                 customers_ordering: companyRows.filter(c => c.order_count > 0).length,
                 companies_total: companies.length,
                 inventory_value: round2(inventoryValue),

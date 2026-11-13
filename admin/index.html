@@ -207,7 +207,6 @@
                         </button>
                     </div>
 
-                    <div id="db-warning" class="hidden mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"></div>
 
                     <!-- Headline numbers: month to date and year to date, always both -->
                     <div id="db-headline" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -224,6 +223,9 @@
                             <p id="db-ytd-cmp" class="text-sm mt-2 text-gray-400"></p>
                         </div>
                     </div>
+
+                    <!-- Notes on the figures above (unpriced lines, partial reads): below the numbers they qualify. -->
+                    <div id="db-warning" class="hidden -mt-2 mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"></div>
 
                     <!-- Sales trend -->
                     <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
@@ -4082,7 +4084,12 @@
     function dbRenderWarning(d, jobs) {
         const msgs = [];
         if (d.totals.unpriced_lines) {
-            msgs.push(`${d.totals.unpriced_lines} order line(s) are priced on request, so the sales figure above does not include them.`);
+            const list = d.totals.unpriced_list || [];
+            const named = list.slice(0, 3).map(u => `${dbNum(u.quantity)} × ${u.name}${u.sku && u.sku !== u.name ? ' (' + u.sku + ')' : ''}${u.order_number ? ' on ' + u.company_name + ' order ' + u.order_number : ''}`);
+            const more = d.totals.unpriced_lines - named.length;
+            msgs.push(named.length
+                ? `Not counted in sales yet: ${named.join('; ')}${more > 0 ? ` and ${more} more` : ''}. ${d.totals.unpriced_lines === 1 ? 'It is' : 'They are'} priced on request, so ${d.totals.unpriced_lines === 1 ? 'it has' : 'they have'} no dollar value until priced.`
+                : `${d.totals.unpriced_lines} order line${d.totals.unpriced_lines === 1 ? ' is' : 's are'} priced on request and not counted in sales until priced.`);
         }
         if (dbStockVisible && d.totals.inventory_unvalued_skus) {
             msgs.push(`${d.totals.inventory_unvalued_skus} stocked item(s) have no price, so stock value is a floor, not a total.`);
