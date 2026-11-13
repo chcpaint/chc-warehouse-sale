@@ -943,6 +943,10 @@
             </select>
             <button type="button" onclick="RAI.loadScanIssues()" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm"><i class="fas fa-rotate mr-1"></i> Refresh</button>
           </div>
+          <details id="inv-issues-terms" class="bg-white rounded-xl shadow-sm px-4 py-3 mb-4 text-sm">
+            <summary class="cursor-pointer font-semibold text-gray-700">What the reasons mean</summary>
+            <dl id="inv-issues-terms-list" class="mt-3 space-y-2 text-gray-600"></dl>
+          </details>
           <div id="inv-issues-list"></div>`;
         anchor.parentNode.appendChild(view);
 
@@ -1059,6 +1063,12 @@
             if (d.installed === false) {
                 list.innerHTML = '<div class="bg-white rounded-xl shadow-sm p-8 text-center text-gray-500">Scan issues are not switched on yet.</div>';
                 return;
+            }
+            const terms = document.getElementById('inv-issues-terms-list');
+            if (terms && d.reasons && !terms.childElementCount) {
+                terms.innerHTML = Object.values(d.reasons).map(r =>
+                    `<div><dt class="font-semibold text-gray-800">${RAI.esc(r.label)}</dt><dd>${RAI.esc(r.help)} ${RAI.esc(r.shop || '')}</dd></div>`).join('')
+                    + '<div><dt class="font-semibold text-gray-800">Open, Put right, Dismissed</dt><dd>Open is waiting to be put right. Put right means the item was fixed and the quantity posted to stock. Dismissed means a mis-scan; nothing changed.</dd></div>';
             }
             const rows = d.issues || [];
             if (!rows.length) {

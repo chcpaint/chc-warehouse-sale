@@ -16,7 +16,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
-const { shapeException, NOT_INSTALLED } = require('../utils/scan-exceptions');
+const { shapeException, NOT_INSTALLED, REASONS } = require('../utils/scan-exceptions');
 
 const router = express.Router({ mergeParams: true });
 
@@ -48,7 +48,7 @@ router.get('/', async (req, res) => {
         if (req.query.location_id && isValidUUID(req.query.location_id)) openQ = openQ.eq('location_id', req.query.location_id);
         const { count } = await openQ;
 
-        res.json({ installed: true, issues: (data || []).map(shapeException), counts: { open: count || 0 } });
+        res.json({ installed: true, issues: (data || []).map(shapeException), counts: { open: count || 0 }, reasons: REASONS });
     } catch (err) {
         console.error('Scan issues list error:', err);
         res.status(500).json({ error: 'Could not load scan issues.' });

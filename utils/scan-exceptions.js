@@ -31,13 +31,7 @@ const { supabaseAdmin } = require('./supabase');
 const { barcodeVariants, canonicalBarcode, cleanBarcode, gs1CheckDigit, isValidGs1 } = require('./inventory');
 const { libraryTableForCompany } = require('./library-scope');
 
-const REASONS = {
-    missing_barcode: { label: 'Missing barcode', help: 'The item is in this shop’s catalogue; this barcode just is not attached to it yet.' },
-    not_in_catalog:  { label: 'Not in catalogue', help: 'The Item Library knows this barcode, but this shop’s catalogue does not carry the item.' },
-    inactive_item:   { label: 'Item switched off', help: 'This barcode belongs to an item that has been switched off for this shop.' },
-    invalid_code:    { label: 'Misread barcode', help: 'The barcode’s check digit is wrong, so it was almost certainly misread. Scan it again.' },
-    unknown_code:    { label: 'Unknown code', help: 'Nothing matches this code. Note what the item is so it can be identified.' }
-};
+const { REASONS } = require('./scan-exception-terms');
 const REASON_NAMES = Object.keys(REASONS);
 
 const CONTEXTS = {

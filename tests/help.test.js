@@ -151,3 +151,21 @@ test('every question in the guide finds itself first', () => {
         assert.equal(best && best.it.q, it.q);
     }
 });
+
+test('scan issue terms: every reason the app shows is explained on the Help page and found by the assistant', () => {
+    const { search, help } = loadSearch();
+    const area = help.areas.find(a => a.id === 'scanissues');
+    assert.ok(area && area.audience === 'shop');
+    const { REASONS } = require('../utils/scan-exception-terms');
+    for (const r of Object.values(REASONS)) {
+        assert.ok(area.items.some(i => i.q === `What does "${r.label}" mean?`), r.label);
+    }
+    const top = (q, aud = 'shop') => (search(q, aud).find(h => h.score >= 2 && h.cover >= 0.5) || {}).it?.q;
+    assert.equal(top('what does missing barcode mean'), 'What does "Missing barcode" mean?');
+    assert.equal(top('not in catalog'), 'What does "Not in catalogue" mean?');
+    assert.equal(top('misread barcode'), 'What does "Misread barcode" mean?');
+    assert.equal(top('unknown code'), 'What does "Unknown code" mean?');
+    assert.equal(top('item switched off'), 'What does "Item switched off" mean?');
+    assert.equal(top('what is a scan issue'), 'What is a scan issue?');
+    assert.equal(top('put a scan issue right', 'all'), 'How do I put a scan issue right?');
+});

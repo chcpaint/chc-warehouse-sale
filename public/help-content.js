@@ -5,7 +5,7 @@
  * bottom right). Edit an answer here and both change. Plain text only.
  */
 window.RAI_HELP = {
-    updated: '2026-11-11',
+    updated: '2026-11-13',
     support: { name: 'Adam Berube', email: 'adam@chcpaint.com' },
     areas: [
         {
@@ -72,6 +72,27 @@ window.RAI_HELP = {
             ]
         },
         {
+            id: 'scanissues', title: 'Scan issues: what the terms mean', audience: 'shop',
+            items: [
+                { q: 'What is a scan issue?', k: 'scan issue scan issues what is meaning failed scan not found barcode did not scan',
+                  a: 'A scan that did not find an item. It is saved automatically, wherever it happened (Stock, Receiving, Deliveries, Counts, Transfers or the kiosk), with who scanned it, where, when, and a reason. Your distributor puts it right and the quantity you entered is posted to stock, so nothing on the shelf is lost. You see them under Stock on Hand, Scan issues.' },
+                { q: 'What does "Missing barcode" mean?', k: 'missing barcode meaning not attached new package box code case code',
+                  a: 'The item is in your catalogue, but this barcode is not attached to it yet. It is often a new package design or the barcode on a box or case instead of the single item. Enter how many there are; your distributor attaches the barcode and the next scan finds the item.' },
+                { q: 'What does "Not in catalogue" mean?', k: 'not in catalogue catalog meaning not carried item library add item',
+                  a: 'Your distributor\'s Item Library knows the barcode, but your shop\'s catalogue does not carry the item yet. Enter how many there are; your distributor adds the item to your catalogue (at list price unless you have agreed a price), and from then on it can be counted and ordered.' },
+                { q: 'What does "Item switched off" mean?', k: 'item switched off inactive removed turned off meaning',
+                  a: 'The barcode belongs to an item that has been switched off for your shop, for example one removed from your catalogue. Your distributor decides whether to switch it back on. Enter how many you have so it is not lost meanwhile.' },
+                { q: 'What does "Misread barcode" mean?', k: 'misread barcode check digit wrong bad scan dirty label glare meaning',
+                  a: 'The code that came through cannot be a real barcode (its check digit is wrong), so the scanner almost certainly misread it, usually because of a creased, dirty or shiny label. Scan it again, or type the part number. Dismiss the misread one.' },
+                { q: 'What does "Unknown code" mean?', k: 'unknown code meaning nothing matches not recognised qr shipping label',
+                  a: 'Nothing anywhere matches this code. It may be a product your distributor does not carry yet, a shipping or internal label, or a QR code. Write the name on the package in "What is it?" so it can be identified, or dismiss it if it was not stock.' },
+                { q: 'What do Open, Put right and Dismissed mean?', k: 'open put right resolved dismissed status meaning scanned times attempts',
+                  a: 'Open: waiting to be put right. Put right: your distributor attached the barcode or added or switched on the item, and posted the quantity to stock. Dismissed: a mis-scan or something that was not stock, so nothing changed. "Scanned 3 times" means the same code failed three times; it is still one issue.' },
+                { q: 'How do I dismiss a scan issue?', k: 'dismiss scan issue mis scan mistake remove clear',
+                  a: 'Open Stock on Hand, Scan issues and press Dismiss on that line. Use it for a mis-scan or something that is not stock. Nothing in your stock changes.' }
+            ]
+        },
+        {
             id: 'kiosk', title: 'Scan-out kiosk (tablet)', audience: 'shop',
             items: [
                 { q: 'How do painters and techs scan out at the kiosk?', k: 'kiosk tablet scan out badge painter tech',
@@ -79,7 +100,7 @@ window.RAI_HELP = {
                 { q: 'How do managers order from the kiosk?', k: 'kiosk place stock order passcode manager',
                   a: 'Press Place Stock Order at the bottom of the kiosk, enter the manager passcode, scan the items to order, and send. The tablet returns to scan-out mode afterwards.' },
                 { q: 'A badge or item will not scan at the kiosk. What do I do?', k: 'kiosk badge not working wont scan unknown',
-                  a: 'Type the code on the badge or item into the box instead. If the item is unknown, tell your manager so it can be added with its barcode; a lost badge can be replaced from the console.' }
+                  a: 'Type the code on the badge or item into the box instead. An item that still does not scan is saved to Scan issues for your manager automatically, so it is not lost; a lost badge can be replaced from the console.' }
             ]
         },
         {
@@ -169,6 +190,8 @@ window.RAI_HELP = {
                   a: 'Open Customer Pricing, choose the customer, and edit prices or apply a rule to a brand or category.' },
                 { q: 'What are the Item Library and the Master Table?', k: 'item library master table catalogue barcodes',
                   a: 'The Item Library is the distributor\'s reference catalogue that customer lists draw from. The Master Table is where the library is maintained and pushed to customers, barcodes included.' },
+                { q: 'How do I put a scan issue right?', k: 'scan issues put right resolve attach barcode add item library missing barcode not in catalogue',
+                  a: 'Open Scan issues. Each line says why the scan failed, what the shop said it was and how many. Press Put right and choose: attach the barcode to the item (Missing barcode), add the Item Library item to the shop\'s catalogue at list price (Not in catalogue), switch the item back on (Item switched off), attach it to another item you search for, or dismiss it. In the same step, post the quantity to stock: added, taken out, or set as a count. A shop\'s own admin can only dismiss.' },
                 { q: 'How do I give a customer a feature for free?', k: 'comp free billing entitlement',
                   a: 'Open Billing and comp the module for that customer, with a reason and, ideally, a review date.' },
                 { q: 'How do I make a customer\'s purchase report PDF?', k: 'purchase report pdf customer by location order item export',

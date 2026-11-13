@@ -1546,6 +1546,10 @@
                         <button onclick="siLoad()" class="text-sm text-gray-500 hover:text-blue-700 px-3 py-2"><i class="fas fa-rotate mr-1"></i> Refresh</button>
                     </div>
                     <p class="text-sm text-gray-500 mb-4">Every scan in a shop that found no item, from Stock, Receiving, Deliveries, Counts, Transfers and the scan-out kiosk. Each one says why, and what the shop said it was. Put it right and, in the same step, post what was on the shelf to stock.</p>
+                    <details id="si-terms" class="bg-white rounded-xl shadow-sm border px-4 py-3 mb-4 text-sm">
+                        <summary class="cursor-pointer font-semibold text-gray-700">What the reasons mean, and how to put each right</summary>
+                        <dl id="si-terms-list" class="mt-3 grid gap-3 md:grid-cols-2 text-gray-600"></dl>
+                    </details>
                     <div id="si-warning" class="hidden mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"></div>
                     <div id="si-list"></div>
                 </section>
@@ -2984,6 +2988,11 @@
             const d = await r.json();
             if (!r.ok) throw new Error(d.error || 'Failed to load.');
             siData = d;
+            const terms = document.getElementById('si-terms-list');
+            if (terms && d.reasons && !terms.childElementCount) {
+                terms.innerHTML = Object.values(d.reasons).map(r =>
+                    `<div><dt class="font-semibold text-gray-800">${esc(r.label)}</dt><dd>${esc(r.help)}</dd><dd class="mt-1"><span class="text-gray-500">Put right:</span> ${esc(r.fix || '')}</dd></div>`).join('');
+            }
             warn.textContent = d.installed === false ? (d.message || 'Scan issues are not set up yet.') : '';
             warn.classList.toggle('hidden', d.installed !== false);
             // Customer filter from what is on screen (kept when filtering).
