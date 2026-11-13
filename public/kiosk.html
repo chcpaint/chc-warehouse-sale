@@ -531,7 +531,7 @@
     if (state === 'pass') return;
 
     busy = true;
-    api('/resolve?code=' + encodeURIComponent(code)).then(function (r) {
+    api('/resolve?code=' + encodeURIComponent(code) + (badge && badge.code ? '&badge=' + encodeURIComponent(badge.code) : '')).then(function (r) {
       busy = false;
       if (r.status === 401 || r.status === 403) return fatal('This kiosk can’t be used', r.data.error);
       if (r.status === 404) { beep('bad'); return notify('err', r.data.error || 'Not recognised.', 6000); }

@@ -31,6 +31,7 @@ const {
     replenishmentFor,
     inventorySettings
 } = require('../utils/inventory');
+const { recordScanException } = require('../utils/scan-exceptions');
 
 const router = express.Router({ mergeParams: true });
 
@@ -129,6 +130,8 @@ router.use('/counts', requireFeature('counts', 'Cycle counts'));
 router.use('/transfers', requireFeature('transfers', 'Transfers'));
 router.use('/', require('./inventory-counts'));          // /counts, /transfers
 router.use('/analytics', requireFeature('analytics', 'Usage reports'), require('./inventory-analytics'));
+// Scans that found nothing, kept with a reason (migration 067).
+router.use('/scan-exceptions', require('./scan-exceptions-store'));
 
 /**
  * Repair kits reuse this file's location resolution, level lookup, text
@@ -326,10 +329,23 @@ router.get('/lookup', async (req, res) => {
         }
 
         if (products.length === 0) {
+            // Keep the miss, with a reason, so it can be put right after the
+            // count or the receiving run. Never blocks the answer.
+            const exception = await recordScanException({
+                companyId,
+                locationId: location.id,
+                raw,
+                context: String(req.query.context || 'scan'),
+                contextRef: req.query.context_ref,
+                intended: req.query.intended,
+                actor: req.query.actor,
+                qty: req.query.qty
+            });
             return res.status(404).json({
                 error: 'No product matches that code.',
                 code: raw,
-                canonical: canonicalBarcode(raw)
+                canonical: canonicalBarcode(raw),
+                exception
             });
         }
 

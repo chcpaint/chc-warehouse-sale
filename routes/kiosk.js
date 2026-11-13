@@ -57,6 +57,7 @@ const {
     ORDER_LOCK_MS,
     ORDER_TOKEN_SECONDS
 } = require('../utils/scan-out');
+const { recordScanException } = require('../utils/scan-exceptions');
 
 const router = express.Router();
 
@@ -457,7 +458,18 @@ router.get('/resolve', async (req, res) => {
         }
 
         if (products.length === 0) {
-            return res.status(404).json({ kind: 'none', error: `Nothing matches ${raw}.`, code: raw });
+            // Kept for the manager to put right. Who scanned it comes from the
+            // badge the tablet is working under, looked up here, never trusted as text.
+            let actor = null;
+            if (req.query.badge) {
+                const badge = await findBadge(k.company.id, text(req.query.badge, 40)).catch(() => null);
+                if (badge) actor = badge.name;
+            }
+            await recordScanException({
+                companyId: k.company.id, locationId: k.location.id, raw,
+                context: 'kiosk', contextRef: k.device && k.device.id, intended: 'consume', actor
+            });
+            return res.status(404).json({ kind: 'none', error: `Nothing matches ${raw}. It has been noted for your manager.`, code: raw, noted: true });
         }
 
         // No prices, no stock levels: the kiosk only needs to know what it is.

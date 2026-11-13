@@ -158,6 +158,8 @@ router.use('/companies/:companyId/tax', require('./tax-admin'));
 router.use('/', require('./report-groups-admin'));
 // Uptime monitor results and alert list (super admin); see migrations/064.
 router.use('/uptime', require('./uptime-admin'));
+// Scans that found nothing, kept with a reason, and putting them right (migration 067).
+router.use('/scan-exceptions', require('./scan-exceptions-admin'));
 router.use('/distributor-tax', require('./distributor-tax-admin'));
 router.use('/billing', require('./billing-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));

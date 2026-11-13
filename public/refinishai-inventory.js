@@ -823,6 +823,7 @@
         if (locEl && loc) locEl.textContent = loc.name;
 
         RAI.mountDeliveries();
+        RAI.mountScanIssues();
         RAI.applyFeatureSwitches();
         RAI.setScanMode('consume');
         RAI.showInvView('scan');
@@ -874,6 +875,219 @@
             b.setAttribute('onclick', "RAI.showInvView('receive')");
             b.innerHTML = '<i class="fas fa-truck-ramp-box mr-1"></i> Deliveries';
             kitsBtn.parentNode.insertBefore(b, kitsBtn);
+        }
+    };
+
+    // ============================================================
+    // SCAN ISSUES
+    //
+    // A scan that finds no item is kept on the server with a reason (missing
+    // barcode, not in the catalogue, ...), so nothing that was on the shelf is
+    // lost and it can be put right straight afterwards. Every screen shows the
+    // latest ones in a tray at the top, where the person can say how many there
+    // were and what the item is; the Scan issues tab lists them all.
+    // Server side: utils/scan-exceptions.js, routes/scan-exceptions-store.js.
+    // ============================================================
+    inv.issueTray = [];
+
+    /** The lookup URL every scanning screen uses, tagged with where the scan came from. */
+    RAI.lookupUrl = function (code, context, opts) {
+        opts = opts || {};
+        const q = new URLSearchParams({
+            code: String(code || ''),
+            location_id: opts.location || RAI.invLocationId(),
+            context: context || 'scan'
+        });
+        const actor = RAI.invActor();
+        if (actor) q.set('actor', actor);
+        if (opts.ref) q.set('context_ref', String(opts.ref));
+        if (opts.intended) q.set('intended', opts.intended);
+        if (opts.qty !== undefined && opts.qty !== null && opts.qty !== '') q.set('qty', String(opts.qty));
+        return `/store/${RAI.ctx.slug}/inventory/lookup?${q.toString()}`;
+    };
+
+    /**
+     * Put a failed scan's issue in the tray. Returns a short sentence the
+     * calling screen can add to its own message ('' when nothing was kept).
+     */
+    RAI.noteScanIssue = function (found, plain) {
+        const ex = found && found.exception;
+        if (!ex || !ex.id) return '';
+        inv.issueTray = [ex, ...inv.issueTray.filter(i => i.id !== ex.id)].slice(0, 5);
+        RAI.renderIssueTray();
+        RAI.refreshIssueBadge();
+        const msg = ` Saved to Scan issues (${ex.reason_label}).`;
+        return plain ? msg : RAI.esc(msg);
+    };
+
+    RAI.mountScanIssues = function () {
+        if (document.getElementById('inv-view-issues')) return;
+        const anchor = document.getElementById('inv-view-scan');
+        if (!anchor) return;
+        const tray = document.createElement('div');
+        tray.id = 'inv-issue-tray';
+        tray.className = 'hidden mb-4 space-y-2';
+        tray.setAttribute('aria-live', 'polite');
+        anchor.parentNode.insertBefore(tray, anchor);
+
+        const view = document.createElement('div');
+        view.id = 'inv-view-issues';
+        view.className = 'hidden';
+        view.innerHTML = `
+          <div class="bg-white rounded-xl shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3">
+            <p class="text-sm text-gray-600 flex-1 min-w-[14rem]">Scans that did not find an item, kept so nothing on the shelf is lost.
+              Say how many there were and what each one is; <span class="dist-short">your distributor</span> attaches the barcode or adds the item,
+              and the quantity is posted to stock when they do. Dismiss anything that was just a mis-scan.</p>
+            <select id="inv-issues-status" class="border rounded-lg px-3 py-2 text-sm" onchange="RAI.loadScanIssues()">
+              <option value="open">Open</option><option value="resolved">Put right</option><option value="dismissed">Dismissed</option><option value="all">All</option>
+            </select>
+            <button type="button" onclick="RAI.loadScanIssues()" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm"><i class="fas fa-rotate mr-1"></i> Refresh</button>
+          </div>
+          <div id="inv-issues-list"></div>`;
+        anchor.parentNode.appendChild(view);
+
+        const histBtn = document.querySelector('.inv-view-btn[data-invview="history"]');
+        if (histBtn && !document.querySelector('.inv-view-btn[data-invview="issues"]')) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'px-3 py-1.5 rounded-lg hover:bg-gray-100 inv-view-btn relative';
+            b.dataset.invview = 'issues';
+            b.setAttribute('onclick', "RAI.showInvView('issues')");
+            b.innerHTML = '<i class="fas fa-triangle-exclamation mr-1"></i> Scan issues'
+                + '<span id="inv-issues-badge" class="hidden absolute -top-1 -right-1 bg-red-600 text-white text-xs rounded-full min-w-[1.25rem] h-5 px-1 items-center justify-center">0</span>';
+            histBtn.parentNode.insertBefore(b, histBtn.nextSibling);
+        }
+        if (typeof applyDistLabels === 'function') applyDistLabels();
+        RAI.refreshIssueBadge();
+    };
+
+    RAI.refreshIssueBadge = async function () {
+        const badge = document.getElementById('inv-issues-badge');
+        if (!badge) return;
+        try {
+            const r = await RAI.api(`/store/${RAI.ctx.slug}/inventory/scan-exceptions?status=open&location_id=${RAI.invLocationId()}`);
+            if (!r.ok) return;
+            const d = await r.json();
+            const n = (d.counts && d.counts.open) || 0;
+            badge.textContent = n > 99 ? '99+' : String(n);
+            badge.classList.toggle('hidden', n === 0);
+            badge.classList.toggle('flex', n > 0);
+        } catch (e) { /* the badge is a convenience */ }
+    };
+
+    RAI.issueEditor = function (ex, where) {
+        const id = RAI.esc(ex.id);
+        return `
+          <div class="flex flex-wrap items-end gap-2 mt-2">
+            <label class="text-xs text-gray-600">How many
+              <input id="inv-iq-${where}-${id}" type="number" min="0.001" step="any" value="${RAI.esc(ex.qty)}" class="block border rounded-lg px-2 py-1.5 text-sm w-24">
+            </label>
+            <label class="text-xs text-gray-600 flex-1 min-w-[12rem]">What is it? (name on the package)
+              <input id="inv-in-${where}-${id}" type="text" maxlength="300" value="${RAI.esc(ex.note || '')}" placeholder="e.g. Norton P400 discs, box of 50" class="block w-full border rounded-lg px-2 py-1.5 text-sm">
+            </label>
+            <button type="button" onclick="RAI.saveScanIssue('${id}', '${where}')" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Save</button>
+            <span id="inv-is-${where}-${id}" class="text-xs text-gray-500"></span>
+          </div>`;
+    };
+
+    RAI.renderIssueTray = function () {
+        const tray = document.getElementById('inv-issue-tray');
+        if (!tray) return;
+        if (!inv.issueTray.length) { tray.classList.add('hidden'); tray.innerHTML = ''; return; }
+        tray.classList.remove('hidden');
+        tray.innerHTML = inv.issueTray.map(ex => `
+          <div class="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
+            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span class="text-amber-800 font-semibold"><i class="fas fa-triangle-exclamation mr-1"></i>${RAI.esc(ex.reason_label)}</span>
+              <code class="text-sm text-gray-800">${RAI.esc(ex.code)}</code>
+              ${ex.attempts > 1 ? `<span class="text-xs text-gray-500">scanned ${ex.attempts} times</span>` : ''}
+              <span class="text-xs text-gray-500">Saved to <button type="button" class="underline" onclick="RAI.showInvView('issues')">Scan issues</button></span>
+              <button type="button" onclick="RAI.dropFromTray('${RAI.esc(ex.id)}')" class="ml-auto text-gray-400 hover:text-gray-600 text-sm" aria-label="Hide">✕</button>
+            </div>
+            <p class="text-xs text-gray-600 mt-1">${RAI.esc(ex.reason_help)}${ex.suggested_label ? ` Looks like <b>${RAI.esc(ex.suggested_label)}</b>.` : ''}</p>
+            ${RAI.issueEditor(ex, 't')}
+          </div>`).join('');
+    };
+
+    RAI.dropFromTray = function (id) {
+        inv.issueTray = inv.issueTray.filter(i => i.id !== id);
+        RAI.renderIssueTray();
+    };
+
+    RAI.saveScanIssue = async function (id, where) {
+        const q = document.getElementById(`inv-iq-${where}-${id}`);
+        const n = document.getElementById(`inv-in-${where}-${id}`);
+        const msg = document.getElementById(`inv-is-${where}-${id}`);
+        const qty = Number(q && q.value);
+        if (!Number.isFinite(qty) || qty <= 0) { if (msg) msg.textContent = 'Enter a quantity above zero.'; return; }
+        try {
+            const r = await RAI.api(`/store/${RAI.ctx.slug}/inventory/scan-exceptions/${encodeURIComponent(id)}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ qty, note: n ? n.value : '' })
+            });
+            const d = await r.json();
+            if (!r.ok) { if (msg) msg.textContent = d.error || 'Could not save.'; return; }
+            inv.issueTray = inv.issueTray.map(i => i.id === id ? d.issue : i);
+            if (msg) msg.textContent = 'Saved.';
+        } catch (e) { if (msg) msg.textContent = 'Could not reach the server.'; }
+    };
+
+    RAI.dismissScanIssue = async function (id) {
+        if (!confirm('Dismiss this scan? Use this for a mis-scan or something that is not stock.')) return;
+        try {
+            const r = await RAI.api(`/store/${RAI.ctx.slug}/inventory/scan-exceptions/${encodeURIComponent(id)}/dismiss`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ actor_label: RAI.invActor() })
+            });
+            const d = await r.json();
+            if (!r.ok) { alert(d.error || 'Could not dismiss that.'); return; }
+            RAI.dropFromTray(id);
+            RAI.loadScanIssues();
+            RAI.refreshIssueBadge();
+        } catch (e) { alert('Could not reach the server.'); }
+    };
+
+    RAI.loadScanIssues = async function () {
+        const list = document.getElementById('inv-issues-list');
+        if (!list) return;
+        const status = (document.getElementById('inv-issues-status') || {}).value || 'open';
+        list.innerHTML = '<div class="bg-white rounded-xl shadow-sm p-8 text-center text-gray-400">Loading…</div>';
+        try {
+            const r = await RAI.api(`/store/${RAI.ctx.slug}/inventory/scan-exceptions?status=${encodeURIComponent(status)}&location_id=${RAI.invLocationId()}`);
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error);
+            if (d.installed === false) {
+                list.innerHTML = '<div class="bg-white rounded-xl shadow-sm p-8 text-center text-gray-500">Scan issues are not switched on yet.</div>';
+                return;
+            }
+            const rows = d.issues || [];
+            if (!rows.length) {
+                list.innerHTML = `<div class="bg-white rounded-xl shadow-sm p-10 text-center">
+                    <i class="fas fa-circle-check text-4xl text-green-500 mb-3"></i>
+                    <div class="text-gray-600">${status === 'open' ? 'No open scan issues at this location.' : 'Nothing here.'}</div></div>`;
+                return;
+            }
+            const when = t => t ? new Date(t).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+            const stateChip = ex => ex.status === 'open'
+                ? '<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Open</span>'
+                : ex.status === 'resolved'
+                    ? '<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">Put right</span>'
+                    : '<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Dismissed</span>';
+            list.innerHTML = '<div class="bg-white rounded-xl shadow-sm divide-y">' + rows.map(ex => `
+              <div class="p-4">
+                <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  ${stateChip(ex)}
+                  <span class="font-semibold text-gray-800">${RAI.esc(ex.reason_label)}</span>
+                  <code class="text-sm">${RAI.esc(ex.code)}</code>
+                  <span class="text-xs text-gray-500">${RAI.esc(ex.context_label)} · ${RAI.esc(when(ex.last_seen_at))}${ex.actor_label ? ' · ' + RAI.esc(ex.actor_label) : ''}${ex.attempts > 1 ? ` · scanned ${ex.attempts} times` : ''}</span>
+                  ${ex.status === 'open' ? `<button type="button" onclick="RAI.dismissScanIssue('${RAI.esc(ex.id)}')" class="ml-auto text-sm text-gray-500 hover:text-red-600">Dismiss</button>` : ''}
+                </div>
+                ${ex.suggested_label ? `<p class="text-xs text-gray-600 mt-1">Looks like <b>${RAI.esc(ex.suggested_label)}</b>.</p>` : ''}
+                ${ex.status === 'open' ? RAI.issueEditor(ex, 'l')
+                  : `<p class="text-sm text-gray-600 mt-1">${RAI.esc(Number(ex.qty))} × ${RAI.esc(ex.note || 'no description')}${ex.resolved_by_label ? ' · ' + RAI.esc(ex.resolved_by_label) : ''}${ex.resolved_at ? ' · ' + RAI.esc(when(ex.resolved_at)) : ''}</p>`}
+              </div>`).join('') + '</div>';
+        } catch (e) {
+            list.innerHTML = '<div class="bg-white rounded-xl shadow-sm p-8 text-center text-red-600">Could not load scan issues.</div>';
         }
     };
 
@@ -1016,10 +1230,10 @@
         const d = inv.delivery;
         if (!code || !d || !d.receivable) return;
         try {
-            const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${RAI.invLocationId()}`);
+            const resp = await RAI.api(RAI.lookupUrl(code, 'delivery', { ref: d.order_id || d.id }));
             const data = await resp.json();
             if (resp.status === 300) { RAI.deliveryMsg('That barcode matches more than one item. Type the part number instead.', 'bad'); RAI.beep(true); return; }
-            if (!resp.ok) { RAI.deliveryMsg(RAI.esc(data.error || 'No item matches that code.'), 'bad'); RAI.beep(true); return; }
+            if (!resp.ok) { RAI.deliveryMsg(RAI.esc(data.error || 'No item matches that code.') + RAI.noteScanIssue(data), 'bad'); RAI.beep(true); return; }
             const p = data.product;
             const idx = d.lines.findIndex(l => l.product_id === p.id);
             if (idx >= 0) {
@@ -1213,7 +1427,7 @@
     // ------------------------------------------------------------
     // VIEW SWITCHING
     // ------------------------------------------------------------
-    RAI.VIEWS = ['scan', 'stock', 'replen', 'receive', 'kits', 'count', 'transfer', 'analytics', 'history'];
+    RAI.VIEWS = ['scan', 'stock', 'replen', 'receive', 'kits', 'count', 'transfer', 'analytics', 'history', 'issues'];
 
     RAI.showInvView = function (view) {
         inv.view = view;
@@ -1241,6 +1455,7 @@
         if (view === 'count') RAI.loadCount();
         if (view === 'transfer') RAI.showTransferMode(inv.trMode || 'ship');
         if (view === 'analytics') RAI.loadAnalytics();
+        if (view === 'issues') RAI.loadScanIssues();
         if (view === 'scan') RAI.focusScanInput();
     }
 
@@ -1659,9 +1874,7 @@
         inv.busy = true;
 
         try {
-            const resp = await RAI.api(
-                `/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${RAI.invLocationId()}`
-            );
+            const resp = await RAI.api(RAI.lookupUrl(code, 'scan', { intended: inv.mode }));
             const data = await resp.json();
 
             if (resp.status === 300 && data.ambiguous) {
@@ -1673,8 +1886,11 @@
                 RAI.renderScanResult(`<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4">
                     <div class="font-semibold">${RAI.esc(data.error || 'Not found')}</div>
                     <div class="text-sm mt-1">Scanned: <code>${RAI.esc(code)}</code></div>
-                    <div class="text-sm mt-2">Ask ${RAI.esc(RAI.dist())} to add this barcode to the item, or search for it under Stock.</div>
+                    <div class="text-sm mt-2">${data.exception
+                        ? `Saved to <button type="button" class="underline font-semibold" onclick="RAI.showInvView('issues')">Scan issues</button> as <b>${RAI.esc(data.exception.reason_label)}</b>, so it is not lost. ${RAI.esc(RAI.dist())} puts it right; enter what it is in the box below.`
+                        : `Ask ${RAI.esc(RAI.dist())} to add this barcode to the item, or search for it under Stock.`}</div>
                 </div>`);
+                RAI.noteScanIssue(data);
                 return;
             }
             RAI.addToBasket(data.product, code);
@@ -2494,8 +2710,7 @@
             return;
         }
 
-        const lookup = await RAI.api(
-            `/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${RAI.invLocationId()}`);
+        const lookup = await RAI.api(RAI.lookupUrl(code, 'count', { ref: RAI.count.session.id, qty: counted }));
         const found = await lookup.json();
 
         if (lookup.status === 300 && found.ambiguous) {
@@ -2504,7 +2719,7 @@
         }
         if (!lookup.ok) {
             RAI.beep(true);
-            RAI.countFeedback(found.error || 'No product matches that code.', 'red');
+            RAI.countFeedback((found.error || 'No product matches that code.') + RAI.noteScanIssue(found, true), 'red');
             return;
         }
 
@@ -2763,11 +2978,10 @@
         if (inv.busy) return;
         inv.busy = true;
         try {
-            const lookup = await RAI.api(
-                `/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${from}`);
+            const lookup = await RAI.api(RAI.lookupUrl(code, 'transfer', { location: from }));
             const found = await lookup.json();
             if (lookup.status === 300) { RAI.beep(true); RAI.transferResult('That barcode is on more than one item — use the Scan tab to identify it, then search here by part number.', 'amber'); return; }
-            if (!lookup.ok) { RAI.beep(true); RAI.transferResult(found.error || 'No product matches that code.', 'red'); return; }
+            if (!lookup.ok) { RAI.beep(true); RAI.transferResult((found.error || 'No product matches that code.') + RAI.noteScanIssue(found, true), 'red'); return; }
 
             RAI.addToTransferBasket(found.product, code);
         } catch (err) {
@@ -3035,11 +3249,10 @@
         if (inv.busy) return;
         inv.busy = true;
         try {
-            const lookup = await RAI.api(
-                `/store/${RAI.ctx.slug}/inventory/lookup?code=${encodeURIComponent(code)}&location_id=${RAI.invLocationId()}`);
+            const lookup = await RAI.api(RAI.lookupUrl(code, 'receive'));
             const found = await lookup.json();
             if (lookup.status === 300) { RAI.beep(true); RAI.receiveResult('That barcode is on more than one item — use the Scan tab to identify it, then receive it from the list below.', 'amber'); return; }
-            if (!lookup.ok) { RAI.beep(true); RAI.receiveResult(found.error || 'No product matches that code.', 'red'); return; }
+            if (!lookup.ok) { RAI.beep(true); RAI.receiveResult((found.error || 'No product matches that code.') + RAI.noteScanIssue(found, true), 'red'); return; }
 
             const stagedIds = new Set(inv.rcvBasket.map(l => l.transfer_id));
             const match = inv.rcvPending

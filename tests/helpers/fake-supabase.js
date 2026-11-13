@@ -29,6 +29,14 @@ function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringi
  * Kept in sync by hand with migrations/.
  */
 const KNOWN_COLUMNS = {
+    // Migration 067.
+    scan_exceptions: new Set([
+        'id', 'company_id', 'location_id', 'code', 'code_canonical', 'reason', 'context', 'context_ref',
+        'intended_movement', 'suggested_product_id', 'suggested_library_id', 'suggested_label',
+        'attempts', 'qty', 'note', 'actor_label', 'first_seen_at', 'last_seen_at', 'status', 'resolution',
+        'resolved_product_id', 'stock_movement_id', 'resolved_by', 'resolved_by_label', 'resolved_at',
+        'created_at', 'updated_at'
+    ]),
     // Kept in step with the live orders table. This list is what caught
     // `needs_pricing` before it shipped, and it is what caught
     // `placed_by_user_id` arriving without the fake being updated — so when a
@@ -509,6 +517,9 @@ function createFakeSupabase(seed = {}) {
         admin_users: [], admin_user_branches: [], admin_user_companies: [],
         // Added by migration 043: the shared storefront cart.
         cart_items: [],
+        // Added by migration 067: scans that found no item.
+        scan_exceptions: [], item_library: [], v_product_master: [],
+        company_catalogue_exclusions: [], company_catalogue_policy: [],
         ...clone(seed)
     };
 
@@ -532,6 +543,19 @@ function createFakeSupabase(seed = {}) {
         // every alternative would look inactive to any query that filters on it.
         if (table === 'kit_item_alternatives' && row.is_active === undefined) {
             row.is_active = true;
+        }
+        // migration 067: scan_exceptions defaults.
+        if (table === 'scan_exceptions') {
+            const now = new Date().toISOString();
+            if (row.status === undefined) row.status = 'open';
+            if (row.attempts === undefined) row.attempts = 1;
+            if (row.qty === undefined) row.qty = 1;
+            if (row.first_seen_at === undefined) row.first_seen_at = now;
+            if (row.last_seen_at === undefined) row.last_seen_at = now;
+            // Reproduce scan_exceptions_open_uniq: one open row per company, location and code.
+            const clash = (db.scan_exceptions || []).find(r => r.status === 'open' && row.status === 'open' &&
+                r.company_id === row.company_id && (r.location_id || null) === (row.location_id || null) && r.code_canonical === row.code_canonical);
+            if (clash) throw new Error('duplicate key value violates unique constraint "scan_exceptions_open_uniq"');
         }
         // migration 053: is_active defaults true on both kiosk tables.
         if ((table === 'kiosk_devices' || table === 'kiosk_badges') && row.is_active === undefined) {

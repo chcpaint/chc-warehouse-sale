@@ -55,6 +55,8 @@ window.RAI_HELP = {
                   a: 'Open Stock on Hand, Deliveries. Pick the delivery, scan or tick each item as it comes off the truck, mark anything damaged, short or extra, then close it. Exceptions go to your distributor automatically.' },
                 { q: 'How do I count stock?', k: 'count cycle count stocktake physical inventory',
                   a: 'Open Stock on Hand, Count. Start a count for the shelf or area, scan each item and enter how many are there, then finish. Differences are shown before stock is changed.' },
+                { q: 'A barcode did not scan. Is the item lost?', k: 'barcode did not scan not found no product matches scan issue missing barcode not in catalogue unknown code failed scan',
+                  a: 'No. Every scan that finds no item is saved to Scan issues (in Stock on Hand) with the reason: missing barcode, not in your catalogue, switched off, misread or unknown. In the yellow box that appears, enter how many there are and what the item is (the name on the package). Your distributor attaches the barcode or adds the item, and the quantity you entered is posted to stock when they do. Dismiss anything that was just a mis-scan.' },
                 { q: 'How do reorders work?', k: 'reorder minimum maximum min max automatic draft approve',
                   a: 'When an item drops below its minimum, a draft reorder is built to bring it back to its maximum. A manager opens Reorder, checks or changes the lines, and presses Approve & send (to your distributor).' },
                 { q: 'How do I set an item\'s minimum and maximum?', k: 'set minimum maximum min max level reorder point',

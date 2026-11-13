@@ -123,6 +123,10 @@
                 <button onclick="adminNav('orders')" data-nav="orders" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-receipt w-5"></i> Orders
                 </button>
+                <button onclick="adminNav('scanissues')" data-nav="scanissues" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-scanissues">
+                    <i class="fas fa-triangle-exclamation w-5"></i> Scan issues
+                    <span id="si-nav-badge" class="hidden ml-auto bg-red-600 text-white text-xs rounded-full px-2 py-0.5">0</span>
+                </button>
                 <button onclick="adminNav('reports')" data-nav="reports" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-chart-line w-5"></i> Reports
                 </button>
@@ -1520,6 +1524,30 @@
                     <div id="pl-staff" class="hidden bg-white rounded-xl shadow-sm border p-5 mt-6"></div>
                 </section>
 
+                <!-- ========================================================
+                     SCAN ISSUES: scans that found no item, kept with a reason
+                     (migration 067). Put right here: attach the barcode, add the
+                     item from the Item Library, and post what was on the shelf.
+                     ======================================================== -->
+                <section id="section-scanissues" class="hidden fade-in">
+                    <div class="flex flex-wrap items-center gap-3 mb-4">
+                        <select id="si-status" onchange="siLoad()" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                            <option value="open">Open</option>
+                            <option value="resolved">Put right</option>
+                            <option value="dismissed">Dismissed</option>
+                            <option value="all">All</option>
+                        </select>
+                        <select id="si-company" onchange="siLoad()" class="border rounded-lg px-3 py-2 text-sm bg-white">
+                            <option value="">All customers</option>
+                        </select>
+                        <div class="flex-1"></div>
+                        <button onclick="siLoad()" class="text-sm text-gray-500 hover:text-blue-700 px-3 py-2"><i class="fas fa-rotate mr-1"></i> Refresh</button>
+                    </div>
+                    <p class="text-sm text-gray-500 mb-4">Every scan in a shop that found no item, from Stock, Receiving, Deliveries, Counts, Transfers and the scan-out kiosk. Each one says why, and what the shop said it was. Put it right and, in the same step, post what was on the shelf to stock.</p>
+                    <div id="si-warning" class="hidden mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"></div>
+                    <div id="si-list"></div>
+                </section>
+
                 <section id="section-audit" class="hidden fade-in">
                     <div id="audit-log-container" class="bg-white rounded-xl shadow-sm border overflow-hidden">
                         <table class="w-full">
@@ -1810,6 +1838,16 @@
          ============================================================ -->
     <!-- Opened from the Modules panel, so it must stack ABOVE it (both are z-50, and
          the Modules panel comes later in the page, so without this it covers this one). -->
+    <div id="si-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4" style="z-index:60">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xl font-bold">Put this scan right</h3>
+                <button onclick="hideModal('si-modal')" class="text-gray-400 hover:text-gray-600" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="si-modal-body"></div>
+        </div>
+    </div>
+
     <div id="scanout-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4" style="z-index:60">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
             <div class="flex justify-between items-center mb-2">
@@ -2848,6 +2886,7 @@
 
         loadDashboard();
         loadCompanies();
+        siCount();
     }
 
     async function loadPlatformLogo() {
@@ -2891,7 +2930,7 @@
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products', pricing: 'Customer Pricing',
             library: 'Item Library', master: 'Master Table', kits: 'Kits',
-            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding', tax: 'Tax & Region', billing: 'Billing', platform: 'Distributors (refinishAI platform)' };
+            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding', tax: 'Tax & Region', billing: 'Billing', platform: 'Distributors (refinishAI platform)', scanissues: 'Scan issues' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
         if (section === 'dashboard') dbLoad();
@@ -2909,6 +2948,182 @@
         if (section === 'tax') dtLoad();
         if (section === 'billing') blLoad();
         if (section === 'platform') plLoad();
+        if (section === 'scanissues') siLoad();
+    }
+
+    // ============================================================
+    // SCAN ISSUES (migration 067; routes/scan-exceptions-admin.js)
+    // ============================================================
+    let siData = { issues: [], can_fix: false };
+    const SI_REASON_CHIP = {
+        missing_barcode: 'bg-blue-100 text-blue-800', not_in_catalog: 'bg-purple-100 text-purple-800',
+        inactive_item: 'bg-gray-200 text-gray-700', invalid_code: 'bg-amber-100 text-amber-800', unknown_code: 'bg-red-100 text-red-800'
+    };
+    const SI_STOCK = { receive: 'Add to stock (received)', consume: 'Take out of stock (used)', count: 'Set on hand to this count', none: 'Don’t change stock' };
+    const siWhen = t => t ? new Date(t).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+
+    async function siCount() {
+        try {
+            const r = await adminFetch('/scan-exceptions/count'); if (!r.ok) return;
+            const d = await r.json(); const n = d.open || 0;
+            const b = document.getElementById('si-nav-badge');
+            if (b) { b.textContent = n > 99 ? '99+' : String(n); b.classList.toggle('hidden', n === 0); }
+        } catch (e) { /* badge only */ }
+    }
+
+    async function siLoad() {
+        const box = document.getElementById('si-list');
+        const warn = document.getElementById('si-warning');
+        box.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
+        const status = document.getElementById('si-status').value;
+        const company = document.getElementById('si-company').value;
+        try {
+            const r = await adminFetch(`/scan-exceptions?status=${encodeURIComponent(status)}${company ? '&company_id=' + encodeURIComponent(company) : ''}`);
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Failed to load.');
+            siData = d;
+            warn.textContent = d.installed === false ? (d.message || 'Scan issues are not set up yet.') : '';
+            warn.classList.toggle('hidden', d.installed !== false);
+            // Customer filter from what is on screen (kept when filtering).
+            const sel = document.getElementById('si-company');
+            if (!company) {
+                const seen = new Map(); (d.issues || []).forEach(i => seen.set(i.company_id, i.company_name));
+                sel.innerHTML = '<option value="">All customers</option>' + [...seen].sort((a, b) => a[1].localeCompare(b[1]))
+                    .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join('');
+            }
+            siCount();
+            const rows = d.issues || [];
+            if (!rows.length) {
+                box.innerHTML = `<div class="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-500"><i class="fas fa-circle-check text-3xl text-green-500 mb-2"></i><p>${status === 'open' ? 'No open scan issues.' : 'Nothing here.'}</p></div>`;
+                return;
+            }
+            box.innerHTML = `<div class="bg-white rounded-xl shadow-sm border overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+                <thead class="bg-gray-50 border-b text-xs text-gray-500 uppercase"><tr>
+                  <th class="text-left px-4 py-3">Customer · location</th><th class="text-left px-4 py-3">Code</th><th class="text-left px-4 py-3">Why</th>
+                  <th class="text-left px-4 py-3">What the shop said</th><th class="text-left px-4 py-3">Scanned</th><th class="text-right px-4 py-3"></th></tr></thead>
+                <tbody>${rows.map(i => `
+                  <tr class="border-b align-top hover:bg-gray-50">
+                    <td class="px-4 py-3"><div class="font-medium text-gray-800">${esc(i.company_name)}</div><div class="text-xs text-gray-500">${esc(i.location_name || '')}</div></td>
+                    <td class="px-4 py-3"><code>${esc(i.code)}</code>${i.attempts > 1 ? `<div class="text-xs text-gray-400">scanned ${i.attempts}×</div>` : ''}</td>
+                    <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded-full ${SI_REASON_CHIP[i.reason] || ''}">${esc(i.reason_label)}</span>
+                      ${i.scans_now ? `<div class="text-xs text-green-700 mt-1"><i class="fas fa-check mr-1"></i>Scans now as ${esc(i.scans_now.sku)}</div>` : ''}
+                      ${i.suggested_product ? `<div class="text-xs text-gray-600 mt-1">Item: ${esc(i.suggested_product.sku)} ${esc(i.suggested_product.name)}</div>` : ''}
+                      ${!i.suggested_product && i.suggested_library ? `<div class="text-xs text-gray-600 mt-1">Library: ${esc(i.suggested_library.sku)} ${esc(i.suggested_library.name)}</div>` : ''}</td>
+                    <td class="px-4 py-3"><span class="font-semibold">${esc(String(i.qty))}</span> × ${esc(i.note || '—')}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500">${esc(i.context_label)}<br>${esc(siWhen(i.last_seen_at))}${i.actor_label ? ' · ' + esc(i.actor_label) : ''}</td>
+                    <td class="px-4 py-3 text-right whitespace-nowrap">${i.status === 'open'
+                        ? `<button onclick="siOpen('${esc(i.id)}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">${d.can_fix ? 'Put right' : 'Review'}</button>`
+                        : `<span class="text-xs ${i.status === 'resolved' ? 'text-green-700' : 'text-gray-500'}">${i.status === 'resolved' ? 'Put right' : 'Dismissed'}${i.resolved_by_label ? ' · ' + esc(i.resolved_by_label) : ''}</span>`}</td>
+                  </tr>`).join('')}</tbody></table></div></div>`;
+        } catch (err) {
+            box.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
+        }
+    }
+
+    function siOpen(id) {
+        const i = (siData.issues || []).find(x => x.id === id);
+        if (!i) return;
+        const fix = siData.can_fix;
+        const opts = [];
+        if (fix && i.scans_now) opts.push(['close', `It scans now as <b>${esc(i.scans_now.sku)} ${esc(i.scans_now.name)}</b>. Close it.`]);
+        if (fix && i.suggested_product && !i.scans_now) {
+            opts.push(i.reason === 'inactive_item'
+                ? ['reactivate', `Switch <b>${esc(i.suggested_product.sku)} ${esc(i.suggested_product.name)}</b> back on for this shop.`]
+                : ['attach_barcode', `Attach this barcode to <b>${esc(i.suggested_product.sku)} ${esc(i.suggested_product.name)}</b>.`]);
+        }
+        if (fix && i.suggested_library && !i.suggested_product && !i.scans_now) {
+            const price = Number(i.suggested_library.list_price) > 0 ? '$' + Number(i.suggested_library.list_price).toFixed(2) : 'price on request';
+            opts.push(['add_from_library', `Add <b>${esc(i.suggested_library.sku)} ${esc(i.suggested_library.name)}</b> to ${esc(i.company_name)}’s catalogue at ${esc(price)}, with this barcode.`]);
+        }
+        if (fix && !i.scans_now) opts.push(['attach_other', 'Attach this barcode to another item in this shop’s catalogue:']);
+        opts.push(['dismiss', 'Dismiss: a mis-scan, nothing to put right.']);
+
+        const intended = ['receive', 'consume', 'count', 'none'].includes(i.intended_movement) ? i.intended_movement : 'receive';
+        document.getElementById('si-modal-body').innerHTML = `
+            <div class="text-sm text-gray-700 mb-4 space-y-1">
+                <div><b>${esc(i.company_name)}</b>${i.location_name ? ' · ' + esc(i.location_name) : ''}</div>
+                <div>Code <code>${esc(i.code)}</code> · <span class="text-xs px-2 py-0.5 rounded-full ${SI_REASON_CHIP[i.reason] || ''}">${esc(i.reason_label)}</span></div>
+                <div class="text-gray-500">${esc(i.reason_help)}</div>
+                <div>The shop said: <b>${esc(String(i.qty))}</b> × ${esc(i.note || 'no description')} · ${esc(i.context_label)}, ${esc(siWhen(i.last_seen_at))}${i.actor_label ? ', ' + esc(i.actor_label) : ''}</div>
+            </div>
+            <fieldset class="space-y-2 mb-4">
+                <legend class="text-sm font-semibold text-gray-800 mb-1">What to do</legend>
+                ${opts.map(([v, label], n) => `
+                  <label class="flex items-start gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="si-action" value="${v}" ${n === 0 ? 'checked' : ''} class="mt-1" onchange="siActionChanged()">
+                    <span>${label}${v === 'attach_other' ? `
+                      <span class="block mt-1"><input id="si-search" type="text" placeholder="Search part number or name" class="border rounded-lg px-2 py-1.5 text-sm w-64" oninput="siSearch('${esc(i.company_id)}')">
+                      <select id="si-pick" class="border rounded-lg px-2 py-1.5 text-sm mt-1 w-full"><option value="">Type to search&hellip;</option></select></span>` : ''}</span>
+                  </label>`).join('')}
+            </fieldset>
+            <div id="si-stock-box" class="bg-gray-50 rounded-lg p-3 mb-4 ${fix ? '' : 'hidden'}">
+                <p class="text-sm font-semibold text-gray-800 mb-2">Stock at ${esc(i.location_name || 'this location')}</p>
+                <div class="flex flex-wrap items-end gap-3">
+                    <select id="si-stock" class="border rounded-lg px-3 py-2 text-sm bg-white">${Object.entries(SI_STOCK).map(([k, v]) => `<option value="${k}" ${k === intended ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+                    <label class="text-xs text-gray-600">Quantity<input id="si-qty" type="number" min="0" step="any" value="${esc(String(i.qty))}" class="block border rounded-lg px-3 py-2 text-sm w-28"></label>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Defaults to what the scan was for (${esc(i.context_label.toLowerCase())}). The movement is in the stock history, marked as a scan issue put right.</p>
+            </div>
+            <div id="si-msg" class="hidden text-sm mb-3"></div>
+            <div class="flex justify-end gap-2">
+                <button onclick="hideModal('si-modal')" class="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+                <button id="si-go" onclick="siResolve('${esc(i.id)}')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Save</button>
+            </div>`;
+        siActionChanged();
+        showModal('si-modal');
+    }
+
+    function siActionChanged() {
+        const v = (document.querySelector('input[name="si-action"]:checked') || {}).value;
+        const box = document.getElementById('si-stock-box');
+        if (box && siData.can_fix) box.classList.toggle('hidden', v === 'dismiss');
+    }
+
+    let siSearchTimer = null;
+    function siSearch(companyId) {
+        clearTimeout(siSearchTimer);
+        siSearchTimer = setTimeout(async () => {
+            const term = document.getElementById('si-search').value.trim();
+            const pick = document.getElementById('si-pick');
+            if (term.length < 2) { pick.innerHTML = '<option value="">Type to search&hellip;</option>'; return; }
+            try {
+                const r = await adminFetch(`/companies/${encodeURIComponent(companyId)}/products?search=${encodeURIComponent(term)}&limit=25&includeInactive=1`);
+                const d = await r.json();
+                const list = d.products || [];
+                pick.innerHTML = list.length
+                    ? list.map(p => `<option value="${esc(p.id)}">${esc(p.sku)} · ${esc(p.name)}${p.is_active === false ? ' (switched off)' : ''}</option>`).join('')
+                    : '<option value="">No items match</option>';
+                const radio = document.querySelector('input[name="si-action"][value="attach_other"]');
+                if (radio) { radio.checked = true; siActionChanged(); }
+            } catch (e) { pick.innerHTML = '<option value="">Search failed</option>'; }
+        }, 250);
+    }
+
+    async function siResolve(id) {
+        const msg = document.getElementById('si-msg');
+        const go = document.getElementById('si-go');
+        let action = (document.querySelector('input[name="si-action"]:checked') || {}).value;
+        const body = { action };
+        if (action === 'attach_other') {
+            const pid = document.getElementById('si-pick').value;
+            if (!pid) { msg.textContent = 'Search for and choose the item first.'; msg.className = 'text-sm mb-3 text-red-600'; return; }
+            body.action = 'attach_barcode'; body.product_id = pid;
+        }
+        if (body.action !== 'dismiss' && siData.can_fix) {
+            body.stock = document.getElementById('si-stock').value;
+            body.qty = Number(document.getElementById('si-qty').value);
+        }
+        go.disabled = true; go.textContent = 'Saving…';
+        try {
+            const r = await adminFetch(`/scan-exceptions/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(body) });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Could not save.');
+            hideModal('si-modal');
+            adminToast(d.message + (d.note ? ' ' + d.note : ''), d.note ? 'warn' : 'ok');
+            siLoad();
+        } catch (err) {
+            msg.textContent = err.message; msg.className = 'text-sm mb-3 text-red-600';
+        } finally { go.disabled = false; go.textContent = 'Save'; }
     }
 
     // ============================================================
