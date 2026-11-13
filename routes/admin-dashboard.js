@@ -117,6 +117,46 @@ const num = v => {
 };
 const round2 = n => Math.round(n * 100) / 100;
 
+// Days and months are counted on the shop's clock (Ontario), not the server's
+// UTC clock: an order placed at 9 p.m. on the 31st belongs to the 31st.
+const LOCAL_TZ = process.env.REPORT_TIMEZONE || 'America/Toronto';
+const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: LOCAL_TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+function localDay(value) {
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return dayFmt.format(d); // en-CA formats as YYYY-MM-DD
+}
+// The trend switches from months to days when the period is short enough to read day by day.
+const DAILY_MAX_DAYS = 100;
+
+/** Every calendar day from `fromDay` to `toDay` inclusive (YYYY-MM-DD strings). */
+function daysBetween(fromDay, toDay) {
+    const out = [];
+    if (!fromDay || !toDay || fromDay > toDay) return out;
+    const [y, m, d] = fromDay.split('-').map(Number);
+    const cur = new Date(Date.UTC(y, m - 1, d));
+    for (let i = 0; i < DAILY_MAX_DAYS + 2; i++) {
+        const key = cur.toISOString().slice(0, 10);
+        if (key > toDay) break;
+        out.push(key);
+        cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return out;
+}
+
+/** The day-by-day series for a period, or null when the period is too long (or open-ended) to read by day. */
+function dailySeries(range, daily) {
+    if (!range.from) return null;
+    const fromDay = localDay(range.from);
+    const toDay = localDay(range.to ? new Date(Math.min(new Date(range.to).getTime(), Date.now())) : new Date());
+    const days = daysBetween(fromDay, toDay);
+    if (!days.length || days.length > DAILY_MAX_DAYS) return null;
+    return days.map(day => {
+        const r = daily.get(day);
+        return { day, sales: r ? round2(r.sales) : 0, orders: r ? r.orders : 0 };
+    });
+}
+
 /**
  * GET /api/admin/dashboard?period=&from=&to=&company_id=
  *
@@ -248,6 +288,7 @@ router.get('/', async (req, res) => {
 
         const products = new Map();   // grouping key -> { sku, name, units, dollars, companies:Set, is_master }
         const monthly = new Map();    // YYYY-MM -> { month, sales, orders }
+        const daily = new Map();      // YYYY-MM-DD -> { day, sales, orders }
         let salesTotal = 0, unpricedLines = 0, unitsOrdered = 0;
 
         for (const { order: o, lines } of parsedLines) {
@@ -257,7 +298,14 @@ router.get('/', async (req, res) => {
             b.order_count += 1;
             salesTotal += total;
 
-            const monthKey = String(o.created_at || '').slice(0, 7);
+            const dayKey = localDay(o.created_at);
+            const monthKey = dayKey.slice(0, 7);
+            if (dayKey) {
+                const drow = daily.get(dayKey) || { day: dayKey, sales: 0, orders: 0 };
+                drow.sales += total;
+                drow.orders += 1;
+                daily.set(dayKey, drow);
+            }
             if (monthKey) {
                 const mrow = monthly.get(monthKey) || { month: monthKey, sales: 0, orders: 0 };
                 mrow.sales += total;
@@ -436,6 +484,10 @@ router.get('/', async (req, res) => {
             monthly: [...monthly.values()]
                 .map(m => ({ ...m, sales: round2(m.sales) }))
                 .sort((a, b) => a.month.localeCompare(b.month)),
+            // Day by day for short periods (this month, last 30 days, a quarter):
+            // every day in the period, including the days with no orders, so the
+            // line shows the gaps as well as the peaks. Null for longer periods.
+            daily: dailySeries(range, daily),
             // Truthfulness flags. The UI shows a warning when either is set,
             // rather than presenting a partial read as the whole business.
             partial: { orders: ordersTruncated, inventory: inventoryTruncated }
@@ -646,3 +698,5 @@ router.get('/jobs', async (req, res) => {
 
 module.exports = router;
 module.exports.periodRange = periodRange;
+module.exports.dailySeries = dailySeries;
+module.exports.localDay = localDay;

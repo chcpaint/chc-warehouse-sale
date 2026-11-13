@@ -224,8 +224,8 @@
                     <!-- Sales trend -->
                     <div class="bg-white rounded-xl shadow-sm border p-5 mb-6">
                         <div class="flex items-baseline justify-between mb-4">
-                            <h3 class="font-semibold text-gray-800">Sales by month</h3>
-                            <span class="text-xs text-gray-400">orders placed through the platform</span>
+                            <h3 id="db-trend-title" class="font-semibold text-gray-800">Sales by day</h3>
+                            <span id="db-trend-note" class="text-xs text-gray-400">orders placed through the platform</span>
                         </div>
                         <div id="db-trend"></div>
                     </div>
@@ -3884,27 +3884,88 @@
         w.classList.remove('hidden');
     }
 
+    // Sales trend: a line by day for short periods (this month, last 30 days,
+    // a quarter), by month for longer ones. Drawn as SVG to the panel's real
+    // width so the text stays crisp; redrawn when the window is resized.
+    let dbTrendData = null;
     function dbRenderTrend(d) {
+        dbTrendData = d;
         const el = document.getElementById('db-trend');
-        const rows = d.monthly || [];
-        if (!rows.length) { el.innerHTML = dbEmpty('No orders in this period.'); return; }
-        const max = Math.max(...rows.map(r => r.sales), 1);
-        const label = m => {
-            const [y, mm] = m.split('-');
-            return new Date(Number(y), Number(mm) - 1, 1).toLocaleString('en-CA', { month: 'short' }) + (rows.length > 12 ? " '" + y.slice(2) : '');
-        };
-        el.innerHTML = `
-          <div class="flex items-end gap-2 h-40">
-            ${rows.map(r => `
-              <div class="flex-1 flex flex-col items-center justify-end h-full group" title="${dbEsc(r.month)} — ${dbEsc(dbMoney(r.sales))} over ${r.orders} order(s)">
-                <span class="text-[10px] text-gray-500 mb-1 whitespace-nowrap">${dbEsc(dbMoney0(r.sales))}</span>
-                <div class="w-full bg-blue-600 group-hover:bg-blue-700 rounded-t" style="height:${Math.max((r.sales / max) * 100, 2)}%"></div>
-              </div>`).join('')}
-          </div>
-          <div class="flex gap-2 mt-2 border-t pt-2">
-            ${rows.map(r => `<div class="flex-1 text-center text-[11px] text-gray-500">${dbEsc(label(r.month))}</div>`).join('')}
-          </div>`;
+        const title = document.getElementById('db-trend-title');
+        const note = document.getElementById('db-trend-note');
+        const byDay = Array.isArray(d.daily) && d.daily.length > 0;
+        const points = byDay
+            ? d.daily.map(r => ({ key: r.day, sales: Number(r.sales) || 0, orders: r.orders || 0 }))
+            : (d.monthly || []).map(r => ({ key: r.month, sales: Number(r.sales) || 0, orders: r.orders || 0 }));
+        title.textContent = byDay ? 'Sales by day' : 'Sales by month';
+        if (!points.length || !points.some(p => p.sales > 0 || p.orders > 0)) {
+            note.textContent = 'orders placed through the platform';
+            el.innerHTML = dbEmpty('No orders in this period.');
+            return;
+        }
+
+        const dateOf = key => { const [y, m, dd] = key.split('-').map(Number); return new Date(y, m - 1, dd || 1); };
+        const longLabel = key => byDay
+            ? dateOf(key).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+            : dateOf(key).toLocaleDateString('en-CA', { month: 'long', year: 'numeric' });
+        const shortLabel = key => byDay
+            ? dateOf(key).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+            : dateOf(key).toLocaleDateString('en-CA', { month: 'short' }) + (points.length > 12 ? " '" + key.slice(2, 4) : '');
+
+        const best = points.reduce((a, b) => (b.sales > a.sales ? b : a), points[0]);
+        const active = points.filter(p => p.orders > 0).length;
+        note.textContent = byDay
+            ? `Best day ${shortLabel(best.key)}: ${dbMoney0(best.sales)} · orders on ${active} of ${points.length} days`
+            : `Best month ${longLabel(best.key)}: ${dbMoney0(best.sales)}`;
+
+        // Scale: a round top value so the gridlines read as plain numbers.
+        const rawMax = Math.max(...points.map(p => p.sales), 1);
+        const mag = Math.pow(10, Math.floor(Math.log10(rawMax)));
+        const top = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map(f => f * mag).find(v => v >= rawMax) || rawMax;
+        const W = Math.max(el.clientWidth || 0, 320), H = 230;
+        const L = 64, R = 16, T = 14, B = 30;
+        const iw = W - L - R, ih = H - T - B;
+        const n = points.length;
+        const x = i => L + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
+        const y = v => T + ih - (v / top) * ih;
+        const tick = v => v >= 1000 ? '$' + (v / 1000).toLocaleString('en-CA', { maximumFractionDigits: 1 }) + 'k' : '$' + Math.round(v);
+
+        const grid = [0, 0.25, 0.5, 0.75, 1].map(f => {
+            const v = top * f, yy = y(v).toFixed(1);
+            return `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="#e5e7eb" stroke-width="1"/>`
+                 + `<text x="${L - 8}" y="${yy}" dy="0.32em" text-anchor="end" font-size="11" fill="#6b7280">${tick(v)}</text>`;
+        }).join('');
+
+        // X labels: at most ~8, always the last one.
+        const every = Math.max(1, Math.ceil(n / 8));
+        const xl = points.map((p, i) => (i % every === 0 || i === n - 1) && !(i !== n - 1 && n - 1 - i < every / 2)
+            ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="${n > 1 && i === n - 1 ? 'end' : n > 1 && i === 0 ? 'start' : 'middle'}" font-size="11" fill="#6b7280">${dbEsc(shortLabel(p.key))}</text>` : '').join('');
+
+        const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.sales).toFixed(1)}`).join(' ');
+        const area = n > 1 ? `${line} L${x(n - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z` : '';
+        const dots = points.map((p, i) => {
+            const last = i === n - 1;
+            const r = p.orders ? (last ? 4.5 : 3.5) : 2;
+            return `<g class="db-pt"><circle cx="${x(i).toFixed(1)}" cy="${y(p.sales).toFixed(1)}" r="${r}" fill="${p.orders ? '#2563eb' : '#fff'}" stroke="#2563eb" stroke-width="1.5"/>`
+                 + `<circle cx="${x(i).toFixed(1)}" cy="${y(p.sales).toFixed(1)}" r="10" fill="transparent"><title>${dbEsc(longLabel(p.key))} — ${dbEsc(dbMoney(p.sales))} · ${p.orders} order${p.orders === 1 ? '' : 's'}</title></circle></g>`;
+        }).join('');
+
+        el.innerHTML = `<div style="overflow-x:auto"><svg width="${W}" height="${H}" role="img" aria-label="${dbEsc(document.getElementById('db-trend-title').textContent)}: ${dbEsc(note.textContent)}" style="display:block">
+            ${grid}
+            ${area ? `<path d="${area}" fill="#2563eb" fill-opacity="0.08"/>` : ''}
+            <path d="${line}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+            ${dots}
+            ${xl}
+          </svg></div>`;
     }
+    let dbTrendResize = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(dbTrendResize);
+        dbTrendResize = setTimeout(() => {
+            const el = document.getElementById('db-trend');
+            if (dbTrendData && el && el.offsetParent) dbRenderTrend(dbTrendData);
+        }, 150);
+    });
 
     function dbEmpty(msg) {
         return `<p class="text-sm text-gray-400 py-6 text-center">${dbEsc(msg)}</p>`;

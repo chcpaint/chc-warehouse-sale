@@ -643,3 +643,23 @@ test('period-to-date on an empty system is zeroes, not an error', async () => {
     assert.equal(res.body.ytd.average_order, 0);
     assert.equal(res.body.companies_total, 0);
 });
+
+test('trend: a short period is shown day by day on Ontario time, including days with no orders', () => {
+    const dash = require('../routes/admin-dashboard');
+    // 9 p.m. on 31 Oct in Toronto is 1 Nov in UTC; it belongs to 31 Oct.
+    assert.equal(dash.localDay('2026-11-01T01:00:00Z'), '2026-10-31');
+    assert.equal(dash.localDay('2026-11-12T15:00:00Z'), '2026-11-12');
+    const daily = new Map([['2026-11-03', { day: '2026-11-03', sales: 120.456, orders: 2 }]]);
+    const s = dash.dailySeries({ from: '2026-11-01T05:00:00Z', to: '2026-11-05T20:00:00Z' }, daily);
+    assert.deepEqual(s.map(r => r.day), ['2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05']);
+    assert.deepEqual(s[2], { day: '2026-11-03', sales: 120.46, orders: 2 });
+    assert.equal(s[0].sales, 0);
+    // Open-ended or long periods stay monthly.
+    assert.equal(dash.dailySeries({ from: null, to: null }, daily), null);
+    assert.equal(dash.dailySeries({ from: '2025-01-01T05:00:00Z', to: '2025-12-31T23:00:00Z' }, daily), null);
+    // The admin chart is a line, not one bar per month.
+    const html = require('fs').readFileSync(require('path').join(__dirname, '../admin/index.html'), 'utf8');
+    assert.match(html, /id="db-trend-title"/);
+    assert.match(html, /Array\.isArray\(d\.daily\)/);
+    assert.doesNotMatch(html, /w-full bg-blue-600 group-hover:bg-blue-700 rounded-t/);
+});
