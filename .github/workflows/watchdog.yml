@@ -1,8 +1,9 @@
 name: Watchdog
 
 # Watches the watcher. Once an hour, from GitHub (outside both Railway and
-# Supabase): is the app ready, and has the uptime monitor inside Supabase
-# checked in the last 5 minutes? A failed run is GitHub's notification to the
+# Supabase): is the app ready, has the uptime monitor inside Supabase checked
+# in, and is the database running short of memory, swap, disk or connections
+# (the early warning added after the 18 Nov 2026 outage)? A failed run is GitHub's notification to the
 # repository's watchers -- turn on "Actions" notifications in the GitHub
 # mobile app to get it as a push.
 
@@ -20,7 +21,12 @@ jobs:
     timeout-minutes: 5
     env:
       APP_URL: ${{ vars.APP_URL || 'https://chcsale.com' }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_METRICS_KEY: ${{ secrets.SUPABASE_METRICS_KEY }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: App and uptime monitor
         run: |
           for attempt in 1 2 3; do
@@ -33,3 +39,10 @@ jobs:
           if [ "$code" != "200" ]; then echo "::error::$APP_URL is not ready (HTTP $code)"; exit 1; fi
           if echo "$json" | grep -q '"uptime_monitor":"stale"'; then echo "::error::The uptime monitor inside Supabase has stopped checking"; exit 1; fi
           echo "App ready; monitor: $(echo "$json" | sed -n 's/.*"uptime_monitor":"\([a-z]*\)".*/\1/p')" >> "$GITHUB_STEP_SUMMARY"
+
+      # Early warning: reads Supabase's metrics feed (read-only) and fails the run
+      # when memory, swap, disk space or connections are running short. Skipped
+      # until the Supabase secrets are added (the same ones the nightly backup uses).
+      - name: Database resources
+        if: ${{ always() && env.SUPABASE_URL != '' }}
+        run: node scripts/ops/db-resources.js

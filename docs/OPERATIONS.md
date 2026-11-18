@@ -64,6 +64,7 @@ For losing recent minutes only (not the whole project), Supabase's own daily bac
 | --- | --- | --- | --- |
 | Uptime monitor (migrations 064, 068) | every 2 minutes | inside Supabase (pg_cron + pg_net), separate from Railway | email via SendGrid to the alert list (default adam@chcpaint.com) and an optional Slack/Teams/Discord webhook, after 2 failures in a row; again on recovery |
 | Watchdog (`.github/workflows/watchdog.yml`) | hourly | GitHub | a failed run (GitHub notification / mobile push) if the app is not ready or the monitor has stopped |
+| Database early warning (`scripts/ops/db-resources.js`, in the watchdog) | hourly | GitHub, reading Supabase's metrics feed | a failed run if memory available < 15%, swap > 256 MB, disk space > 80% or connections > 80% (and Disk IO balance < 40% if Supabase publishes it). Limits are environment variables in the script. Needs the `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` secrets (or a `SUPABASE_METRICS_KEY` secret key, `sb_secret_...`); skipped until they are set |
 
 Watched: the health check only (`/api/health/ready`, a few bytes, which answers 200 only when the app
 can reach the database, so it proves the whole service). **Do not add full pages to
