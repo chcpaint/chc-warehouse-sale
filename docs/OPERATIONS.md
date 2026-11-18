@@ -62,12 +62,14 @@ For losing recent minutes only (not the whole project), Supabase's own daily bac
 
 | Check | How often | From | Alerts |
 | --- | --- | --- | --- |
-| Uptime monitor (migration 064) | every minute | inside Supabase (pg_cron + pg_net), separate from Railway | email via SendGrid to the alert list (default adam@chcpaint.com) and an optional Slack/Teams/Discord webhook, after 2 failures in a row; again on recovery |
+| Uptime monitor (migrations 064, 068) | every 2 minutes | inside Supabase (pg_cron + pg_net), separate from Railway | email via SendGrid to the alert list (default adam@chcpaint.com) and an optional Slack/Teams/Discord webhook, after 2 failures in a row; again on recovery |
 | Watchdog (`.github/workflows/watchdog.yml`) | hourly | GitHub | a failed run (GitHub notification / mobile push) if the app is not ready or the monitor has stopped |
 
-Pages watched: the health check (`/api/health/ready`, which answers 200 only when the app can reach
-the database), the shop sign-in page, the admin console and the help page. Add or remove pages in
-`public.uptime_targets`. Results: admin console > Reports > Uptime (24 h, 7 day and 30 day uptime, incidents,
+Watched: the health check only (`/api/health/ready`, a few bytes, which answers 200 only when the app
+can reach the database, so it proves the whole service). **Do not add full pages to
+`public.uptime_targets`:** pg_net stores every response inside the database. Fetching four pages
+(one of them ~720 KB) every minute used up the database's disk-activity allowance and took the
+service down on 18 Nov 2026; migration 068 fixed it and deletes each answer once read. Results: admin console > Reports > Uptime (24 h, 7 day and 30 day uptime, incidents,
 alert list).
 
 After running migration 064, add the SendGrid key to Vault once (SQL editor):

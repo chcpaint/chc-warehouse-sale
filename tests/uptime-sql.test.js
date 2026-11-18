@@ -108,3 +108,23 @@ test('uptime monitor: checks, incidents, alerts and recovery', { skip: !URL && '
     psql(`select monitor.send_alert('t', 'b');`);
     assert.equal(psql(`select url from net.sent where method = 'POST' order by id desc limit 1;`), 'https://hooks.example.test/x');
 });
+
+test('migration 068: only the small health address, every 2 minutes, answers deleted once read', { skip: !URL && 'set TEST_PG_URL to run' }, () => {
+    const light = fs.readFileSync(path.join(__dirname, '../migrations/068_uptime_monitor_light.sql'), 'utf8');
+    psql(STUBS);
+    psql(PORTABLE);
+    psql(`insert into net._http_response (id, status_code, content) values (999999, 200, repeat('x', 700000));`); // the old backlog
+    psql(light);
+    psql(light);   // safe to run twice
+    assert.equal(psql(`select string_agg(schedule, ',') from cron.job where jobname = 'refinishai-uptime';`), '*/2 * * * *');
+    assert.equal(psql('select count(*) from public.uptime_targets where enabled;'), '1');
+    assert.equal(psql('select url from public.uptime_targets where enabled;'), HEALTH);
+    assert.equal(psql('select count(*) from net._http_response;'), '0', 'backlog cleared');
+
+    psql('select monitor.tick();');
+    assert.equal(psql(`select count(*) from net.sent where method = 'GET';`), '1', 'one small request, not four pages');
+    answer(allUp);
+    psql('select monitor.tick();');
+    assert.equal(psql('select count(*) from public.uptime_checks where ok;'), '1');
+    assert.equal(psql('select count(*) from net._http_response;'), '0', 'answer deleted after reading');
+});
