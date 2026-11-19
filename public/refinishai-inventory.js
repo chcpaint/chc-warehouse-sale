@@ -184,13 +184,13 @@
         "",
         "                        <!-- Camera viewport -->",
         "                        <div id=\"inv-camera-wrap\" class=\"hidden mt-4\">",
-        "                            <div class=\"relative bg-black rounded-lg overflow-hidden max-w-md mx-auto\">",
-        "                                <video id=\"inv-video\" playsinline muted class=\"w-full\"></video>",
-        "                                <div id=\"inv-camera-box\" class=\"absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-green-400/80 rounded-lg pointer-events-none\"></div>",
+        "                            <div class=\"relative bg-black rounded-lg overflow-hidden max-w-md mx-auto aspect-square sm:aspect-[4/3]\">",
+        "                                <video id=\"inv-video\" playsinline muted autoplay class=\"absolute inset-0 w-full h-full object-cover\"></video>",
+        "                                <div id=\"inv-camera-box\" class=\"absolute left-[10%] right-[10%] top-[15%] bottom-[15%] border-[3px] border-green-400 rounded-xl pointer-events-none shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]\"></div>",
         "                                <div id=\"inv-camera-flash\" class=\"absolute inset-0 bg-white opacity-0 pointer-events-none\"></div>",
         "                            </div>",
         "                            <p id=\"inv-camera-hint\" class=\"text-center text-xs text-gray-500 mt-2\">",
-        "                                Hold the barcode inside the green box.",
+        "                                Fill the green box with the barcode. Sideways is fine.",
         "                            </p>",
         "                        </div>",
         "                    </div>",
@@ -472,13 +472,13 @@
         "                            <!-- Camera viewport -- this view's own; the Scan tab's camera lives in a",
         "                                 different, hidden section while Count is open, so it cannot be reused here. -->",
         "                            <div id=\"inv-count-camera-wrap\" class=\"hidden mt-4\">",
-        "                                <div class=\"relative bg-black rounded-lg overflow-hidden max-w-md mx-auto\">",
-        "                                    <video id=\"inv-count-video\" playsinline muted class=\"w-full\"></video>",
-        "                                    <div id=\"inv-count-camera-box\" class=\"absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-green-400/80 rounded-lg pointer-events-none\"></div>",
+        "                                <div class=\"relative bg-black rounded-lg overflow-hidden max-w-md mx-auto aspect-square sm:aspect-[4/3]\">",
+        "                                    <video id=\"inv-count-video\" playsinline muted autoplay class=\"absolute inset-0 w-full h-full object-cover\"></video>",
+        "                                    <div id=\"inv-count-camera-box\" class=\"absolute left-[10%] right-[10%] top-[15%] bottom-[15%] border-[3px] border-green-400 rounded-xl pointer-events-none shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]\"></div>",
         "                                    <div id=\"inv-count-camera-flash\" class=\"absolute inset-0 bg-white opacity-0 pointer-events-none\"></div>",
         "                                </div>",
         "                                <p id=\"inv-count-camera-hint\" class=\"text-center text-xs text-gray-500 mt-2\">",
-        "                                    Each scan adds 1. Hold the barcode inside the green box; change any number in the list below.",
+        "                                    Fill the green box with the barcode (sideways is fine). Each scan adds 1.",
         "                                </p>",
         "                            </div>",
         "                            <div id=\"inv-count-feedback\" class=\"mt-3\"></div>",
@@ -777,7 +777,7 @@
     //
     // Two scan inputs sit behind one RAI.submitScan():
     //   1. keyboard-wedge scanners (USB / Bluetooth) — detected by typing speed
-    //   2. the phone camera — native BarcodeDetector, with html5-qrcode as the
+    //   2. the phone camera — native BarcodeDetector, with the ZXing reader as the
     //      fallback iOS requires
     // ============================================================
 
@@ -796,7 +796,7 @@
         rcvBasket: [],
         stock: [],
         replenishment: [],
-        camera: { on: false, target: 'scan', stream: null, detector: null, raf: null, html5: null, lastCode: '', lastAt: 0 },
+        camera: { on: false, target: 'scan', stream: null, detector: null, raf: null, timer: null, zxing: null, lastCode: '', lastAt: 0 },
         busy: false
     };
 
@@ -1587,9 +1587,9 @@
     RAI.cameraIds = function (target) {
         return target === 'count'
             ? { wrap: 'inv-count-camera-wrap', hint: 'inv-count-camera-hint', video: 'inv-count-video',
-                flash: 'inv-count-camera-flash', label: 'inv-count-camera-label', host: 'inv-count-html5-host' }
+                flash: 'inv-count-camera-flash', label: 'inv-count-camera-label', host: 'inv-count-html5-host', box: 'inv-count-camera-box' }
             : { wrap: 'inv-camera-wrap', hint: 'inv-camera-hint', video: 'inv-video',
-                flash: 'inv-camera-flash', label: 'inv-camera-label', host: 'inv-html5-host' };
+                flash: 'inv-camera-flash', label: 'inv-camera-label', host: 'inv-html5-host', box: 'inv-camera-box' };
     }
 
     RAI.toggleCamera = async function (target) {
@@ -1638,29 +1638,53 @@
         }
 
         try {
-            inv.camera.stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-                audio: false
-            });
+            // Rear camera at a real resolution: barcode bars are thin, and a
+            // browser's default (often 640x480) cannot resolve them. 'ideal'
+            // never fails; a laptop with only a front camera falls back.
+            const highRes = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+            try {
+                inv.camera.stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' }, ...highRes }, audio: false });
+            } catch (first) {
+                if (first && first.name === 'NotAllowedError') throw first;
+                inv.camera.stream = await navigator.mediaDevices.getUserMedia({ video: highRes, audio: false });
+            }
             video.srcObject = inv.camera.stream;
             await video.play();
             inv.camera.on = true;
+            RAI.tryContinuousFocus(inv.camera.stream);
 
+            // Chrome and Android have a built-in barcode reader; use it.
             if ('BarcodeDetector' in window) {
-                const supported = await window.BarcodeDetector.getSupportedFormats();
-                const formats = CAMERA_FORMATS.filter(f => supported.includes(f));
-                if (formats.length) {
-                    inv.camera.detector = new window.BarcodeDetector({ formats });
-                    hint.textContent = 'Hold the barcode inside the green box.';
-                    RAI.detectLoop();
-                    return;
-                }
+                try {
+                    const supported = await window.BarcodeDetector.getSupportedFormats();
+                    const formats = CAMERA_FORMATS.filter(f => supported.includes(f));
+                    if (formats.length) {
+                        inv.camera.detector = new window.BarcodeDetector({ formats });
+                        hint.textContent = RAI.cameraHint();
+                        RAI.detectLoop();
+                        return;
+                    }
+                } catch (e) { /* fall through to the reader below */ }
             }
 
-            // Safari on iOS and iPadOS has no BarcodeDetector, so fall back to
-            // the WASM decoder. This path is mandatory for iPhones and iPads.
+            // iPhone and iPad Safari have none: read frames ourselves with the
+            // ZXing reader, served from this site (public/vendor). The video
+            // and the box on screen stay ours, so turning the phone never
+            // throws the picture or the box out of line.
             hint.textContent = 'Loading scanner…';
-            await RAI.startHtml5Fallback(hint);
+            try {
+                const v = window.RAI_ASSET_VERSION && window.RAI_ASSET_VERSION.indexOf('__') !== 0 ? '?v=' + encodeURIComponent(window.RAI_ASSET_VERSION) : '';
+                await RAI.loadScriptOnce('/vendor/zxing-library.min.js' + v);
+            } catch (e) { /* handled just below */ }
+            if (!inv.camera.on) return;   // Stop was tapped while it loaded
+            if (!window.ZXing || !window.ZXing.MultiFormatReader) {
+                hint.textContent = 'The scanner could not load. Use a USB scanner or type the part number.';
+                RAI.stopCamera();
+                return;
+            }
+            RAI.startZxing();
+            hint.textContent = RAI.cameraHint();
         } catch (err) {
             console.error('[Inventory] camera error:', err);
             hint.textContent = err && err.name === 'NotAllowedError'
@@ -1669,6 +1693,23 @@
             RAI.stopCamera();
         }
     }
+
+    RAI.cameraHint = function () {
+        return inv.camera.target === 'count'
+            ? 'Fill the green box with the barcode (sideways is fine). Each scan adds 1.'
+            : 'Fill the green box with the barcode. Sideways is fine.';
+    };
+
+    /** Ask for continuous autofocus where the camera allows it (Android); iPhones focus on their own. */
+    RAI.tryContinuousFocus = function (stream) {
+        try {
+            const track = stream && stream.getVideoTracks()[0];
+            const caps = track && track.getCapabilities ? track.getCapabilities() : null;
+            if (caps && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+                track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+            }
+        } catch (e) { /* optional */ }
+    };
 
     RAI.detectLoop = async function () {
         const video = document.getElementById(RAI.cameraIds(inv.camera.target).video);
@@ -1683,79 +1724,75 @@
         if (inv.camera.on) inv.camera.raf = requestAnimationFrame(RAI.detectLoop);
     }
 
-    RAI.startHtml5Fallback = async function (hint) {
-        try {
-            await RAI.loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js');
-        } catch (e) {
-            hint.textContent = 'Scanner could not load. Use a USB scanner or type the part number.';
-            RAI.stopCamera();
-            return;
+    /**
+     * The part of the camera picture that is inside the green box on screen.
+     * The video fills its frame with object-fit: cover, so the picture is
+     * scaled up and its edges trimmed; this undoes that, whatever way the
+     * phone is held. Returns { sx, sy, sw, sh } in camera pixels.
+     */
+    RAI.cameraCrop = function (video, box) {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        const vr = video.getBoundingClientRect();
+        if (!vw || !vh || !vr.width || !vr.height) return null;
+        const scale = Math.max(vr.width / vw, vr.height / vh);   // object-fit: cover
+        const shownW = vw * scale, shownH = vh * scale;
+        const offX = (shownW - vr.width) / 2, offY = (shownH - vr.height) / 2;
+        let bx = 0, by = 0, bw = vr.width, bh = vr.height;
+        if (box) {
+            const br = box.getBoundingClientRect();
+            bx = br.left - vr.left; by = br.top - vr.top; bw = br.width; bh = br.height;
         }
-        // The library manages its own video element, so hand the stream back.
-        RAI.stopStreamOnly();
+        // A little margin around the box: a barcode held slightly outside it still reads.
+        const pad = 0.08;
+        bx -= bw * pad; by -= bh * pad; bw *= 1 + 2 * pad; bh *= 1 + 2 * pad;
+        let sx = (bx + offX) / scale, sy = (by + offY) / scale, sw = bw / scale, sh = bh / scale;
+        sx = Math.max(0, sx); sy = Math.max(0, sy);
+        sw = Math.min(vw - sx, sw); sh = Math.min(vh - sy, sh);
+        return sw > 20 && sh > 20 ? { sx: Math.round(sx), sy: Math.round(sy), sw: Math.round(sw), sh: Math.round(sh) } : null;
+    };
 
+    RAI.startZxing = function () {
+        const Z = window.ZXing;
+        const hints = new Map();
+        const F = Z.BarcodeFormat;
+        hints.set(Z.DecodeHintType.POSSIBLE_FORMATS,
+            [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.ITF, F.QR_CODE].filter(x => x !== undefined));
+        // Try harder: also reads a barcode printed sideways (as on paint tins)
+        // by turning the picture a quarter turn when the first look finds nothing.
+        hints.set(Z.DecodeHintType.TRY_HARDER, true);
+        const reader = new Z.MultiFormatReader();
+        reader.setHints(hints);
+        inv.camera.zxing = { reader, canvas: document.createElement('canvas') };
+        RAI.zxingTick();
+    };
+
+    RAI.zxingTick = function () {
+        if (!inv.camera.on || !inv.camera.zxing) return;
         const ids = RAI.cameraIds(inv.camera.target);
-        let host = document.getElementById(ids.host);
-        if (!host) {
-            host = document.createElement('div');
-            host.id = ids.host;
-            host.className = 'max-w-md mx-auto';
-            document.getElementById(ids.wrap).prepend(host);
-        }
-        host.classList.remove('hidden');
-        document.getElementById(ids.video).classList.add('hidden');
-
-        inv.camera.html5 = new window.Html5Qrcode(ids.host, { verbose: false });
-        // A UPC/EAN barcode is thin bars, not a QR code's error-corrected
-        // blocks -- the decoder needs real pixel detail on those bars to
-        // read them, and a browser's default (often 640x480-ish) camera
-        // resolution frequently isn't enough. Ask for the camera's best
-        // available resolution explicitly; `ideal` degrades gracefully on
-        // a camera that can't do 1080p rather than failing to start.
-        const highRes = { width: { ideal: 1920 }, height: { ideal: 1080 } };
-        const scanConfig = {
-            fps: 12,
-            qrbox: { width: 300, height: 150 },
-            // Restricting to the symbologies this shop actually scans (vs.
-            // the decoder's full default list) means every frame is spent
-            // trying to read a barcode, not a QR/Aztec/PDF417/etc. code
-            // nobody is holding up to the camera.
-            formatsToSupport: window.Html5QrcodeSupportedFormats ? [
-                window.Html5QrcodeSupportedFormats.UPC_A,
-                window.Html5QrcodeSupportedFormats.UPC_E,
-                window.Html5QrcodeSupportedFormats.EAN_13,
-                window.Html5QrcodeSupportedFormats.EAN_8,
-                window.Html5QrcodeSupportedFormats.CODE_128,
-                window.Html5QrcodeSupportedFormats.CODE_39,
-                window.Html5QrcodeSupportedFormats.QR_CODE,
-                window.Html5QrcodeSupportedFormats.ITF
-            ] : undefined
-        };
-        const onDecoded = (decoded) => RAI.onCameraCode(decoded);
-        const onMiss = () => { /* per-frame miss; ignore */ };
-
-        // 'environment' (the rear camera) is what a phone or tablet should
-        // use, but it is a hard requirement here — a laptop with only a
-        // front camera fails outright rather than falling back, exactly
-        // the case that made this look "broken" on a MacBook. Try it,
-        // then fall back to the front camera as any device is guaranteed
-        // to have one. The resolution ask has to travel with the facing
-        // mode inside `videoConstraints` -- passing both separately, the
-        // library uses one or the other, not a merge of the two.
+        const video = document.getElementById(ids.video);
+        const box = document.getElementById(ids.box);
+        const started = performance.now();
         try {
-            await inv.camera.html5.start(
-                { facingMode: 'environment' },
-                { ...scanConfig, videoConstraints: { ...highRes, facingMode: 'environment' } },
-                onDecoded, onMiss);
-        } catch (envErr) {
-            await inv.camera.html5.start(
-                { facingMode: 'user' },
-                { ...scanConfig, videoConstraints: { ...highRes, facingMode: 'user' } },
-                onDecoded, onMiss);
-        }
-        inv.camera.on = true;
-        hint.textContent = 'Hold the barcode inside the frame, filling as much of it as you can.';
-    }
+            const crop = video && video.readyState >= 2 ? RAI.cameraCrop(video, box) : null;
+            if (crop) {
+                // Enough pixels for the bars, few enough to decode quickly on a phone.
+                const k = Math.min(1, 1100 / Math.max(crop.sw, crop.sh));
+                const c = inv.camera.zxing.canvas;
+                c.width = Math.max(1, Math.round(crop.sw * k));
+                c.height = Math.max(1, Math.round(crop.sh * k));
+                const g = c.getContext('2d', { willReadFrequently: true });
+                g.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, c.width, c.height);
+                const Z = window.ZXing;
+                const bitmap = new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(c)));
+                let result = null;
+                try { result = inv.camera.zxing.reader.decodeWithState(bitmap); } catch (e) { result = null; }   // nothing in this frame
+                if (result && inv.camera.on) RAI.onCameraCode(result.getText());
+            }
+        } catch (e) { /* a dropped frame is not an error worth surfacing */ }
+        // Pace to the phone: a slow decode waits a little longer before the next.
+        const spent = performance.now() - started;
+        if (inv.camera.on) inv.camera.timer = setTimeout(RAI.zxingTick, Math.max(60, Math.min(250, spent)));
+    };
 
     RAI.loadScriptOnce = function (src) {
         return new Promise((resolve, reject) => {
@@ -1798,6 +1835,7 @@
 
     RAI.stopStreamOnly = function () {
         if (inv.camera.raf) { cancelAnimationFrame(inv.camera.raf); inv.camera.raf = null; }
+        if (inv.camera.timer) { clearTimeout(inv.camera.timer); inv.camera.timer = null; }
         if (inv.camera.stream) {
             inv.camera.stream.getTracks().forEach(t => t.stop());
             inv.camera.stream = null;
@@ -1809,12 +1847,7 @@
     RAI.stopCamera = function () {
         RAI.stopStreamOnly();
         inv.camera.detector = null;
-        if (inv.camera.html5) {
-            inv.camera.html5.stop().catch(() => {}).then(() => {
-                try { inv.camera.html5.clear(); } catch (e) {}
-                inv.camera.html5 = null;
-            });
-        }
+        inv.camera.zxing = null;
         const ids = RAI.cameraIds(inv.camera.target);
         const host = document.getElementById(ids.host);
         if (host) host.classList.add('hidden');

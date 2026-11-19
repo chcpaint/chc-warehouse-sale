@@ -120,12 +120,17 @@ function makeServer({ inventoryEnabled }) {
         summary: { counted: hits.countLines.length, variances: hits.countLines.filter(l => l.live_variance !== 0).length, net_units: 0 }
     }));
     app.post('/api/store/:slug/inventory/counts/:id/lines', (req, res) => {
-        hits.countLines.push({
-            id: 'cl-' + hits.countLines.length, product_id: PRODUCT_ID, sku: '2PCPSL',
-            name: 'Two piece Paint Suit Large', counted_qty: req.body.counted_qty,
-            current_on_hand: 3, live_variance: Number(req.body.counted_qty) - 3, counted_by: req.body.actor_label
-        });
-        res.status(201).json({ line: hits.countLines.at(-1), expected_qty: 3, variance: Number(req.body.counted_qty) - 3 });
+        // Like the real route: { add: n } adds to the line, { counted_qty } sets it.
+        const prior = hits.countLines.find(l => l.product_id === PRODUCT_ID);
+        const counted = req.body.add !== undefined ? Number(prior ? prior.counted_qty : 0) + Number(req.body.add) : Number(req.body.counted_qty);
+        hits.countPosts = (hits.countPosts || 0) + 1;
+        const line = {
+            id: 'cl-0', product_id: PRODUCT_ID, sku: '2PCPSL',
+            name: 'Two piece Paint Suit Large', counted_qty: counted,
+            current_on_hand: 3, live_variance: counted - 3, counted_by: req.body.actor_label
+        };
+        if (prior) Object.assign(prior, line); else hits.countLines.push(line);
+        res.status(201).json({ line, counted_qty: counted, expected_qty: 3, variance: counted - 3 });
     });
 
     app.get('/api/store/:slug/inventory/transfers', (req, res) => res.json({ transfers: [] }));
@@ -464,66 +469,38 @@ check('the camera falls back to the front camera when no rear camera is availabl
             // No native BarcodeDetector — the path every iPhone/iPad and
             // most desktop Safari installs actually take.
             delete window.BarcodeDetector;
-            RAI.loadScriptOnce = async () => {}; // no CDN in this stub server
-            window.Html5Qrcode = class {
-                constructor() { this.constraintsTried = []; }
-                async start(constraint) {
-                    this.constraintsTried.push(constraint.facingMode);
-                    if (constraint.facingMode === 'environment') throw new Error('OverconstrainedError: no matching camera');
-                }
-                async stop() {}
-                clear() {}
+            const asked = [];
+            const realGum = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+            navigator.mediaDevices.getUserMedia = async (c) => {
+                asked.push(c.video && c.video.facingMode ? 'environment' : 'any');
+                if (c.video && c.video.facingMode) throw Object.assign(new Error('no rear camera'), { name: 'OverconstrainedError' });
+                const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 480;
+                const g = canvas.getContext('2d'); g.fillStyle = '#888'; g.fillRect(0, 0, 640, 480);
+                const stream = canvas.captureStream(5);
+                setInterval(() => g.fillRect(0, 0, 1, 1), 100);   // keep frames coming so play() resolves
+                return stream;
+            };
+            RAI.loadScriptOnce = async () => {};   // no vendor file in this stub server
+            let hints = null;
+            window.ZXing = {
+                BarcodeFormat: { EAN_13: 7, EAN_8: 6, UPC_A: 14, UPC_E: 15, CODE_128: 4, CODE_39: 2, ITF: 8, QR_CODE: 11 },
+                DecodeHintType: { POSSIBLE_FORMATS: 2, TRY_HARDER: 3 },
+                MultiFormatReader: class { setHints(h) { hints = h; } decodeWithState() { throw new Error('none'); } },
+                BinaryBitmap: class {}, HybridBinarizer: class {}, HTMLCanvasElementLuminanceSource: class {}
             };
             await RAI.toggleCamera();
-            const html5 = RAI.state.camera.html5;
             const started = RAI.state.camera.on === true;
             const hint = document.getElementById('inv-camera-hint').textContent;
             RAI.stopCamera();
-            return { constraintsTried: html5 && html5.constraintsTried, started, hint };
+            navigator.mediaDevices.getUserMedia = realGum;
+            return { asked, started, hint, tryHarder: hints && hints.get(3), formats: hints && hints.get(2) };
         });
 
-        assert.deepEqual(outcome.constraintsTried, ['environment', 'user'], 'should try the rear camera, then fall back to the front one');
+        assert.deepEqual(outcome.asked, ['environment', 'any'], 'should try the rear camera, then any camera');
         assert.equal(outcome.started, true, 'the camera should end up running, not stuck on the failed rear-camera request');
-        assert.match(outcome.hint, /hold the barcode/i);
-    } finally { await page.close(); server.close(); }
-});
-
-check('the Safari fallback asks for a real resolution and only the formats this shop scans', async (browser) => {
-    // A UPC/EAN barcode is thin bars a low-resolution camera stream can't
-    // resolve, and this is the config that most affects whether html5-qrcode
-    // ever actually decodes one -- pin it so a future edit can't quietly
-    // drop the resolution ask or widen back out to every symbology the
-    // decoder knows (which was measurably slower to get a hit with).
-    const { app } = makeServer({ inventoryEnabled: true });
-    const { server, port } = await listen(app);
-    const page = await browser.newPage();
-    try {
-        await login(page, `http://127.0.0.1:${port}`);
-        await page.waitForSelector('#nav-inventory:not(.hidden)');
-        await page.click('#nav-inventory');
-        await page.waitForSelector('#inv-view-scan:not(.hidden)');
-
-        const config = await page.evaluate(async () => {
-            delete window.BarcodeDetector;
-            RAI.loadScriptOnce = async () => {};
-            window.Html5QrcodeSupportedFormats = { UPC_A: 14, UPC_E: 15, EAN_13: 9, EAN_8: 10, CODE_128: 5, CODE_39: 4, QR_CODE: 0, ITF: 8 };
-            let seenConfig = null;
-            window.Html5Qrcode = class {
-                async start(_constraint, config) { seenConfig = config; }
-                async stop() {}
-                clear() {}
-            };
-            await RAI.toggleCamera();
-            RAI.stopCamera();
-            return seenConfig;
-        });
-
-        assert.ok(config.videoConstraints, 'should ask for a specific camera resolution, not the browser default');
-        assert.ok(config.videoConstraints.width && config.videoConstraints.width.ideal >= 1280,
-            'the resolution ask should be high enough to resolve barcode bars, saw ' + JSON.stringify(config.videoConstraints));
-        assert.ok(Array.isArray(config.formatsToSupport) && config.formatsToSupport.length > 0 && config.formatsToSupport.length < 17,
-            'should restrict to the formats this shop scans rather than the decoder\'s full default list');
-        assert.ok(config.formatsToSupport.includes(14), 'UPC_A must be one of the supported formats');
+        assert.match(outcome.hint, /green box/i);
+        assert.equal(outcome.tryHarder, true, 'must try harder, which also reads sideways barcodes');
+        assert.ok(outcome.formats.includes(14) && outcome.formats.length < 10, 'UPC-A and only the shop formats');
     } finally { await page.close(); server.close(); }
 });
 
@@ -625,11 +602,11 @@ check('a cycle count can be started and an item counted', async (browser) => {
         assert.equal(hits.countLines[0].counted_qty, 5);
         // Counted 5 against a system figure of 3 -> the difference is shown, not the raw count.
         assert.match(await page.locator('#inv-count-body').innerText(), /\+2/);
-        assert.match(await page.locator('#inv-count-feedback').innerText(), /system had 3/);
+        assert.match(await page.locator('#inv-count-feedback').innerText(), /System has 3/);
     } finally { await page.close(); server.close(); }
 });
 
-check('counting without a quantity asks for one before scanning', async (browser) => {
+check('counting without a quantity adds one per scan', async (browser) => {
     const { app, hits } = makeServer({ inventoryEnabled: true });
     const { server, port } = await listen(app);
     const page = await browser.newPage();
@@ -642,12 +619,15 @@ check('counting without a quantity asks for one before scanning', async (browser
         await page.click('text=Start count');
         await page.waitForSelector('#inv-count-active:not(.hidden)');
 
-        await page.fill('#inv-count-scan', '051131020474');
-        await page.press('#inv-count-scan', 'Enter');
-        await page.waitForTimeout(400);
+        for (let i = 0; i < 2; i++) {
+            await page.fill('#inv-count-scan', '051131020474');
+            await page.press('#inv-count-scan', 'Enter');
+            await page.waitForTimeout(400);
+        }
 
-        assert.equal(hits.countLines.length, 0);
-        assert.match(await page.locator('#inv-count-feedback').innerText(), /counted quantity first/i);
+        assert.equal(hits.countLines.length, 1, 'one line, scanned twice');
+        assert.equal(hits.countLines[0].counted_qty, 2);
+        assert.match(await page.locator('#inv-count-feedback').innerText(), /2 counted/);
     } finally { await page.close(); server.close(); }
 });
 

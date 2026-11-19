@@ -172,3 +172,22 @@ test('showInvView leaves the camera running when the view is the one that opened
 
     assert.equal(stopped, false);
 });
+
+// ------------------------------------------------------------------
+// The phone camera reads frames itself (no html5-qrcode): its own video and
+// box, the ZXing reader served from this site, and a sideways barcode read.
+// ------------------------------------------------------------------
+test('the camera reader is served from this site and set to read sideways barcodes', () => {
+    const vendor = fs.readFileSync(path.join(__dirname, '..', 'public', 'vendor', 'zxing-library.min.js'), 'utf8');
+    assert.match(vendor.slice(0, 400), /@zxing\/library 0\.21\.3/);
+    assert.ok(vendor.includes('MultiFormatReader'), 'the reader class is in the file');
+    assert.ok(!/html5-qrcode/.test(SRC), 'the old camera library is gone');
+    assert.match(SRC, /loadScriptOnce\('\/vendor\/zxing-library\.min\.js'/);
+    assert.match(SRC, /DecodeHintType\.TRY_HARDER, true/);
+});
+
+test('cameraIds names the green box each camera reads inside', () => {
+    const { RAI } = loadRAI();
+    assert.equal(RAI.cameraIds('scan').box, 'inv-camera-box');
+    assert.equal(RAI.cameraIds('count').box, 'inv-count-camera-box');
+});
