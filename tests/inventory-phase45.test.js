@@ -233,7 +233,7 @@ test('a scoped count needs its scope value', async () => {
     reset();
     const res = await openCount({ scope_type: 'category' });
     assert.equal(res.status, 400);
-    assert.match(res.body.error, /category is required/i);
+    assert.match(res.body.error, /Pick the category/i);
 });
 
 test('counting records the variance without touching stock', async () => {
@@ -301,13 +301,68 @@ test('an add below zero is refused', async () => {
     assert.equal(res.status, 400);
 });
 
+// ---- Counting one manufacturer or one PPG paint line (migration 070) ----
+const EHP_ID = '77777777-7777-4777-8777-777777777771';
+const MMM_ID = '77777777-7777-4777-8777-777777777772';
+function addPaint() {
+    fake.db.products.push(
+        { id: EHP_ID, company_id: COMPANY_ID, sku: 'T474', name: 'EHP Fine Metallic L', brand: 'PPG', category: 'Colour', price: 90, is_active: true },
+        { id: MMM_ID, company_id: COMPANY_ID, sku: 'MMM06334', name: 'Masking Tape', brand: '3M', category: 'Abrasives/Masking', price: 9, is_active: true });
+}
+
+test('the count screen lists manufacturers, PPG paint lines and categories from the catalogue', async () => {
+    reset(); addPaint();
+    const res = await request(app()).get(`${S}/counts/scopes`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.brands.map(b => b.value), ['3M', 'PPG']);
+    assert.equal(res.body.brands.find(b => b.value === 'PPG').items, 3);
+    assert.deepEqual(res.body.lines, [{ value: 'Envirobase / EHP', items: 1 }]);
+    assert.ok(res.body.categories.some(c => c.value === 'Colour'));
+});
+
+test('a manufacturer count takes that brand and refuses others, saying why', async () => {
+    reset(); addPaint();
+    const session = (await openCount({ scope_type: 'brand', scope_value: 'PPG' })).body.session;
+    assert.equal(session.name, 'Count — PPG');
+    const ok = await request(app()).post(`${S}/counts/${session.id}/lines`).send({ product_id: EHP_ID, add: 1, actor_label: 'Dana' });
+    assert.equal(ok.status, 201);
+    const no = await request(app()).post(`${S}/counts/${session.id}/lines`).send({ product_id: MMM_ID, add: 1, actor_label: 'Dana' });
+    assert.equal(no.status, 400);
+    assert.match(no.body.error, /MMM06334 is 3M .*This count covers PPG items only/);
+});
+
+test('a paint-line count takes Envirobase items only, not other PPG products', async () => {
+    reset(); addPaint();
+    const session = (await openCount({ scope_type: 'line', scope_value: 'Envirobase / EHP' })).body.session;
+    const ok = await request(app()).post(`${S}/counts/${session.id}/lines`).send({ product_id: EHP_ID, add: 1, actor_label: 'Dana' });
+    assert.equal(ok.status, 201);
+    const suit = await request(app()).post(`${S}/counts/${session.id}/lines`).send({ product_id: PRODUCT_ID, add: 1, actor_label: 'Dana' });
+    assert.equal(suit.status, 400);
+});
+
+test('a count typed as category "Enviro" before the lists existed still accepts Envirobase items', async () => {
+    reset(); addPaint();
+    const session = (await openCount({ scope_type: 'category', scope_value: 'Enviro' })).body.session;
+    const ok = await request(app()).post(`${S}/counts/${session.id}/lines`).send({ product_id: EHP_ID, add: 1, actor_label: 'Dana' });
+    assert.equal(ok.status, 201);
+    const tape = await request(app()).post(`${S}/counts/${session.id}/lines`).send({ product_id: MMM_ID, add: 1, actor_label: 'Dana' });
+    assert.equal(tape.status, 400);
+});
+
+test('a manufacturer count needs a manufacturer', async () => {
+    reset();
+    const res = await openCount({ scope_type: 'brand' });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /Pick the manufacturer/);
+});
+
 test('a category-scoped count refuses items outside it', async () => {
     reset();
     const session = (await openCount({ scope_type: 'category', scope_value: 'Colour' })).body.session;
     const res = await request(app()).post(`${S}/counts/${session.id}/lines`)
         .send({ product_id: PRODUCT_ID, counted_qty: 1, actor_label: 'Dana' });   // Masks/Suits
     assert.equal(res.status, 400);
-    assert.match(res.body.error, /Colour only/);
+    assert.match(res.body.error, /the Colour category only/);
 });
 
 test('committing posts one movement per genuine variance', async () => {

@@ -17,6 +17,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../utils/supabase');
 const { stripHtml, isValidUUID } = require('../utils/sanitize');
 const { canonicalBarcode, round4 } = require('../utils/inventory');
+const { classify, LINES, OTHER_PPG } = require('../utils/report-groups');
 
 const router = express.Router({ mergeParams: true });
 
@@ -30,6 +31,51 @@ function text(v, max = 200) {
 
 function actorLabel(req) {
     return text(req.body?.actor_label, 80) || null;
+}
+
+// What a count can cover. 'brand' (a manufacturer) and 'line' (a PPG paint
+// line such as Envirobase / EHP) need migration 070.
+const SCOPE_TYPES = ['all', 'brand', 'line', 'category', 'bin', 'selection'];
+const fold = v => String(v === undefined || v === null ? '' : v).trim().toLowerCase();
+
+/** The PPG paint line an item belongs to, or null. */
+function paintLine(product) {
+    const c = classify({ brand: product.brand, name: product.name, category: product.category, sku: product.sku }, null);
+    return c.group === 'ppg' && c.line && c.line !== OTHER_PPG ? c.line : null;
+}
+
+/** A line label named in free text ("Enviro", "EHP", "Shopline"), or null. */
+function lineNamed(text) {
+    const hit = LINES.find(l => l.re.test(String(text || '')));
+    return hit ? hit.label : null;
+}
+
+/**
+ * Does this item belong in the count? A category count also accepts an item
+ * whose manufacturer or paint line matches what was typed, so a count started
+ * as "Enviro" before manufacturers and lines could be picked still works.
+ */
+function inScope(session, product) {
+    const v = session.scope_value;
+    switch (session.scope_type) {
+        case 'brand': return fold(product.brand) === fold(v);
+        case 'line': return paintLine(product) === v;
+        case 'category': {
+            if (fold(product.category) === fold(v)) return true;
+            if (fold(product.brand) === fold(v)) return true;
+            const named = lineNamed(v);
+            return !!named && paintLine(product) === named;
+        }
+        default: return true;
+    }
+}
+
+function scopeLabel(session) {
+    const v = session.scope_value;
+    if (session.scope_type === 'brand') return `${v} items`;
+    if (session.scope_type === 'line') return `${v} paint`;
+    if (session.scope_type === 'category') return `the ${v} category`;
+    return v || 'this count';
 }
 
 async function resolveLocation(companyId, locationId) {
@@ -59,11 +105,11 @@ router.post('/counts', async (req, res) => {
         const actor = actorLabel(req);
         if (!actor) return res.status(400).json({ error: 'Enter your name to start a count.' });
 
-        const scopeType = ['all', 'category', 'bin', 'selection'].includes(req.body?.scope_type)
-            ? req.body.scope_type : 'all';
+        const scopeType = SCOPE_TYPES.includes(req.body?.scope_type) ? req.body.scope_type : 'all';
         const scopeValue = scopeType === 'all' ? null : text(req.body?.scope_value, 80);
         if (scopeType !== 'all' && !scopeValue) {
-            return res.status(400).json({ error: `A ${scopeType} is required for that count scope.` });
+            const what = { brand: 'manufacturer', line: 'paint line' }[scopeType] || scopeType;
+            return res.status(400).json({ error: `Pick the ${what} to count.` });
         }
 
         const { data, error } = await supabaseAdmin
@@ -94,6 +140,9 @@ router.post('/counts', async (req, res) => {
                     open_session: open || null
                 });
             }
+            if (/inventory_count_scope_chk|check constraint/i.test(error.message || '') && ['brand', 'line'].includes(scopeType)) {
+                return res.status(503).json({ error: 'Counting by manufacturer or paint line is not switched on yet. Ask your distributor to finish the update (migration 070).' });
+            }
             throw error;
         }
 
@@ -105,7 +154,7 @@ router.post('/counts', async (req, res) => {
 });
 
 function defaultCountName(scopeType, scopeValue) {
-    if (scopeType === 'category') return `Count — ${scopeValue}`;
+    if (scopeType === 'category' || scopeType === 'brand' || scopeType === 'line') return `Count — ${scopeValue}`;
     if (scopeType === 'bin') return `Count — bin ${scopeValue}`;
     if (scopeType === 'selection') return 'Spot count';
     return 'Full count';
@@ -136,6 +185,40 @@ router.get('/counts', async (req, res) => {
     } catch (err) {
         console.error('List counts error:', err);
         res.status(500).json({ error: 'Failed to load counts.' });
+    }
+});
+
+/**
+ * GET /counts/scopes
+ * What a count can cover, from this shop's own catalogue: manufacturers,
+ * PPG paint lines and categories, each with how many items it holds.
+ */
+router.get('/counts/scopes', async (req, res) => {
+    try {
+        const rows = [];
+        for (let from = 0; from < 20000; from += 1000) {
+            const { data, error } = await supabaseAdmin.from('products')
+                .select('brand, category, name, sku')
+                .eq('company_id', req.company.id).eq('is_active', true)
+                .range(from, from + 999);
+            if (error) throw error;
+            rows.push(...(data || []));
+            if (!data || data.length < 1000) break;
+        }
+        const tally = () => new Map();
+        const brands = tally(), lines = tally(), categories = tally();
+        const add = (m, v) => { const k = String(v || '').trim(); if (k) m.set(k, (m.get(k) || 0) + 1); };
+        for (const p of rows) {
+            add(brands, p.brand);
+            add(categories, p.category);
+            add(lines, paintLine(p));
+        }
+        const list = m => [...m].map(([value, items]) => ({ value, items }))
+            .sort((a, b) => a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }));
+        res.json({ brands: list(brands), lines: list(lines), categories: list(categories) });
+    } catch (err) {
+        console.error('Count scopes error:', err);
+        res.status(500).json({ error: 'Could not load what can be counted.' });
     }
 });
 
@@ -229,12 +312,16 @@ router.post('/counts/:id/lines', async (req, res) => {
         }
 
         const { data: product } = await supabaseAdmin
-            .from('products').select('id, sku, name, category')
+            .from('products').select('id, sku, name, brand, category')
             .eq('id', productId).eq('company_id', companyId).maybeSingle();
         if (!product) return res.status(404).json({ error: 'Product not found for this account.' });
 
-        if (session.scope_type === 'category' && (product.category || '') !== session.scope_value) {
-            return res.status(400).json({ error: `This count covers ${session.scope_value} only.` });
+        if (!inScope(session, product)) {
+            const what = [product.brand, paintLine(product), product.category].filter(Boolean).join(' · ');
+            return res.status(400).json({
+                error: `${product.sku || product.name} is ${what || 'not part of this count'}. This count covers ${scopeLabel(session)} only.`,
+                out_of_scope: true
+            });
         }
 
         const { data: level } = await supabaseAdmin
@@ -973,3 +1060,5 @@ router.post('/transfers/:id/cancel', async (req, res) => {
 });
 
 module.exports = router;
+
+module.exports._test = { inScope, paintLine, lineNamed };

@@ -419,10 +419,14 @@
         "                            <select id=\"inv-count-scope\" onchange=\"RAI.onCountScopeChange()\"",
         "                                class=\"border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
         "                                <option value=\"all\">Everything at this location</option>",
+        "                                <option value=\"brand\">One manufacturer</option>",
+        "                                <option value=\"line\">One PPG paint line (e.g. Envirobase)</option>",
         "                                <option value=\"category\">One category</option>",
         "                                <option value=\"bin\">One bin / shelf</option>",
         "                            </select>",
-        "                            <input id=\"inv-count-scope-value\" type=\"text\" maxlength=\"80\" placeholder=\"Category or bin\"",
+        "                            <select id=\"inv-count-scope-pick\" aria-label=\"Which one to count\"",
+        "                                class=\"hidden border rounded-lg px-3 py-2 max-w-full focus:ring-2 focus:ring-blue-500 focus:outline-none\"></select>",
+        "                            <input id=\"inv-count-scope-value\" type=\"text\" maxlength=\"80\" placeholder=\"Bin / shelf\"",
         "                                class=\"hidden border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
         "                            <button onclick=\"RAI.startCount()\"",
         "                                class=\"px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium\">",
@@ -2037,27 +2041,27 @@
 
         const verb = { consume: 'Use', receive: 'Receive', count: 'Count' }[inv.mode] || inv.mode;
         el.innerHTML = inv.basket.map(l => `
-            <div class="px-4 py-3 flex items-center gap-3 ${l.product_id === inv.activeProductId ? 'bg-blue-50' : ''}">
-                <div class="flex-1 min-w-0">
-                    <div class="font-medium text-gray-800 truncate">${RAI.esc(l.name)}</div>
+            <div class="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 ${l.product_id === inv.activeProductId ? 'bg-blue-50' : ''}">
+                <div class="basis-full sm:basis-0 sm:flex-1 min-w-0">
+                    <div class="font-medium text-gray-800 sm:truncate">${RAI.esc(l.name)}</div>
                     <div class="text-xs text-gray-500">
                         ${RAI.esc(l.sku || '')}
                         ${l.on_hand !== null && l.on_hand !== undefined ? ` · on hand ${RAI.formatQty(l.on_hand)}` : ''}
                     </div>
                     ${l.error ? `<div class="text-xs text-red-600 mt-1">${RAI.esc(l.error)}</div>` : ''}
                 </div>
-                <div class="flex items-center gap-1 shrink-0">
+                <div class="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
                     <button onclick="RAI.bumpLine('${l.product_id}', -1)" type="button"
-                        class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">&minus;</button>
+                        class="w-11 h-11 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 text-xl font-semibold">&minus;</button>
                     <input type="number" step="0.5" min="0" value="${l.quantity}"
                         onchange="RAI.setLineQty('${l.product_id}', this.value)"
                         onfocus="this.select()"
                         aria-label="${RAI.esc(verb)} how many of ${RAI.esc(l.name)}"
-                        class="w-20 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                        class="w-20 h-11 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     <button onclick="RAI.bumpLine('${l.product_id}', 1)" type="button"
-                        class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">+</button>
+                        class="w-11 h-11 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 text-xl font-semibold">+</button>
                     <button onclick="RAI.removeLine('${l.product_id}')" type="button" title="Take this off the list"
-                        class="w-9 h-9 rounded-lg text-gray-300 hover:text-red-600">&times;</button>
+                        class="w-11 h-11 ml-auto sm:ml-5 rounded-lg border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-300" aria-label="Take ${RAI.esc(l.name)} off the list"><i class="fas fa-trash-can" aria-hidden="true"></i></button>
                 </div>
             </div>`).join('');
     }
@@ -2609,17 +2613,55 @@
 
     RAI.count = { session: null, lines: [], pendingProduct: null };
 
-    RAI.onCountScopeChange = function () {
+    /** Manufacturers, PPG paint lines and categories this shop carries (GET /counts/scopes). */
+    RAI.countScopes = null;
+
+    RAI.onCountScopeChange = async function () {
         const scope = document.getElementById('inv-count-scope').value;
-        const el = document.getElementById('inv-count-scope-value');
-        el.classList.toggle('hidden', scope === 'all');
-        el.placeholder = scope === 'bin' ? 'Bin / shelf' : 'Category';
+        const text = document.getElementById('inv-count-scope-value');
+        const pick = document.getElementById('inv-count-scope-pick');
+        text.classList.toggle('hidden', scope !== 'bin');
+        const listed = ['brand', 'line', 'category'].includes(scope);
+        pick.classList.toggle('hidden', !listed);
+        if (!listed) return;
+
+        if (!RAI.countScopes) {
+            pick.innerHTML = '<option value="">Loading…</option>';
+            try {
+                const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/counts/scopes`);
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.error);
+                RAI.countScopes = data;
+            } catch (e) {
+                pick.innerHTML = '<option value="">Could not load the list</option>';
+                return;
+            }
+        }
+        const key = { brand: 'brands', line: 'lines', category: 'categories' }[scope];
+        const items = RAI.countScopes[key] || [];
+        const prompt = { brand: 'Pick a manufacturer', line: 'Pick a paint line', category: 'Pick a category' }[scope];
+        pick.innerHTML = items.length
+            ? `<option value="">${prompt}</option>` + items.map(o =>
+                `<option value="${RAI.esc(o.value)}">${RAI.esc(o.value)} (${o.items} item${o.items === 1 ? '' : 's'})</option>`).join('')
+            : '<option value="">None in your catalogue</option>';
+    };
+
+    RAI.countScopeText = function (s) {
+        if (!s || !s.scope_type || s.scope_type === 'all') return 'Everything at this location';
+        const kind = { brand: 'Manufacturer', line: 'Paint line', category: 'Category', bin: 'Bin', selection: 'Selected items' }[s.scope_type] || '';
+        return `${kind}: ${s.scope_value || ''}`;
     };
 
     RAI.startCount = async function () {
         if (!RAI.requireActor()) return;
         const scope = document.getElementById('inv-count-scope').value;
-        const scopeValue = (document.getElementById('inv-count-scope-value') || {}).value || '';
+        const scopeValue = ['brand', 'line', 'category'].includes(scope)
+            ? (document.getElementById('inv-count-scope-pick') || {}).value || ''
+            : (document.getElementById('inv-count-scope-value') || {}).value || '';
+        if (scope !== 'all' && !scopeValue.trim()) {
+            alert({ brand: 'Pick a manufacturer to count.', line: 'Pick a paint line to count.', category: 'Pick a category to count.', bin: 'Enter the bin or shelf to count.' }[scope] || 'Pick what to count.');
+            return;
+        }
 
         const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/counts`, {
             method: 'POST',
@@ -2673,7 +2715,7 @@
         const s = RAI.count.session;
         RAI.setText('inv-count-name', s.name || 'Count');
         RAI.setText('inv-count-meta',
-            `Started by ${s.opened_by || '—'} · ${new Date(s.created_at).toLocaleString()}`);
+            `${RAI.countScopeText(s)} · Started by ${s.opened_by || '—'} · ${new Date(s.created_at).toLocaleString()}`);
     };
 
     RAI.renderCountLines = function () {
@@ -3099,27 +3141,27 @@
         }
 
         el.innerHTML = inv.trBasket.map(l => `
-            <div class="px-4 py-3 flex items-center gap-3 ${l.product_id === inv.trActiveProductId ? 'bg-blue-50' : ''}">
-                <div class="flex-1 min-w-0">
-                    <div class="font-medium text-gray-800 truncate">${RAI.esc(l.name)}</div>
+            <div class="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 ${l.product_id === inv.trActiveProductId ? 'bg-blue-50' : ''}">
+                <div class="basis-full sm:basis-0 sm:flex-1 min-w-0">
+                    <div class="font-medium text-gray-800 sm:truncate">${RAI.esc(l.name)}</div>
                     <div class="text-xs text-gray-500">
                         ${RAI.esc(l.sku || '')}
                         ${l.on_hand !== null && l.on_hand !== undefined ? ` · on hand ${RAI.formatQty(l.on_hand)} at source` : ''}
                     </div>
                     ${l.error ? `<div class="text-xs text-red-600 mt-1">${RAI.esc(l.error)}</div>` : ''}
                 </div>
-                <div class="flex items-center gap-1 shrink-0">
+                <div class="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
                     <button onclick="RAI.bumpTransferLine('${l.product_id}', -1)" type="button"
-                        class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">&minus;</button>
+                        class="w-11 h-11 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 text-xl font-semibold">&minus;</button>
                     <input type="number" step="0.5" min="0" value="${l.quantity}"
                         onchange="RAI.setTransferLineQty('${l.product_id}', this.value)"
                         onfocus="this.select()"
                         aria-label="Move how many of ${RAI.esc(l.name)}"
-                        class="w-20 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                        class="w-20 h-11 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     <button onclick="RAI.bumpTransferLine('${l.product_id}', 1)" type="button"
-                        class="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">+</button>
+                        class="w-11 h-11 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 text-xl font-semibold">+</button>
                     <button onclick="RAI.removeTransferLine('${l.product_id}')" type="button" title="Take this off the list"
-                        class="w-9 h-9 rounded-lg text-gray-300 hover:text-red-600">&times;</button>
+                        class="w-11 h-11 ml-auto sm:ml-5 rounded-lg border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-300" aria-label="Take ${RAI.esc(l.name)} off the list"><i class="fas fa-trash-can" aria-hidden="true"></i></button>
                 </div>
             </div>`).join('');
     };
@@ -3360,23 +3402,23 @@
         el.innerHTML = inv.rcvBasket.map(l => {
             const mismatch = Number(l.quantity) !== Number(l.quantity_shipped);
             return `
-            <div class="px-4 py-3 flex items-center gap-3">
-                <div class="flex-1 min-w-0">
-                    <div class="font-medium text-gray-800 truncate">${RAI.esc(l.name)}</div>
+            <div class="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <div class="basis-full sm:basis-0 sm:flex-1 min-w-0">
+                    <div class="font-medium text-gray-800 sm:truncate">${RAI.esc(l.name)}</div>
                     <div class="text-xs text-gray-500">
                         ${RAI.esc(l.sku || '')} · from ${RAI.esc(l.from_location_name || '')} · driver ${RAI.esc(l.driver_name || 'unassigned')}
                         · shipped ${RAI.formatQty(l.quantity_shipped)}
                     </div>
                     ${mismatch ? `<div class="text-xs text-amber-600 mt-1"><i class="fas fa-triangle-exclamation mr-1"></i>Will be flagged as a discrepancy</div>` : ''}
                 </div>
-                <div class="flex items-center gap-1 shrink-0">
+                <div class="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
                     <input type="number" step="0.5" min="0.01" value="${l.quantity}"
                         onchange="RAI.setReceiveLineQty('${l.transfer_id}', this.value)"
                         onfocus="this.select()"
                         aria-label="Quantity actually received for ${RAI.esc(l.name)}"
-                        class="w-20 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none ${mismatch ? 'border-amber-400' : ''}">
+                        class="w-20 h-11 border rounded-lg px-2 py-1.5 text-center text-lg focus:ring-2 focus:ring-blue-500 focus:outline-none ${mismatch ? 'border-amber-400' : ''}">
                     <button onclick="RAI.removeReceiveLine('${l.transfer_id}')" type="button" title="Take this off the list"
-                        class="w-9 h-9 rounded-lg text-gray-300 hover:text-red-600">&times;</button>
+                        class="w-11 h-11 ml-auto sm:ml-5 rounded-lg border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-300" aria-label="Take ${RAI.esc(l.name)} off the list"><i class="fas fa-trash-can" aria-hidden="true"></i></button>
                 </div>
             </div>`;
         }).join('');
