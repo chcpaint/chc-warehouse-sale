@@ -157,6 +157,16 @@
     .keypad { grid-template-columns: repeat(3, 88px); }
     .hero h1 { font-size: 2rem; }
     button.big { min-height: 68px; font-size: 1.3rem; }
+    /* A phone: each item gets two lines -- its full name and part number on top,
+       the quantity controls underneath -- instead of the name being squeezed
+       into a sliver beside four buttons. */
+    .row { flex-wrap: wrap; gap: 10px; padding: 14px 4px; }
+    .row .info { flex: 1 1 100%; }
+    .row .nm { -webkit-line-clamp: 3; }
+    .stepper { flex: 1 1 0; min-width: 0; }
+    .stepper button { width: 52px; height: 52px; flex: 0 0 52px; }
+    .stepper input { flex: 1 1 0; width: 0; min-width: 0; height: 52px; }
+    .rm { width: 52px; height: 52px; }
     /* A phone: the label goes, the box takes the width, so a typed code is readable. */
     .scanrow label { display: none; }
     .scanrow input { flex: 1 1 auto; min-width: 0; }
@@ -947,7 +957,7 @@
   function setKeyboard(on) {
     keyboardMode = on;
     $('scan').setAttribute('inputmode', on ? 'text' : 'none');
-    $('scan').setAttribute('placeholder', on ? 'Type a code, then Enter' : '');
+    $('scan').setAttribute('placeholder', on ? 'Type a code, tap Go' : '');
     $('btn-kb').textContent = on ? 'Scanner' : 'Keyboard';
     // iOS only raises the keyboard for a focus made inside the tap itself.
     $('scan').blur(); $('scan').focus();
@@ -1078,6 +1088,9 @@
             var nr = s.data.require_badge !== false;
             cfg.idle_seconds = Number(s.data.idle_seconds) || 60;
             ordering = s.data.ordering === true; updateOrderBar();
+            // A tablet moved to another location or company shows it without a reload.
+            $('hdr-co').textContent = s.data.company;
+            $('hdr-loc').textContent = s.data.location;
             if (nr !== cfg.require_badge) { cfg.require_badge = nr; resetToStart(); }
           }
         }).catch(function () {});
