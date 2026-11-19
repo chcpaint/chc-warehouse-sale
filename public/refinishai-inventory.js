@@ -457,7 +457,7 @@
         "                                        class=\"w-full border-2 border-blue-200 rounded-lg pl-10 pr-3 py-2.5 focus:border-blue-500 focus:outline-none\"",
         "                                        onkeydown=\"if(event.key==='Enter'){event.preventDefault();RAI.countScan(this.value);}\">",
         "                                </div>",
-        "                                <input id=\"inv-count-qty\" type=\"number\" step=\"0.5\" min=\"0\" placeholder=\"Counted\"",
+        "                                <input id=\"inv-count-qty\" type=\"number\" step=\"any\" min=\"0\" inputmode=\"decimal\" placeholder=\"Qty\" aria-label=\"Quantity (optional)\" title=\"Leave empty: each scan adds 1. Or type the whole count, then scan.\"",
         "                                    class=\"w-28 border rounded-lg px-3 py-2.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none\">",
         "                                <button onclick=\"RAI.toggleCamera('count')\" type=\"button\"",
         "                                    class=\"px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white\">",
@@ -474,7 +474,7 @@
         "                                    <div id=\"inv-count-camera-flash\" class=\"absolute inset-0 bg-white opacity-0 pointer-events-none\"></div>",
         "                                </div>",
         "                                <p id=\"inv-count-camera-hint\" class=\"text-center text-xs text-gray-500 mt-2\">",
-        "                                    Enter the counted quantity above, then hold the barcode inside the green box.",
+        "                                    Each scan adds 1. Hold the barcode inside the green box; change any number in the list below.",
         "                                </p>",
         "                            </div>",
         "                            <div id=\"inv-count-feedback\" class=\"mt-3\"></div>",
@@ -485,12 +485,12 @@
         "                                <table class=\"w-full text-sm\">",
         "                                    <thead class=\"bg-gray-50 text-gray-500 text-xs uppercase tracking-wide\">",
         "                                        <tr>",
-        "                                            <th class=\"text-left px-4 py-3\">Item</th>",
-        "                                            <th class=\"text-right px-4 py-3\">System</th>",
-        "                                            <th class=\"text-right px-4 py-3\">Counted</th>",
-        "                                            <th class=\"text-right px-4 py-3\">Difference</th>",
-        "                                            <th class=\"text-left px-4 py-3\">By</th>",
-        "                                            <th class=\"px-4 py-3\"></th>",
+        "                                            <th class=\"text-left px-3 sm:px-4 py-3\">Item</th>",
+        "                                            <th class=\"text-right px-4 py-3 hidden sm:table-cell\">System</th>",
+        "                                            <th class=\"text-right px-2 sm:px-4 py-3\">Counted</th>",
+        "                                            <th class=\"text-right px-2 sm:px-4 py-3\"><span class=\"sm:hidden\">Diff</span><span class=\"hidden sm:inline\">Difference</span></th>",
+        "                                            <th class=\"text-left px-4 py-3 hidden sm:table-cell\">By</th>",
+        "                                            <th class=\"px-2 sm:px-4 py-3\"><span class=\"sr-only\">Remove</span></th>",
         "                                        </tr>",
         "                                    </thead>",
         "                                    <tbody id=\"inv-count-body\" class=\"divide-y\"></tbody>",
@@ -1766,7 +1766,7 @@
 
     /** Debounce repeated frames of the same barcode into one scan, then hand
      *  it to whichever screen's own scan handler opened this camera --
-     *  countScan's "enter the quantity first" flow if it was the Count tab,
+     *  countScan (each scan adds one; 2.5 s apart so one held barcode is not counted twice) for the Count tab,
      *  submitScan's use/receive basket otherwise. */
     RAI.onCameraCode = function (code) {
         const now = Date.now();
@@ -2688,16 +2688,22 @@
             const cls = v === 0 ? 'text-gray-400' : (v < 0 ? 'text-red-600' : 'text-green-600');
             return `
             <tr class="hover:bg-gray-50">
-                <td class="px-4 py-3">
+                <td class="px-3 sm:px-4 py-3">
                     <div class="font-medium text-gray-800">${RAI.esc(l.name || '')}</div>
                     <div class="text-xs text-gray-400 font-mono">${RAI.esc(l.sku || '')}</div>
+                    <div class="text-xs text-gray-500 sm:hidden">System ${RAI.formatQty(l.current_on_hand)}${l.counted_by ? ' · ' + RAI.esc(l.counted_by) : ''}</div>
                 </td>
-                <td class="px-4 py-3 text-right text-gray-500">${RAI.formatQty(l.current_on_hand)}</td>
-                <td class="px-4 py-3 text-right font-semibold">${RAI.formatQty(l.counted_qty)}</td>
-                <td class="px-4 py-3 text-right font-semibold ${cls}">${v > 0 ? '+' : ''}${RAI.formatQty(v)}</td>
-                <td class="px-4 py-3 text-gray-500">${RAI.esc(l.counted_by || '')}</td>
-                <td class="px-4 py-3 text-right">
-                    <button onclick="RAI.removeCountLine('${l.id}')" class="text-gray-400 hover:text-red-600" title="Remove">
+                <td class="px-4 py-3 text-right text-gray-500 hidden sm:table-cell">${RAI.formatQty(l.current_on_hand)}</td>
+                <td class="px-2 py-2 text-right">
+                    <input type="number" min="0" step="any" inputmode="decimal" value="${RAI.esc(String(Number(l.counted_qty)))}"
+                        aria-label="Counted for ${RAI.esc(l.sku || l.name || '')}"
+                        class="w-16 sm:w-20 border rounded-lg px-2 py-1.5 text-right font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        onchange="RAI.setCountLine('${l.product_id}', this.value)">
+                </td>
+                <td class="px-2 sm:px-4 py-3 text-right font-semibold ${cls}">${v > 0 ? '+' : ''}${RAI.formatQty(v)}</td>
+                <td class="px-4 py-3 text-gray-500 hidden sm:table-cell">${RAI.esc(l.counted_by || '')}</td>
+                <td class="px-2 sm:px-4 py-3 text-right">
+                    <button onclick="RAI.removeCountLine('${l.id}')" class="text-gray-400 hover:text-red-600 p-1" title="Remove" aria-label="Remove ${RAI.esc(l.sku || '')} from this count">
                         <i class="fas fa-xmark"></i>
                     </button>
                 </td>
@@ -2712,15 +2718,16 @@
         if (!code || !RAI.count.session) return;
         if (!RAI.requireActor()) return;
 
+        // Each scan adds 1 to that item. A number typed in the Qty box first is
+        // taken as the whole count for the item instead (for a shelf of 40).
         const qtyEl = document.getElementById('inv-count-qty');
-        const counted = parseFloat(qtyEl ? qtyEl.value : '');
-        if (!Number.isFinite(counted) || counted < 0) {
-            RAI.countFeedback('Enter the counted quantity first, then scan.', 'amber');
-            if (qtyEl) qtyEl.focus();
+        const typed = qtyEl && qtyEl.value !== '' ? parseFloat(qtyEl.value) : null;
+        if (typed !== null && (!Number.isFinite(typed) || typed < 0)) {
+            RAI.countFeedback('The quantity must be 0 or more.', 'amber');
             return;
         }
 
-        const lookup = await RAI.api(RAI.lookupUrl(code, 'count', { ref: RAI.count.session.id, qty: counted }));
+        const lookup = await RAI.api(RAI.lookupUrl(code, 'count', { ref: RAI.count.session.id, qty: typed }));
         const found = await lookup.json();
 
         if (lookup.status === 300 && found.ambiguous) {
@@ -2737,7 +2744,7 @@
             method: 'POST',
             body: JSON.stringify({
                 product_id: found.product.id,
-                counted_qty: counted,
+                ...(typed === null ? { add: 1 } : { counted_qty: typed }),
                 scanned_barcode: code,
                 actor_label: RAI.invActor()
             })
@@ -2746,14 +2753,27 @@
         if (!resp.ok) { RAI.beep(true); RAI.countFeedback(data.error || 'Could not record that count.', 'red'); return; }
 
         RAI.beep();
+        const counted = Number(data.counted_qty);
         const v = Number(data.variance);
         RAI.countFeedback(
-            v === 0
-                ? `${found.product.name} — matches the system (${RAI.formatQty(counted)}).`
-                : `${found.product.name} — counted ${RAI.formatQty(counted)}, system had ${RAI.formatQty(data.expected_qty)} (${v > 0 ? '+' : ''}${RAI.formatQty(v)}).`,
+            `${found.product.name}: ${RAI.formatQty(counted)} counted${typed === null ? ' (scan again to add 1, or change the number below)' : ''}. ` +
+            (v === 0 ? 'Matches the system.' : `System has ${RAI.formatQty(data.expected_qty)} (${v > 0 ? '+' : ''}${RAI.formatQty(v)}).`),
             v === 0 ? 'green' : 'amber');
 
         if (qtyEl) qtyEl.value = '';
+        RAI.loadCount();
+    };
+
+    /** Change a counted number on the line (a miscount, or a shelf counted by hand). */
+    RAI.setCountLine = async function (productId, value) {
+        if (!RAI.count.session || !RAI.requireActor()) return;
+        const n = parseFloat(value);
+        if (!Number.isFinite(n) || n < 0) { RAI.countFeedback('The quantity must be 0 or more.', 'amber'); RAI.loadCount(); return; }
+        const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/counts/${RAI.count.session.id}/lines`, {
+            method: 'POST', body: JSON.stringify({ product_id: productId, counted_qty: n, actor_label: RAI.invActor() })
+        });
+        const data = await resp.json();
+        if (!resp.ok) { RAI.countFeedback(data.error || 'Could not change that count.', 'red'); }
         RAI.loadCount();
     };
 

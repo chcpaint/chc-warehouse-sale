@@ -160,6 +160,8 @@ router.use('/', require('./report-groups-admin'));
 router.use('/uptime', require('./uptime-admin'));
 // Scans that found nothing, kept with a reason, and putting them right (migration 067).
 router.use('/scan-exceptions', require('./scan-exceptions-admin'));
+// A manager or admin correcting a finished count or a delivery (migration 069).
+router.use('/companies/:companyId/stock-corrections', require('./stock-corrections-admin'));
 router.use('/distributor-tax', require('./distributor-tax-admin'));
 router.use('/billing', require('./billing-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));

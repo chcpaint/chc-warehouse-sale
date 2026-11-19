@@ -192,7 +192,7 @@ async function recordScanException({ companyId, locationId, raw, context, contex
         if (!companyId || !code) return null;
         const canonical = canonicalBarcode(code) || code.toUpperCase();
         const ctx = contextOf(context);
-        // A count scan carries the quantity counted; anything else starts at 1.
+        // A count scan may carry the quantity counted; anything else starts at 1.
         const n = Number(qty);
         const givenQty = Number.isFinite(n) && n > 0 && n <= 100000 ? Math.round(n * 1000) / 1000 : null;
 
@@ -207,7 +207,8 @@ async function recordScanException({ companyId, locationId, raw, context, contex
             const patch = { attempts: (row.attempts || 1) + 1, last_seen_at: new Date().toISOString() };
             const who = clean(actor, 80);
             if (who) patch.actor_label = who;
-            if (givenQty && ctx === 'count') patch.qty = givenQty;
+            // A count: a typed quantity is the whole count; otherwise each scan adds one.
+            if (ctx === 'count') patch.qty = givenQty || Math.min(100000, Number(row.qty || 1) + 1);
             const { data: updated } = await supabaseAdmin.from('scan_exceptions')
                 .update(patch).eq('id', row.id).select('*').single();
             return shapeException(updated || { ...row, ...patch });

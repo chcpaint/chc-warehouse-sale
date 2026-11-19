@@ -124,6 +124,12 @@ const KNOWN_COLUMNS = {
         'movement_id', 'actor_label', 'actor_type', 'created_at',
         'exception_type', 'exception_note'
     ]),
+    // Migration 069: a manager or admin correcting a count or a delivery.
+    inventory_corrections: new Set([
+        'id', 'company_id', 'location_id', 'kind', 'count_session_id', 'count_line_id', 'order_id',
+        'product_id', 'sku', 'name', 'old_qty', 'new_qty', 'qty_change', 'movement_id', 'reason',
+        'actor_type', 'actor_label', 'admin_id', 'created_at'
+    ]),
     order_receiving_closures: new Set([
         'id', 'company_id', 'order_id', 'location_id', 'short_lines', 'note', 'closed_by', 'created_at'
     ]),
@@ -519,6 +525,8 @@ function createFakeSupabase(seed = {}) {
         cart_items: [],
         // Added by migration 067: scans that found no item.
         scan_exceptions: [], item_library: [], v_product_master: [],
+        // Added by migration 069.
+        inventory_corrections: [],
         company_catalogue_exclusions: [], company_catalogue_policy: [],
         ...clone(seed)
     };

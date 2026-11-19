@@ -213,9 +213,19 @@ router.post('/counts/:id/lines', async (req, res) => {
         const productId = req.body?.product_id;
         if (!isValidUUID(productId)) return res.status(400).json({ error: 'A valid product is required.' });
 
-        const counted = Number(req.body?.counted_qty);
+        // Two ways to count: { counted_qty } sets the number outright (typed on the
+        // line), { add: n } adds to what is already counted (each scan adds one).
+        const adding = req.body?.add !== undefined && req.body?.add !== null;
+        let counted = Number(adding ? req.body.add : req.body?.counted_qty);
         if (!Number.isFinite(counted) || counted < 0 || counted > 1000000) {
             return res.status(400).json({ error: 'Counted quantity must be between 0 and 1,000,000.' });
+        }
+        if (adding) {
+            const { data: prior } = await supabaseAdmin
+                .from('inventory_count_lines').select('counted_qty')
+                .eq('session_id', session.id).eq('product_id', productId).maybeSingle();
+            counted = round4(Number(prior?.counted_qty || 0) + counted);
+            if (counted > 1000000) return res.status(400).json({ error: 'Counted quantity must be between 0 and 1,000,000.' });
         }
 
         const { data: product } = await supabaseAdmin
@@ -255,6 +265,7 @@ router.post('/counts/:id/lines', async (req, res) => {
 
         res.status(201).json({
             line,
+            counted_qty: round4(counted),
             expected_qty: expected,
             variance: round4(counted - expected)
         });

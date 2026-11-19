@@ -126,6 +126,16 @@ test('an unknown code is kept as "Unknown code", with who scanned it and where',
     assert.equal(row.actor_label, 'Sam'); assert.equal(row.context, 'count'); assert.equal(row.intended_movement, 'count');
 });
 
+test('during a count, each scan of an unknown code adds one to what was on the shelf', async () => {
+    reset();
+    await scan('999999999993', '&context=count&context_ref=S1');
+    await scan('999999999993', '&context=count&context_ref=S1');
+    const r = await scan('999999999993', '&context=count&context_ref=S1');
+    assert.equal(fake.db.scan_exceptions.length, 1);
+    assert.equal(r.body.exception.qty, 3);
+    assert.equal(r.body.exception.attempts, 3);
+});
+
 test('scanning the same code again counts an attempt rather than making another issue', async () => {
     reset();
     await scan('999999999993'); const r = await scan('999999999993');

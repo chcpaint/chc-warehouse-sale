@@ -316,6 +316,12 @@ const ORDER_DESK_ALLOW = [
     // still refuses order_desk, and group changes need a full admin.
     ['GET', /^\/companies\/[^/]+\/people\/(activity|groups|logins)$/],
     ['GET', /^\/companies\/[^/]+\/people\/users\/[^/]+$/],
+    // Correcting a finished count or a delivery, from the Orders screen.
+    // Reachability only -- routes/stock-corrections-admin.js scopes every
+    // request like the Orders screen and lets only managers change anything.
+    ['GET', /^\/companies\/[^/]+\/stock-corrections\/(counts|orders)(\/[^/]+)?$/],
+    ['POST', /^\/companies\/[^/]+\/stock-corrections\/counts\/[^/]+\/lines\/[^/]+$/],
+    ['POST', /^\/companies\/[^/]+\/stock-corrections\/orders\/[^/]+$/],
     ['GET', /^\/whoami$/],
     ['PUT', /^\/me\/password$/]
 ];

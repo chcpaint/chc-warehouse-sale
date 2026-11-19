@@ -267,6 +267,40 @@ test('re-counting an item replaces its line rather than adding a second', async 
     assert.equal(Number(fake.db.inventory_count_lines[0].counted_qty), 9);
 });
 
+test('each scan adds one: { add: 1 } counts up on the same line', async () => {
+    reset();
+    await receive(PRODUCT_ID, 10);
+    const session = (await openCount()).body.session;
+    const scan = () => request(app()).post(`${S}/counts/${session.id}/lines`)
+        .send({ product_id: PRODUCT_ID, add: 1, actor_label: 'Dana' });
+
+    const first = await scan();
+    assert.equal(first.status, 201);
+    assert.equal(first.body.counted_qty, 1);
+    await scan();
+    const third = await scan();
+    assert.equal(third.body.counted_qty, 3);
+    assert.equal(third.body.variance, -7);
+    assert.equal(fake.db.inventory_count_lines.length, 1);
+    assert.equal(Number(fake.db.inventory_count_lines[0].counted_qty), 3);
+
+    // Typing a number on the line then sets it outright.
+    const typed = await request(app()).post(`${S}/counts/${session.id}/lines`)
+        .send({ product_id: PRODUCT_ID, counted_qty: 10, actor_label: 'Dana' });
+    assert.equal(typed.body.counted_qty, 10);
+    assert.equal(typed.body.variance, 0);
+    // And nothing touches stock until the count is committed.
+    assert.equal(Number(fake.db.inventory_levels[0].on_hand), 10);
+});
+
+test('an add below zero is refused', async () => {
+    reset();
+    const session = (await openCount()).body.session;
+    const res = await request(app()).post(`${S}/counts/${session.id}/lines`)
+        .send({ product_id: PRODUCT_ID, add: -1, actor_label: 'Dana' });
+    assert.equal(res.status, 400);
+});
+
 test('a category-scoped count refuses items outside it', async () => {
     reset();
     const session = (await openCount({ scope_type: 'category', scope_value: 'Colour' })).body.session;

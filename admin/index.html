@@ -1102,6 +1102,9 @@
                                 <button id="grp-branch" onclick="setOrderGroup('branch', this)" class="px-3 py-1.5 bg-blue-700 text-white font-semibold"><i class="fas fa-warehouse mr-1"></i>By CHC Branch</button>
                                 <button id="grp-all" onclick="setOrderGroup('all', this)" class="px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50">All</button>
                             </div>
+                            <button onclick="openStockCounts()" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50" title="See a customer's stock counts and correct a miscount">
+                                <i class="fas fa-clipboard-check mr-1"></i> Stock counts
+                            </button>
                             <button onclick="toggleLocationSummary()" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
                                 <i class="fas fa-chart-bar mr-1"></i> By Location
                             </button>
@@ -2356,6 +2359,26 @@
                 <button onclick="saveOrderPricing()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">Save Pricing</button>
             </div>
 
+            <div id="od-recv" class="hidden mb-6">
+                <h4 class="text-sm font-bold text-gray-700 mb-1">Received at the shop</h4>
+                <p id="od-recv-help" class="text-xs text-gray-500 mb-2"></p>
+                <div class="overflow-x-auto border rounded-lg mb-2">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-xs text-gray-500"><tr><th class="px-2 py-1.5 text-left">Item</th><th class="px-2 py-1.5 text-right">Ordered</th><th class="px-2 py-1.5 text-right">Received</th><th id="od-recv-fix-h" class="px-2 py-1.5 text-right hidden">Really received</th></tr></thead>
+                        <tbody id="od-recv-body"></tbody>
+                    </table>
+                </div>
+                <div id="od-recv-save" class="hidden flex flex-wrap items-end gap-2 mb-2">
+                    <div class="flex-1 min-w-[12rem]">
+                        <label for="od-recv-reason" class="block text-xs font-medium text-gray-600 mb-1">Why (required, kept with the correction)</label>
+                        <input type="text" id="od-recv-reason" maxlength="300" placeholder="e.g. scanned twice, only 4 came off the truck" class="w-full px-3 py-2 border rounded-lg text-sm">
+                    </div>
+                    <button type="button" onclick="saveReceivingCorrections()" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">Correct received</button>
+                </div>
+                <div id="od-recv-msg" class="text-sm"></div>
+                <div id="od-recv-history" class="text-xs text-gray-500 space-y-1 mt-2"></div>
+            </div>
+
             <h4 class="text-sm font-bold text-gray-700 mb-2">Notes</h4>
             <div id="od-original-note-wrap" class="hidden mb-2 p-2 rounded-lg bg-amber-50 text-sm text-amber-900">
                 <span class="font-semibold">At checkout:</span> <span id="od-original-note"></span>
@@ -2365,6 +2388,18 @@
                 <textarea id="od-new-note" rows="2" placeholder="Add a note — a return to pick up, pricing on a non-catalog item, etc. The customer will be emailed." class="flex-1 px-3 py-2 border rounded-lg text-sm"></textarea>
                 <button onclick="addOrderNoteFromAdmin()" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">Add Note</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Stock counts: a manager or admin correcting a finished count (migration 069) -->
+    <div id="stock-counts-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-bold"><i class="fas fa-clipboard-check text-blue-500 mr-2"></i>Stock counts <span id="sc-company" class="text-gray-500 font-normal text-base"></span></h3>
+                <button onclick="hideModal('stock-counts-modal')" class="text-gray-400 hover:text-gray-600" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <p id="sc-help" class="text-sm text-gray-500 mb-4"></p>
+            <div id="sc-body"></div>
         </div>
     </div>
 
@@ -9787,6 +9822,180 @@
         renderOrderDetailItems(o);
         renderOrderDetailNotes(o);
         showModal('order-detail-modal');
+        loadOrderReceiving();
+    }
+
+    // ------------------------------------------------------------
+    // Received at the shop: a manager or admin correcting a delivery the
+    // shop posted wrong (routes/stock-corrections-admin.js, migration 069).
+    // ------------------------------------------------------------
+    let odRecv = null;
+    const fmtQty = n => { const v = Number(n); return Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000); };
+
+    async function loadOrderReceiving() {
+        const box = document.getElementById('od-recv');
+        box.classList.add('hidden');
+        document.getElementById('od-recv-msg').innerHTML = '';
+        odRecv = null;
+        if (!orderDetailCtx) return;
+        const ctx = orderDetailCtx;
+        try {
+            const r = await adminFetch(`/companies/${ctx.companyId}/stock-corrections/orders/${ctx.orderId}`);
+            if (!r.ok) return;
+            const d = await r.json();
+            if (orderDetailCtx !== ctx || !d.receipt_count) return;   // nothing scanned in against this order
+            odRecv = d;
+            renderOrderReceiving();
+            box.classList.remove('hidden');
+        } catch (e) { /* section stays hidden */ }
+    }
+
+    function renderOrderReceiving() {
+        const d = odRecv; if (!d) return;
+        const fix = d.can_correct;
+        document.getElementById('od-recv-help').textContent = fix
+            ? 'What the shop scanned in against this order. If staff got a number wrong, type the right number and say why: stock at the shop moves by the difference, and the change is kept with your name.'
+            : 'What the shop scanned in against this order. A manager or admin can correct a number posted wrong.';
+        document.getElementById('od-recv-fix-h').classList.toggle('hidden', !fix);
+        document.getElementById('od-recv-save').classList.toggle('hidden', !fix);
+        document.getElementById('od-recv-reason').value = '';
+        document.getElementById('od-recv-body').innerHTML = d.lines.map((l, i) => `
+            <tr class="border-t">
+                <td class="px-2 py-1.5">${esc(l.name || '')}<div class="text-xs text-gray-400">${esc(l.sku || '')}${l.on_order ? '' : ' · not on the order'}</div></td>
+                <td class="px-2 py-1.5 text-right">${l.on_order ? fmtQty(l.quantity_ordered) : '—'}</td>
+                <td class="px-2 py-1.5 text-right font-semibold">${fmtQty(l.quantity_received)}${l.damaged ? `<div class="text-xs text-red-600 font-normal">${fmtQty(l.damaged)} damaged</div>` : ''}</td>
+                ${fix ? `<td class="px-2 py-1.5 text-right"><input type="number" min="0" step="any" inputmode="decimal" id="od-recv-q-${i}" aria-label="Really received of ${esc(l.sku || l.name || '')}" placeholder="${fmtQty(l.quantity_received)}" class="w-20 px-2 py-1 border rounded text-sm text-right"></td>` : ''}
+            </tr>`).join('');
+        document.getElementById('od-recv-history').innerHTML = (d.corrections || []).map(c =>
+            `<div><i class="fas fa-pen text-amber-600 mr-1"></i>${esc(c.sku || '')}: ${fmtQty(c.old_qty)} → ${fmtQty(c.new_qty)} by ${esc(c.actor_label || 'admin')}, ${new Date(c.created_at).toLocaleString()} · ${esc(c.reason || '')}</div>`).join('');
+    }
+
+    async function saveReceivingCorrections() {
+        const d = odRecv; if (!d || !orderDetailCtx) return;
+        const msg = document.getElementById('od-recv-msg');
+        const reason = document.getElementById('od-recv-reason').value.trim();
+        const changes = [];
+        d.lines.forEach((l, i) => {
+            const el = document.getElementById(`od-recv-q-${i}`);
+            if (!el || el.value === '') return;
+            const n = Number(el.value);
+            if (Number.isFinite(n) && n !== Number(l.quantity_received)) changes.push({ l, n });
+        });
+        if (!changes.length) { msg.innerHTML = '<span class="text-gray-500">Type the right number next to the item that was posted wrong.</span>'; return; }
+        if (reason.length < 3) { msg.innerHTML = '<span class="text-red-600">Say why it is being corrected.</span>'; return; }
+        const done = [], failed = [];
+        for (const { l, n } of changes) {
+            try {
+                const r = await adminFetch(`/companies/${orderDetailCtx.companyId}/stock-corrections/orders/${orderDetailCtx.orderId}`, {
+                    method: 'POST', body: JSON.stringify({ product_id: l.product_id, received_qty: n, reason })
+                });
+                const out = await r.json();
+                (r.ok ? done : failed).push(r.ok ? out.message : `${l.sku}: ${out.error || 'not saved'}`);
+            } catch (e) { failed.push(`${l.sku}: not saved`); }
+        }
+        await loadOrderReceiving();
+        msg.innerHTML = [...done.map(t => `<div class="text-green-700">${esc(t)}</div>`), ...failed.map(t => `<div class="text-red-600">${esc(t)}</div>`)].join('');
+    }
+
+    // ------------------------------------------------------------
+    // Stock counts: the customer's counts, and correcting a miscount after
+    // the count was committed (routes/stock-corrections-admin.js).
+    // ------------------------------------------------------------
+    let scCtx = { companyId: null, counts: [], count: null, can_correct: false };
+    const scWhen = t => t ? new Date(t).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+
+    async function openStockCounts() {
+        const sel = document.getElementById('admin-order-company');
+        const companyId = sel ? sel.value : '';
+        const body = document.getElementById('sc-body');
+        document.getElementById('sc-company').textContent = companyId ? '· ' + (sel.options[sel.selectedIndex]?.textContent || '') : '';
+        showModal('stock-counts-modal');
+        if (!companyId) {
+            document.getElementById('sc-help').textContent = '';
+            body.innerHTML = '<p class="text-sm text-gray-600">Pick a customer in the Orders filter first, then open Stock counts.</p>';
+            return;
+        }
+        scCtx = { companyId, counts: [], count: null, can_correct: false };
+        body.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
+        try {
+            const r = await adminFetch(`/companies/${companyId}/stock-corrections/counts`);
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Could not load counts.');
+            scCtx.counts = d.counts || []; scCtx.can_correct = d.can_correct;
+            document.getElementById('sc-help').textContent = d.can_correct
+                ? 'Open a count to see each item counted. If staff miscounted, type the right number and say why. A committed count is corrected by moving stock by the difference; an open one is simply changed.'
+                : 'Open a count to see each item counted. A manager or admin can correct a miscount.';
+            if (!scCtx.counts.length) { body.innerHTML = '<p class="text-sm text-gray-600">This customer has no stock counts yet.</p>'; return; }
+            body.innerHTML = `<div class="border rounded-lg overflow-hidden"><table class="w-full text-sm">
+                <thead class="bg-gray-50 text-xs text-gray-500"><tr><th class="px-3 py-2 text-left">Count</th><th class="px-3 py-2 text-left">Location</th><th class="px-3 py-2 text-left">Status</th><th class="px-3 py-2 text-right">Items</th><th class="px-3 py-2"></th></tr></thead>
+                <tbody>${scCtx.counts.map(c => `<tr class="border-t">
+                    <td class="px-3 py-2"><div class="font-medium text-gray-800">${esc(c.name || 'Count')}</div><div class="text-xs text-gray-500">${esc(scWhen(c.committed_at || c.created_at))}${c.committed_by || c.opened_by ? ' · ' + esc(c.committed_by || c.opened_by) : ''}</div></td>
+                    <td class="px-3 py-2">${esc(c.location_name || '')}</td>
+                    <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded-full ${c.status === 'open' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}">${c.status === 'open' ? 'Counting' : 'Committed'}</span></td>
+                    <td class="px-3 py-2 text-right">${c.line_count || ''}</td>
+                    <td class="px-3 py-2 text-right"><button onclick="openStockCount('${esc(c.id)}')" class="text-blue-700 hover:underline text-sm font-medium">Open</button></td>
+                </tr>`).join('')}</tbody></table></div>`;
+        } catch (err) { body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`; }
+    }
+
+    async function openStockCount(sessionId, flash) {
+        const body = document.getElementById('sc-body');
+        body.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
+        try {
+            const r = await adminFetch(`/companies/${scCtx.companyId}/stock-corrections/counts/${sessionId}`);
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Could not load that count.');
+            scCtx.count = d;
+            const fix = d.can_correct && d.installed !== false;
+            const s = d.session;
+            body.innerHTML = `
+                <button onclick="openStockCounts()" class="text-sm text-blue-700 hover:underline mb-3"><i class="fas fa-arrow-left mr-1"></i>All counts</button>
+                <div class="mb-3"><div class="font-semibold text-gray-800">${esc(s.name || 'Count')} · ${esc(s.location_name || '')}</div>
+                    <div class="text-xs text-gray-500">${s.status === 'open' ? 'Still counting' : 'Committed ' + esc(scWhen(s.committed_at)) + (s.committed_by ? ' by ' + esc(s.committed_by) : '')}</div></div>
+                ${d.installed === false && d.can_correct ? '<div class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Run migrations/069_inventory_corrections.sql in Supabase to turn corrections on.</div>' : ''}
+                <div class="overflow-x-auto border rounded-lg mb-3"><table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-xs text-gray-500"><tr><th class="px-2 py-1.5 text-left">Item</th><th class="px-2 py-1.5 text-right">Counted</th><th class="px-2 py-1.5 text-right">System had</th><th class="px-2 py-1.5 text-right">On hand now</th>${fix ? '<th class="px-2 py-1.5 text-right">Right count</th>' : ''}</tr></thead>
+                    <tbody>${d.lines.map((l, i) => `<tr class="border-t">
+                        <td class="px-2 py-1.5">${esc(l.name || '')}<div class="text-xs text-gray-400">${esc(l.sku || '')}${l.counted_by ? ' · ' + esc(l.counted_by) : ''}${l.corrected ? ' · <span class="text-amber-700">corrected</span>' : ''}</div></td>
+                        <td class="px-2 py-1.5 text-right font-semibold">${fmtQty(l.counted_qty)}</td>
+                        <td class="px-2 py-1.5 text-right text-gray-500">${l.expected_qty === null ? '—' : fmtQty(l.expected_qty)}</td>
+                        <td class="px-2 py-1.5 text-right">${l.on_hand_now === null ? '—' : fmtQty(l.on_hand_now)}</td>
+                        ${fix ? `<td class="px-2 py-1.5 text-right"><input type="number" min="0" step="any" inputmode="decimal" id="sc-q-${i}" aria-label="Right count for ${esc(l.sku || l.name || '')}" placeholder="${fmtQty(l.counted_qty)}" class="w-20 px-2 py-1 border rounded text-sm text-right"></td>` : ''}
+                    </tr>`).join('') || '<tr><td colspan="5" class="text-center text-gray-400 py-3">Nothing counted yet.</td></tr>'}</tbody></table></div>
+                ${fix ? `<div class="flex flex-wrap items-end gap-2 mb-2">
+                    <div class="flex-1 min-w-[12rem]"><label for="sc-reason" class="block text-xs font-medium text-gray-600 mb-1">Why (required, kept with the correction)</label>
+                    <input type="text" id="sc-reason" maxlength="300" placeholder="e.g. recounted the shelf, 2 were behind the door" class="w-full px-3 py-2 border rounded-lg text-sm"></div>
+                    <button type="button" onclick="saveCountCorrections()" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">Correct count</button></div>` : ''}
+                <div id="sc-msg" class="text-sm">${flash || ''}</div>
+                <div class="text-xs text-gray-500 space-y-1 mt-2">${(d.corrections || []).map(c =>
+                    `<div><i class="fas fa-pen text-amber-600 mr-1"></i>${esc(c.sku || '')}: ${fmtQty(c.old_qty)} → ${fmtQty(c.new_qty)} by ${esc(c.actor_label || 'admin')}, ${esc(scWhen(c.created_at))} · ${esc(c.reason || '')}</div>`).join('')}</div>`;
+        } catch (err) { body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`; }
+    }
+
+    async function saveCountCorrections() {
+        const d = scCtx.count; if (!d) return;
+        const msg = document.getElementById('sc-msg');
+        const reason = (document.getElementById('sc-reason') || {}).value?.trim() || '';
+        const changes = [];
+        d.lines.forEach((l, i) => {
+            const el = document.getElementById(`sc-q-${i}`);
+            if (!el || el.value === '') return;
+            const n = Number(el.value);
+            if (Number.isFinite(n) && n !== Number(l.counted_qty)) changes.push({ l, n });
+        });
+        if (!changes.length) { msg.innerHTML = '<span class="text-gray-500">Type the right number next to the item that was miscounted.</span>'; return; }
+        if (reason.length < 3) { msg.innerHTML = '<span class="text-red-600">Say why it is being corrected.</span>'; return; }
+        const out = [];
+        for (const { l, n } of changes) {
+            try {
+                const r = await adminFetch(`/companies/${scCtx.companyId}/stock-corrections/counts/${d.session.id}/lines/${l.id}`, {
+                    method: 'POST', body: JSON.stringify({ counted_qty: n, reason })
+                });
+                const j = await r.json();
+                out.push(r.ok ? `<div class="text-green-700">${esc(l.sku || '')}: ${esc(j.message)}</div>` : `<div class="text-red-600">${esc(l.sku || '')}: ${esc(j.error || 'not saved')}</div>`);
+            } catch (e) { out.push(`<div class="text-red-600">${esc(l.sku || '')}: not saved</div>`); }
+        }
+        openStockCount(d.session.id, out.join(''));
     }
 
     function renderOrderDetailItems(o) {

@@ -426,7 +426,8 @@ router.get('/exceptions', async (req, res) => {
             if (r.exception_type === 'damaged') {
                 out.push({ type: 'damaged', order_id: r.order_id, sku: r.sku, name: r.name, quantity: Number(r.quantity_received),
                            note: r.exception_note, by: r.actor_label, at: r.created_at });
-            } else if (r.unexpected_item) {
+            } else if (r.unexpected_item && r.exception_type !== 'correction') {
+                // A manager's correction (migration 069) is not a new extra item.
                 out.push({ type: 'not_ordered', order_id: r.order_id, sku: r.sku, name: r.name, quantity: Number(r.quantity_received),
                            note: null, by: r.actor_label, at: r.created_at });
             }
