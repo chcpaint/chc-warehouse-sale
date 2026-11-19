@@ -779,3 +779,14 @@ test('the Done bar on every company panel sits flush with the bottom, not 24px a
     assert.match(html, /'sticky -bottom-6 -mx-6 -mb-6 mt-6/);
     assert.ok(!/'sticky bottom-0 -mx-6 -mb-6/.test(html));
 });
+
+test('a badge code with text glued on by a phone keyboard or autofill still reads as the badge', () => {
+    const { normalizeBadgeCode, looksLikeBadge } = require('../utils/scan-out');
+    assert.equal(normalizeBadgeCode('ID-ZLB34WFWadam@chcpaint.'), 'ID-ZLB34WFW');   // seen 19 Nov 2026 on an iPhone
+    assert.equal(normalizeBadgeCode('ID-ZLB34WFW com'), 'ID-ZLB34WFW');
+    assert.ok(looksLikeBadge('ID-ZLB34WFWadam@chcpaint.'));
+    assert.equal(normalizeBadgeCode('ID-ZLB34WFW'), 'ID-ZLB34WFW');
+    assert.equal(looksLikeBadge('051131306691'), false, 'a product barcode is never a badge');
+    const page = require('fs').readFileSync(require('path').join(__dirname, '../public/kiosk.html'), 'utf8');
+    assert.match(page, /id="scan" name="kiosk-code"[^>]*autocomplete="off"[^>]*data-1p-ignore/);
+});

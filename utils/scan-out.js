@@ -43,6 +43,11 @@ function normalizeBadgeCode(raw) {
         .replace(/[^\x21-\x7e]/g, '')
         .toUpperCase()
         .slice(0, 40);
+    // Every badge we issue is exactly ID- plus 8 characters. A phone keyboard or
+    // autofill can glue extra text onto a typed code ("ID-ZLB34WFWadam@..."), so a
+    // code that STARTS with a whole badge code is read as that badge.
+    const issued = s.match(new RegExp('^' + BADGE_PREFIX + '[' + BADGE_ALPHABET + ']{' + BADGE_RANDOM_LEN + '}'));
+    if (issued) return issued[0];
     return /^[A-Z0-9-]{6,32}$/.test(s) ? s : '';
 }
 
