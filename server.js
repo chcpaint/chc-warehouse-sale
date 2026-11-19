@@ -12,6 +12,10 @@ const adminRoutes = require('./routes/admin');
 const { resolveDistributor } = require('./utils/tenant');
 
 const app = express();
+
+// This deploy's version: the commit Railway built, or the start time.
+const ASSET_VERSION = String(process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 12).replace(/[^a-zA-Z0-9]/g, '')
+    || Date.now().toString(36);
 const PORT = process.env.PORT || 3000;
 
 // Trust proxy for Railway (required for rate limiting and correct IP detection)
@@ -191,6 +195,11 @@ app.use('/api/help', require('./routes/help'));
 app.use('/api/admin', adminRoutes);
 
 // Health check
+// Which deploy is running, so an open page can tell when it is out of date.
+app.get('/api/version', (req, res) => {
+    res.set('Cache-Control', 'no-store').json({ version: ASSET_VERSION });
+});
+
 app.get('/api/health', (req, res) => {
     res.json({ status: 'healthy', timestamp: new Date().toISOString(), version: '3.0.0' });
 });
@@ -243,14 +252,24 @@ app.get(['/kiosk', '/kiosk/:token'], (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'kiosk.html'));
 });
 
-// Company storefront (slug-based routing)
-app.get('/store/:slug', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'store.html'));
-});
-
-app.get('/store/:slug/*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'store.html'));
-});
+// Company storefront (slug-based routing).
+//
+// The page names its scripts with this deploy's version (?v=...), so a phone
+// or a home-screen app that kept yesterday's copy cannot keep running old
+// code after a deploy. The page itself is always re-checked (no-cache).
+let storeHtml = null;
+function storePage(req, res) {
+    if (!storeHtml || process.env.NODE_ENV !== 'production') {
+        storeHtml = require('fs').readFileSync(path.join(__dirname, 'public', 'store.html'), 'utf8')
+            .replace(/__ASSET_VERSION__/g, ASSET_VERSION)
+            // Every script and stylesheet of our own gets this deploy's version.
+            .replace(/(<script src="\/[a-z0-9-]+\.js)(")/g, `$1?v=${ASSET_VERSION}$2`)
+            .replace(/(<link rel="stylesheet" href="\/[a-z0-9-]+\.css)(")/g, `$1?v=${ASSET_VERSION}$2`);
+    }
+    res.set('Cache-Control', 'no-cache').type('html').send(storeHtml);
+}
+app.get('/store/:slug', storePage);
+app.get('/store/:slug/*', storePage);
 
 // Vulnerability disclosure (RFC 9116). Served explicitly: express.static skips
 // dot-folders, and the catch-all below would otherwise answer with a web page.

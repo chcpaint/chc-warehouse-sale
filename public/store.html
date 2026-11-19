@@ -3986,7 +3986,8 @@
 
     function loadInventoryModule() {
         return new Promise((resolve, reject) => {
-            const src = '/refinishai-inventory.js';
+            const v = window.RAI_ASSET_VERSION && window.RAI_ASSET_VERSION.indexOf('__') !== 0 ? window.RAI_ASSET_VERSION : '';
+            const src = '/refinishai-inventory.js' + (v ? '?v=' + encodeURIComponent(v) : '');
             if (document.querySelector(`script[src="${src}"]`)) return resolve();
             const el = document.createElement('script');
             el.src = src;
@@ -4023,7 +4024,39 @@
     <script src="/purchase-report.js"></script>
     <script src="/accounting-export.js"></script>
     <script src="/support-footer.js"></script>
+    <script>window.RAI_ASSET_VERSION = '__ASSET_VERSION__';</script>
     <script src="/numpad.js"></script>
+    <script>
+    // An open tab or home-screen app can sit on yesterday's code for days.
+    // When the phone comes back to the page, ask which deploy is live; if it
+    // changed, offer a one-tap refresh (never forced, so nothing half-typed
+    // is lost).
+    (function () {
+        var mine = window.RAI_ASSET_VERSION;
+        if (!mine || mine.indexOf('__') === 0) return;
+        var shown = false, last = 0;
+        function check() {
+            if (shown || document.hidden || Date.now() - last < 60000) return;
+            last = Date.now();
+            fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+                if (!d || !d.version || d.version === mine || shown) return;
+                shown = true;
+                var bar = document.createElement('div');
+                bar.setAttribute('role', 'status');
+                bar.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:9997;' +
+                    'max-width:520px;margin:0 auto;background:#1e3a8a;color:#fff;border-radius:14px;padding:12px 14px;display:flex;gap:12px;' +
+                    'align-items:center;box-shadow:0 8px 24px rgba(15,23,42,.3);font-size:15px';
+                bar.innerHTML = '<span style="flex:1">An update is ready.</span>' +
+                    '<button type="button" style="background:#fff;color:#1e3a8a;border:0;border-radius:10px;padding:10px 14px;font-weight:700">Refresh</button>';
+                bar.querySelector('button').addEventListener('click', function () { location.reload(); });
+                document.body.appendChild(bar);
+            }).catch(function () { /* offline: try again later */ });
+        }
+        document.addEventListener('visibilitychange', check);
+        window.addEventListener('focus', check);
+        setInterval(check, 15 * 60000);
+    })();
+    </script>
     <script src="/help-content.js"></script>
     <script src="/help-bot.js"></script>
 </body>

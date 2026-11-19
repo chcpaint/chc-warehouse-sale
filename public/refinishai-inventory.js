@@ -2299,11 +2299,11 @@
         const level = inv.stock.find(l => l.product_id === productId);
         if (!level) return;
 
-        const min = prompt(`Minimum for ${level.product_name}\n\nReorder when on-hand falls to this number. Leave blank for no automatic reorder.`,
-            level.min_point ?? '');
+        const min = await RAI.askNumber(`Minimum for ${level.product_name}`,
+            'Reorder when on-hand falls to this number. Leave blank for no automatic reorder.', level.min_point ?? '');
         if (min === null) return;
-        const max = prompt(`Maximum for ${level.product_name}\n\nWhen it reorders, it orders back up to this number.`,
-            level.max_point ?? '');
+        const max = await RAI.askNumber(`Maximum for ${level.product_name}`,
+            'When it reorders, it orders back up to this number.', level.max_point ?? '');
         if (max === null) return;
         const bin = prompt(`Shelf / bin for ${level.product_name}`, level.bin_location ?? '');
         if (bin === null) return;
@@ -2458,7 +2458,8 @@
     }
 
     RAI.rejectReplenishment = async function (orderId) {
-        const reason = prompt('Why is this reorder being rejected?');
+        const reason = await RAI.askReason('Why is this reorder being rejected?',
+            ['Not needed right now', 'Already ordered another way', 'Wrong quantity', 'Wrong item']);
         if (reason === null) return;
         if (!reason.trim()) { alert('A reason is required.'); return; }
 
@@ -2593,6 +2594,26 @@
     // ------------------------------------------------------------
     // SMALL HELPERS
     // ------------------------------------------------------------
+    /**
+     * A reason picked from big buttons (RAINumpad.choose, public/numpad.js), so
+     * it can be answered on a phone whose keyboard is hidden by a plugged-in
+     * scanner. Falls back to prompt() if the pad script is not on the page.
+     */
+    RAI.askReason = function (title, options) {
+        if (window.RAINumpad && window.RAINumpad.choose) {
+            return window.RAINumpad.choose({ title, options, other: 'Or type another reason' });
+        }
+        return Promise.resolve(prompt(title));
+    };
+
+    /** A number from the on-screen pad on a phone, or prompt() on a computer. Resolves '' for blank, null for cancel. */
+    RAI.askNumber = function (title, help, current) {
+        if (window.RAINumpad && window.RAINumpad.isTouch && window.RAINumpad.isTouch()) {
+            return window.RAINumpad.askNumber(`${title}: ${help}`, current, {});
+        }
+        return Promise.resolve(prompt(`${title}\n\n${help}`, current));
+    };
+
     RAI.formatQty = function (n) {
         const v = Number(n || 0);
         return Number.isInteger(v) ? String(v) : String(Math.round(v * 10000) / 10000);
@@ -2862,7 +2883,8 @@
 
     RAI.cancelCount = async function () {
         if (!RAI.count.session || !RAI.requireActor()) return;
-        const reason = prompt('Why is this count being cancelled?');
+        const reason = await RAI.askReason('Why is this count being cancelled?',
+            ['Started by mistake', 'Picked the wrong manufacturer or category', 'Will count again later', 'Count was interrupted']);
         if (reason === null) return;
         if (!reason.trim()) { alert('A reason is required.'); return; }
 
