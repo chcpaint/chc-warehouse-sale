@@ -121,10 +121,10 @@
     <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-blue-700">
         <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4">
             <!-- Dual Logo Area -->
-            <div class="flex items-center justify-center gap-4 mb-6">
-                <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-14 object-contain" onerror="this.style.display='none'">
-                <div class="h-10 w-px bg-gray-300" id="logo-divider" style="display:none"></div>
-                <img id="login-company-logo" src="" alt="" class="h-14 object-contain" style="display:none">
+            <div class="flex items-center justify-center gap-4 mb-6 min-w-0">
+                <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-14 w-auto max-w-[42%] min-w-0 object-contain" onerror="this.style.display='none'">
+                <div class="h-10 w-px bg-gray-300 shrink-0" id="logo-divider" style="display:none"></div>
+                <img id="login-company-logo" src="" alt="" class="h-14 w-auto max-w-[52%] min-w-0 object-contain" style="display:none">
             </div>
             <h2 id="login-company-name" class="text-2xl font-bold text-center text-gray-800 mb-2">Welcome</h2>
             <p class="text-gray-500 text-center mb-6">Enter your access code to continue</p>
@@ -249,20 +249,20 @@
             <div class="max-w-7xl mx-auto px-4 py-3">
                 <div class="flex items-center justify-between">
                     <!-- Dual Logo -->
-                    <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                         <button onclick="openDrawer()" id="drawer-btn" aria-label="Open menu"
                                 aria-expanded="false" aria-controls="drawer"
                                 class="nav-tap -ml-2 mr-1 text-gray-500 hover:text-blue-700 hover:bg-gray-100 rounded-lg px-3">
                             <i class="fas fa-bars text-lg"></i>
                         </button>
-                        <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-10 object-contain" onerror="this.parentElement.innerHTML='<span class=\'font-bold text-blue-900 text-xl\'>CHC</span>'">
-                        <div class="h-8 w-px bg-gray-300" id="header-logo-divider" style="display:none"></div>
-                        <img id="header-company-logo" src="" alt="" class="h-10 object-contain" style="display:none">
-                        <span id="header-company-name" class="font-semibold text-gray-700 text-lg"></span>
+                        <img src="/assets/chc-logo.png" alt="CHC Paint" class="h-8 sm:h-10 w-auto max-w-[28%] sm:max-w-none min-w-0 object-contain" onerror="this.parentElement.innerHTML='<span class=\'font-bold text-blue-900 text-xl\'>CHC</span>'">
+                        <div class="h-8 w-px bg-gray-300 shrink-0" id="header-logo-divider" style="display:none"></div>
+                        <img id="header-company-logo" src="" alt="" class="h-8 sm:h-10 w-auto max-w-[40%] sm:max-w-none min-w-0 object-contain" style="display:none">
+                        <span id="header-company-name" class="font-semibold text-gray-700 text-base sm:text-lg truncate min-w-0"></span>
                     </div>
 
                     <!-- Cart & User Info -->
-                    <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2 sm:gap-4 shrink-0 ml-2">
                         <span id="header-user-name" class="hidden sm:inline text-sm text-gray-500"></span>
                         <button id="team-btn" onclick="openTeam()" class="hidden text-gray-500 hover:text-blue-700 text-sm" title="Manage your team">
                             <i class="fas fa-user-group"></i> Team
@@ -274,8 +274,8 @@
                             <i class="fas fa-shopping-cart"></i>
                             <span id="cart-badge" class="hidden absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center cart-count">0</span>
                         </button>
-                        <button onclick="logout()" class="text-gray-400 hover:text-gray-600 text-sm">
-                            <i class="fas fa-sign-out-alt"></i> Logout
+                        <button onclick="logout()" class="text-gray-400 hover:text-gray-600 text-sm px-1" aria-label="Log out">
+                            <i class="fas fa-sign-out-alt"></i><span class="hidden sm:inline"> Logout</span>
                         </button>
                     </div>
                 </div>
@@ -1285,6 +1285,8 @@
             logo.alt = state.company.name;
             logo.style.display = 'block';
             document.getElementById('header-logo-divider').style.display = 'block';
+            // On a phone the logo already says who this is; the name returns on wider screens.
+            document.getElementById('header-company-name').classList.add('hidden', 'sm:inline');
         }
 
         // Cart is shared with everyone else signed in to this account (see

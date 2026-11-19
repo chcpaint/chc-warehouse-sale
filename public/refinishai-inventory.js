@@ -82,7 +82,7 @@
         "                    <div class=\"text-sm text-gray-500 border-l pl-3\">",
         "                        <i class=\"fas fa-location-dot mr-1\"></i><span id=\"inv-location-name\">\u2014</span>",
         "                    </div>",
-        "                    <div class=\"ml-auto flex gap-1 text-sm\">",
+        "                    <div class=\"w-full lg:w-auto lg:ml-auto flex flex-wrap gap-1 text-sm\">",
         "                        <button onclick=\"RAI.showInvView('scan')\" data-invview=\"scan\"",
         "                            class=\"px-3 py-1.5 rounded-lg hover:bg-gray-100 inv-view-btn\">",
         "                            <i class=\"fas fa-barcode mr-1\"></i> Scan",
