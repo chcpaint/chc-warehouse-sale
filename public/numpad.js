@@ -28,7 +28,7 @@
     var ROOTS = '#tab-inventory, [data-numpad-root]';
     var BOXES = '#tab-inventory input[type="number"], [data-numpad-root] input[type="number"]';
     var state = { input: null, text: '', fresh: true, decimals: true };
-    var sheet = null, back = null, chooser = null;
+    var sheet = null, back = null, chooser = null, openedAt = 0, down = null;
 
     function touchScreen() {
         try {
@@ -62,6 +62,7 @@
             // The heart of it: on a touch screen the box itself never takes a tap.
             'html.rnp-touch #tab-inventory input[type="number"]:not([data-native-keyboard]),' +
             'html.rnp-touch [data-numpad-root] input[type="number"]:not([data-native-keyboard]){pointer-events:none}' +
+            'html.rnp-touch #tab-inventory :has(> input[type="number"]){cursor:pointer}' +
             '.rnp-back{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9998;display:none}' +
             '.rnp-back.open{display:block}' +
             '.rnp,.rnp-choose{position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#fff;border-radius:18px 18px 0 0;' +
@@ -74,6 +75,10 @@
             'padding:6px 14px;min-height:56px;margin-bottom:10px;font-variant-numeric:tabular-nums;overflow:hidden}' +
             '.rnp-display.empty{color:#94a3b8}' +
             '.rnp-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}' +
+            '.rnp-step{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}' +
+            '.rnp-step button{height:60px;border-radius:12px;border:2px solid #2563eb;background:#eff6ff;color:#1e40af;font-size:26px;font-weight:700;' +
+            'touch-action:manipulation;-webkit-tap-highlight-color:transparent}' +
+            '.rnp-step button:active{background:#dbeafe}' +
             '.rnp-keys button{height:56px;border-radius:12px;border:1px solid #e2e8f0;background:#f8fafc;font-size:24px;font-weight:600;color:#0f172a;' +
             'touch-action:manipulation;-webkit-tap-highlight-color:transparent}' +
             '.rnp-keys button:active,.rnp-opt:active{background:#e2e8f0}' +
@@ -99,7 +104,12 @@
         if (back) return back;
         back = document.createElement('div');
         back.className = 'rnp-back';
-        back.addEventListener('click', function () { if (state.input) close(); if (chooser && chooser._resolve) closeChooser(null); });
+        back.addEventListener('click', function () {
+            // The same tap that opened the pad can arrive here as a click a moment later.
+            if (Date.now() - openedAt < 500) return;
+            if (state.input) close();
+            if (chooser && chooser._resolve) closeChooser(null);
+        });
         document.body.appendChild(back);
         return back;
     }
@@ -119,6 +129,8 @@
         sheet.innerHTML =
             '<p class="rnp-label" id="rnp-label"></p>' +
             '<div class="rnp-display" id="rnp-display" aria-live="polite"></div>' +
+            '<div class="rnp-step"><button type="button" data-k="minus" aria-label="One less">&minus; 1</button>' +
+            '<button type="button" data-k="plus" aria-label="One more">+ 1</button></div>' +
             '<div class="rnp-keys">' + keys.map(function (k) {
                 return k === 'back'
                     ? '<button type="button" data-k="back" aria-label="Delete">&#9003;</button>'
@@ -129,6 +141,8 @@
         sheet.addEventListener('click', function (e) {
             var b = e.target.closest('button[data-k]');
             if (!b) return;
+            // A key pressed while the pad is still sliding up is the opening tap, not a choice.
+            if (Date.now() - openedAt < 350) { e.preventDefault(); return; }
             e.preventDefault();
             press(b.getAttribute('data-k'));
         });
@@ -162,6 +176,14 @@
         if (!state.input) return;
         if (k === 'cancel') return close();
         if (k === 'done') return done();
+        if (k === 'plus' || k === 'minus') {
+            var cur = parseFloat(state.fresh || state.text === '' ? (state.input.value || '0') : state.text);
+            if (!isFinite(cur)) cur = 0;
+            var next = Math.max(0, Math.round((cur + (k === 'plus' ? 1 : -1)) * 10000) / 10000);
+            state.text = String(next);
+            state.fresh = false;
+            return paint();
+        }
         if (state.fresh) { state.text = ''; state.fresh = false; }
         if (k === 'back') state.text = state.text.slice(0, -1);
         else if (k === '.') {
@@ -205,6 +227,7 @@
         state.decimals = allowsDecimals(el);
         document.getElementById('rnp-label').textContent = labelFor(el);
         paint();
+        openedAt = Date.now();
         back.classList.add('open');
         sheet.classList.add('open');
     }
@@ -222,8 +245,28 @@
         return null;
     }
 
+    // iPhones and iPads do not send a "click" for a tap on a plain part of the
+    // page (no link, no button), which is exactly what sits under the box
+    // here, so a tap is read from the finger going down and up instead.
+    function onDown(e) {
+        if (e.pointerType === 'mouse') { down = null; return; }
+        down = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
+    }
+    function onUp(e) {
+        var d = down; down = null;
+        if (!d || e.pointerId !== d.id || e.pointerType === 'mouse') return;
+        if (!document.documentElement.classList.contains('rnp-touch')) return;
+        if (state.input || (chooser && chooser.classList.contains('open'))) return;
+        if (Math.abs(e.clientX - d.x) > 12 || Math.abs(e.clientY - d.y) > 12 || Date.now() - d.t > 1200) return;   // a scroll, not a tap
+        var el = boxAt(e.clientX, e.clientY);
+        if (!el) return;
+        e.preventDefault();
+        open(el);
+    }
+
     function onTap(e) {
         if (!document.documentElement.classList.contains('rnp-touch')) return;
+        if (state.input && Date.now() - openedAt < 500) { e.preventDefault(); e.stopPropagation(); return; }
         if (state.input || (chooser && chooser.classList.contains('open'))) return;
         var x = e.clientX, y = e.clientY;
         if (x === undefined || (x === 0 && y === 0 && e.detail === 0)) return;   // keyboard "click"
@@ -314,7 +357,10 @@
     function init() {
         if (touchScreen()) document.documentElement.classList.add('rnp-touch');
         css();
-        document.addEventListener('click', onTap, true);
+        document.addEventListener('pointerdown', onDown, true);
+        document.addEventListener('pointerup', onUp, true);
+        document.addEventListener('pointercancel', function () { down = null; }, true);
+        document.addEventListener('click', onTap, true);   // anything else that does send a click
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 

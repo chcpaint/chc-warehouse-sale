@@ -492,9 +492,9 @@
         "                                            <th class=\"text-left px-3 sm:px-4 py-3\">Item</th>",
         "                                            <th class=\"text-right px-4 py-3 hidden sm:table-cell\">System</th>",
         "                                            <th class=\"text-right px-2 sm:px-4 py-3\">Counted</th>",
-        "                                            <th class=\"text-right px-2 sm:px-4 py-3\"><span class=\"sm:hidden\">Diff</span><span class=\"hidden sm:inline\">Difference</span></th>",
+        "                                            <th class=\"text-right px-4 py-3 hidden sm:table-cell\">Difference</th>",
         "                                            <th class=\"text-left px-4 py-3 hidden sm:table-cell\">By</th>",
-        "                                            <th class=\"px-2 sm:px-4 py-3\"><span class=\"sr-only\">Remove</span></th>",
+        "                                            <th class=\"px-4 py-3 hidden sm:table-cell\"><span class=\"sr-only\">Remove</span></th>",
         "                                        </tr>",
         "                                    </thead>",
         "                                    <tbody id=\"inv-count-body\" class=\"divide-y\"></tbody>",
@@ -2754,18 +2754,25 @@
                 <td class="px-3 sm:px-4 py-3">
                     <div class="font-medium text-gray-800">${RAI.esc(l.name || '')}</div>
                     <div class="text-xs text-gray-400 font-mono">${RAI.esc(l.sku || '')}</div>
-                    <div class="text-xs text-gray-500 sm:hidden">System ${RAI.formatQty(l.current_on_hand)}${l.counted_by ? ' · ' + RAI.esc(l.counted_by) : ''}</div>
+                    <div class="text-xs text-gray-500 sm:hidden">System ${RAI.formatQty(l.current_on_hand)} · <span class="font-semibold ${cls}">${v > 0 ? '+' : ''}${RAI.formatQty(v)}</span>${l.counted_by ? ' · ' + RAI.esc(l.counted_by) : ''}</div>
+                    <button type="button" onclick="RAI.removeCountLine('${l.id}')" class="sm:hidden mt-1 text-xs text-gray-500 underline py-1" aria-label="Remove ${RAI.esc(l.sku || '')} from this count">Remove</button>
                 </td>
                 <td class="px-4 py-3 text-right text-gray-500 hidden sm:table-cell">${RAI.formatQty(l.current_on_hand)}</td>
                 <td class="px-2 py-2 text-right">
-                    <input type="number" min="0" step="any" inputmode="decimal" value="${RAI.esc(String(Number(l.counted_qty)))}"
-                        aria-label="Counted for ${RAI.esc(l.sku || l.name || '')}"
-                        class="w-16 sm:w-20 border rounded-lg px-2 py-1.5 text-right font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        onchange="RAI.setCountLine('${l.product_id}', this.value)">
+                    <div class="flex items-center justify-end gap-1">
+                        <button type="button" onclick="RAI.bumpCountLine('${l.product_id}', -1)" aria-label="One less ${RAI.esc(l.sku || '')}"
+                            class="w-10 h-10 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 text-xl font-semibold">&minus;</button>
+                        <input type="number" min="0" step="any" inputmode="decimal" value="${RAI.esc(String(Number(l.counted_qty)))}"
+                            aria-label="Counted for ${RAI.esc(l.sku || l.name || '')}"
+                            class="w-14 sm:w-20 h-10 border rounded-lg px-1 sm:px-2 text-center font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                            onchange="RAI.setCountLine('${l.product_id}', this.value)">
+                        <button type="button" onclick="RAI.bumpCountLine('${l.product_id}', 1)" aria-label="One more ${RAI.esc(l.sku || '')}"
+                            class="w-10 h-10 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 text-xl font-semibold">+</button>
+                    </div>
                 </td>
-                <td class="px-2 sm:px-4 py-3 text-right font-semibold ${cls}">${v > 0 ? '+' : ''}${RAI.formatQty(v)}</td>
+                <td class="px-4 py-3 text-right font-semibold hidden sm:table-cell ${cls}">${v > 0 ? '+' : ''}${RAI.formatQty(v)}</td>
                 <td class="px-4 py-3 text-gray-500 hidden sm:table-cell">${RAI.esc(l.counted_by || '')}</td>
-                <td class="px-2 sm:px-4 py-3 text-right">
+                <td class="px-4 py-3 text-right hidden sm:table-cell">
                     <button onclick="RAI.removeCountLine('${l.id}')" class="text-gray-400 hover:text-red-600 p-1" title="Remove" aria-label="Remove ${RAI.esc(l.sku || '')} from this count">
                         <i class="fas fa-xmark"></i>
                     </button>
@@ -2825,6 +2832,23 @@
 
         if (qtyEl) qtyEl.value = '';
         RAI.loadCount();
+    };
+
+    /** One more / one less on a counted line, without typing. */
+    RAI.bumpCountLine = function (productId, delta) {
+        const line = RAI.count.lines.find(l => l.product_id === productId);
+        if (!line) return;
+        const next = Math.max(0, Math.round((Number(line.counted_qty) + delta) * 10000) / 10000);
+        if (next === Number(line.counted_qty)) return;
+        line.counted_qty = next;   // show it at once
+        RAI.renderCountLines();
+        // Quick taps are saved once, as the final number, so they cannot arrive out of order.
+        RAI.count.bumpTimers = RAI.count.bumpTimers || {};
+        clearTimeout(RAI.count.bumpTimers[productId]);
+        RAI.count.bumpTimers[productId] = setTimeout(() => {
+            delete RAI.count.bumpTimers[productId];
+            RAI.setCountLine(productId, line.counted_qty);
+        }, 500);
     };
 
     /** Change a counted number on the line (a miscount, or a shelf counted by hand). */
