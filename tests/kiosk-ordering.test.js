@@ -542,3 +542,10 @@ test('console panel: ordering controls exist, never touch sign-in settings, and 
     // The passcode box is a password field, so it is not shown on screen.
     assert.match(html, /id="so-pass-new" type="password"/);
 });
+
+test('the kiosk keeps the screen on while it is open, and asks again when it comes back', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'public/kiosk.html'), 'utf8');
+    assert.match(html, /navigator\.wakeLock\.request\('screen'\)/);
+    assert.match(html, /visibilitychange[^\n]*keepAwake/, 'the lock is dropped when hidden, so it must be asked for again');
+    assert.match(html, /'wakeLock' in navigator/, 'a browser without it must carry on as before');
+});

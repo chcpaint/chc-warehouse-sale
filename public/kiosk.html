@@ -1183,6 +1183,29 @@
     });
   }
 
+  // ---------------------------------------------------------------
+  // Keep the screen on while the kiosk is open
+  // ---------------------------------------------------------------
+  // A kiosk that dims and sleeps between scans makes people tap it awake, and
+  // on some tablets wake it to the lock screen. The Screen Wake Lock asks the
+  // browser to keep the display on while this page is showing. The browser
+  // drops the lock whenever the page is hidden (screen switched off by hand,
+  // another app opened), so it is asked for again each time the page comes
+  // back, and on the first touch if the browser wanted a tap first. Where the
+  // browser has no wake lock, the tablet's own screen timeout applies, as before.
+  var wakeLock = null;
+  function keepAwake() {
+    if (!('wakeLock' in navigator) || document.hidden || wakeLock) return;
+    navigator.wakeLock.request('screen').then(function (lock) {
+      wakeLock = lock;
+      lock.addEventListener('release', function () { wakeLock = null; });
+    }).catch(function () { /* refused (low battery saver, no tap yet): try again on the next touch */ });
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) keepAwake(); });
+  document.addEventListener('pointerdown', keepAwake, true);
+  document.addEventListener('keydown', keepAwake, true);   // a scanner counts as a key press
+  keepAwake();
+
   start();
 })();
 </script>
