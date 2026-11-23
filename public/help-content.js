@@ -5,7 +5,7 @@
  * bottom right). Edit an answer here and both change. Plain text only.
  */
 window.RAI_HELP = {
-    updated: '2026-11-13',
+    updated: '2026-11-23',
     support: { name: 'Adam Berube', email: 'adam@chcpaint.com' },
     areas: [
         {
@@ -36,6 +36,12 @@ window.RAI_HELP = {
                   a: 'The cart is shared by everyone signed in to your shop\'s account, so a teammate can add to it and one person can send it.' },
                 { q: 'How do I see my past orders and invoices?', k: 'order history past invoices status track',
                   a: 'Open Order History. Each order shows its status (for example Processing, Out for delivery, Closed) and, once your distributor uploads it, the invoice to download.' },
+                { q: 'Why does my order say a manager needs to approve it?', k: 'approval manager approve passcode limit hold rule needs manager lock',
+                  a: 'Your shop has ordering rules turned on: an order limit, a stock limit, orders on hold, or items that need a manager (shown with a lock). The screen shows the order, its total and which rule it hit. A manager can type their approval passcode to send it now, or you can press Send for manager approval. Nothing goes to your distributor until a manager approves it.' },
+                { q: 'How do I approve or decline an order that is waiting?', k: 'waiting approval release decline approve manager passcode orders',
+                  a: 'Open Order History. Orders waiting for a manager are listed at the top. Press Review to see the order and its total as it stands now, then enter your approval passcode and press Approve and send, or Decline with a reason the person who asked will see.' },
+                { q: 'How do I change my shop\'s ordering rules or passcodes?', k: 'ordering rules limit hold passcode change settings manager staff items equipment',
+                  a: 'Open Order History and press Ordering rules, then enter an approval passcode (an owner with their own login goes straight in). You can turn each rule on or off for the whole company or one shop, set the dollar amounts, add or switch off passcodes, and choose which items need a manager. A passcode for one shop only changes that shop. Your distributor can set these up for you too.' },
                 { q: 'What does it mean when an order is partial or on backorder?', k: 'partial backorder missing short follow up invoice',
                   a: 'Your distributor shipped part of the order and the rest is on backorder. The order shows which items are still to come, and a follow-up invoice is added when they ship.' },
                 { q: 'Where are promotions?', k: 'promotions deals sale specials discount',

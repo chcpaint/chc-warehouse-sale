@@ -21,6 +21,7 @@ const { hidePricingEnabled, stripOrderPricing } = require('../utils/pricing-visi
 const { labelFor } = require('../utils/order-status');
 const { resolveOrderingUser } = require('../utils/people-activity');
 const { moduleEnabled } = require('../utils/modules');
+const orderingRules = require('../utils/ordering-rules');
 const { lineFor, orFilterFor, brandOptions } = require('../utils/product-lines');
 
 const router = express.Router();
@@ -603,13 +604,24 @@ router.post('/:slug/track', async (req, res) => {
     } catch (e) { res.json({ ok: true }); }
 });
 
-router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
+/**
+ * Place one order. The body of POST /:slug/orders, as a function so the same
+ * rules, prices, PO, tax and fees apply when a manager later releases an order
+ * that was waiting for approval (routes/ordering-rules-store.js).
+ *
+ *   opts.approval  the order is already approved (release): skip the rule check
+ *   opts.preview   price and check it, but place nothing (the release screen)
+ *
+ * Returns { status, body } for the caller to send.
+ */
+async function placeOrder(req, body, opts = {}) {
+    const reply = (status, payload) => ({ status, body: payload });
     try {
         const companyId = req.company.id;
         let {
             contact_name, contact_email, contact_phone,
             po_number, location, location_id, items, notes
-        } = sanitizeObject(req.body);
+        } = sanitizeObject(body);
 
         // An individual login owns its order. Who placed it comes from the
         // database, not the form: a person cannot order as someone else, a
@@ -619,7 +631,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         let orderer = null;
         if (req.companyUser) {
             const who = await resolveOrderingUser(companyId, req.companyUser);
-            if (!who.ok) return res.status(who.status).json({ error: who.error });
+            if (!who.ok) return reply(who.status, { error: who.error });
             orderer = who.user;
             contact_name = orderer.name;
             contact_email = orderer.email;
@@ -627,7 +639,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             // access code carries no location, so it is untouched by this.
             if (req.companyUser.location_id) {
                 if (location_id && location_id !== req.companyUser.location_id) {
-                    return res.status(403).json({ error: 'You can only place orders for your own location.' });
+                    return reply(403, { error: 'You can only place orders for your own location.' });
                 }
                 location_id = req.companyUser.location_id;
             }
@@ -635,7 +647,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
 
         // Validate required fields
         if (!contact_name || !contact_email || !items || !Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ error: 'Contact name, email, and at least one item are required.' });
+            return reply(400, { error: 'Contact name, email, and at least one item are required.' });
         }
 
         // How the PO is handled is a per-company choice. Until this existed the
@@ -648,7 +660,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         // individuals only. A session opened with the shared access code before
         // that was switched on must not keep placing unattributed orders.
         if (!orderer && moduleEnabled(poCompany?.settings, 'activity')) {
-            return res.status(403).json({
+            return reply(403, {
                 error: 'Orders for this account are placed by signed-in people. Please sign out and sign in with your own email and password.',
                 individual_login_required: true
             });
@@ -662,18 +674,18 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         if (poThreshold === null) {
             poDecision = resolveOrderPo(poCompany?.settings, po_number);
             if (!poDecision.ok) {
-                return res.status(400).json({ error: poDecision.error });
+                return reply(400, { error: poDecision.error });
             }
         }
 
         if (!isValidUUID(companyId)) {
-            return res.status(400).json({ error: 'Invalid company identifier.' });
+            return reply(400, { error: 'Invalid company identifier.' });
         }
 
         // Location is required and must be a real, active location belonging to this company.
         // We resolve the authoritative name from the DB and never trust client-supplied text.
         if (!location_id || !isValidUUID(location_id)) {
-            return res.status(400).json({ error: 'Please select your location before submitting your order.' });
+            return reply(400, { error: 'Please select your location before submitting your order.' });
         }
         const lookupLocation = (cols) => supabaseAdmin
             .from('company_locations')
@@ -690,7 +702,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 await lookupLocation('id, name, supplier_branch_id, restrict_to_category, notify_emails'));
         }
         if (locationLookupError || !locationRow) {
-            return res.status(400).json({ error: 'Selected location is not valid for this account.' });
+            return reply(400, { error: 'Selected location is not valid for this account.' });
         }
         const resolvedLocationName = locationRow.name;
 
@@ -705,7 +717,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 const wanted = String(contact_name || '').trim().toLowerCase();
                 const match = allowed.find(n => n.toLowerCase() === wanted);
                 if (!match) {
-                    return res.status(400).json({ error: 'Please choose who is ordering from the list.' });
+                    return reply(400, { error: 'Please choose who is ordering from the list.' });
                 }
                 contact_name = match;
             }
@@ -715,7 +727,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         for (const item of items) {
             const qty = parseInt(item.quantity);
             if (!item.product_id || !isValidUUID(item.product_id) || !qty || qty < 1 || qty > 9999) {
-                return res.status(400).json({ error: 'Invalid product or quantity. Quantities must be between 1 and 9999.' });
+                return reply(400, { error: 'Invalid product or quantity. Quantities must be between 1 and 9999.' });
             }
         }
 
@@ -728,14 +740,14 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             .in('id', productIds);
 
         if (!products || products.length !== productIds.length) {
-            return res.status(400).json({ error: 'One or more products not found.' });
+            return reply(400, { error: 'One or more products not found.' });
         }
 
         // Enforce location category lockdown at order time (defense in depth)
         if (locationRow.restrict_to_category) {
             const offItem = products.find(p => (p.category || '') !== locationRow.restrict_to_category);
             if (offItem) {
-                return res.status(400).json({ error: `This location can only order ${locationRow.restrict_to_category} items. Please remove other items from your cart.` });
+                return reply(400, { error: `This location can only order ${locationRow.restrict_to_category} items. Please remove other items from your cart.` });
             }
         }
 
@@ -817,7 +829,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 subtotal, hasUnpricedLines: quotedItems.length > 0
             });
             if (!poDecision.ok) {
-                return res.status(400).json({ error: poDecision.error, ...(poDecision.po_required ? { po_required: true } : {}) });
+                return reply(400, { error: poDecision.error, ...(poDecision.po_required ? { po_required: true } : {}) });
             }
         }
 
@@ -845,6 +857,93 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
         const total = Math.round((subtotal + tax + fees.total) * 100) / 100;
 
         // ------------------------------------------------------------------
+        // Ordering rules (migration 071): order limit, stock limit, orders on
+        // hold, items that need a manager. Checked here, after the order is
+        // priced from the database and before anything is allocated or sent,
+        // so no screen, kiosk or hand-built request can skip it.
+        //
+        // An order that trips a rule goes ahead only with a manager's approval:
+        // an approval passcode typed now, an owner's own login, or a manager
+        // releasing it later (opts.approval). Otherwise it is either saved as
+        // "waiting for approval" (hold_for_approval) or handed back so the
+        // screen can show the order, its total and why, and ask.
+        // ------------------------------------------------------------------
+        let approval = null;
+        const ruleCheck = await orderingRules.checkOrder(companyId, locationRow.id, { subtotal, lines: verifiedItems });
+        const summary = () => ({
+            location: { id: locationRow.id, name: resolvedLocationName },
+            items: verifiedItems.map(i => ({ product_id: i.product_id, name: i.name, sku: i.sku, quantity: i.quantity,
+                unit_price: i.unit_price, subtotal: i.subtotal, price_on_request: i.price_on_request })),
+            subtotal: Math.round(subtotal * 100) / 100, tax, fee_lines: fees.lines, total,
+            unpriced_items: quotedItems.length
+        });
+
+        if (opts.preview) {
+            return reply(200, { preview: { ...summary(), reasons: ruleCheck.reasons, stock: ruleCheck.stock } });
+        }
+
+        if (ruleCheck.reasons.length) {
+            const reasons = ruleCheck.reasons;
+            const at = new Date().toISOString();
+            if (opts.approval) {
+                approval = { ...opts.approval, reasons, approved_at: at };
+            } else if (req.companyUser && req.companyUser.role === 'owner') {
+                approval = { via: 'owner', approved_by: orderer ? orderer.name : (req.companyUser.name || 'Owner'), reasons, approved_at: at };
+            } else if (body && body.approval_passcode !== undefined && body.approval_passcode !== null && body.approval_passcode !== '') {
+                const check = await orderingRules.verifyApprovalPasscode(companyId, locationRow.id, body.approval_passcode);
+                if (!check.ok) {
+                    return reply(check.status, { error: check.error, approval_required: true, passcode_rejected: true,
+                        attempts_left: check.attempts_left, locked_seconds: check.locked_seconds,
+                        reasons, order: summary() });
+                }
+                approval = { via: 'passcode', approved_by: check.passcode.name, passcode_id: check.passcode.id, reasons, approved_at: at };
+            } else if (body && body.hold_for_approval === true) {
+                // Saved for a manager. Not an order: nothing goes to the
+                // distributor, no PO number is used, nothing is reported.
+                const { data: held, error: holdError } = await supabaseAdmin.from('order_approvals').insert({
+                    company_id: companyId,
+                    location_id: locationRow.id,
+                    status: 'waiting',
+                    request: {
+                        contact_name, contact_email, contact_phone: contact_phone || '',
+                        po_number: po_number || null, location_id: locationRow.id,
+                        notes: notes || '',
+                        items: verifiedItems.map(i => ({ product_id: i.product_id, quantity: i.quantity }))
+                    },
+                    requested_by: req.companyUser ? {
+                        id: req.companyUser.id, name: req.companyUser.name || null, email: req.companyUser.email || null,
+                        role: req.companyUser.role || null, location_id: req.companyUser.location_id || null
+                    } : null,
+                    contact_name: stripHtml(contact_name),
+                    contact_email: stripHtml(contact_email),
+                    items: summary().items,
+                    subtotal: Math.round(subtotal * 100) / 100,
+                    total,
+                    reasons
+                }).select('id, status, created_at, subtotal, total').single();
+                if (holdError) {
+                    console.error('Hold-for-approval insert failed:', holdError.message);
+                    return reply(500, { error: 'Could not save the order for approval. Please try again.' });
+                }
+                return reply(202, {
+                    held: true,
+                    message: 'Saved for a manager. It goes to CHC once a manager approves it.',
+                    approval: { id: held.id, ref: orderingRules.shortRef(held.id), created_at: held.created_at, subtotal: held.subtotal, total: held.total, reasons }
+                });
+            } else {
+                const passcodes = await orderingRules.activePasscodes(companyId, locationRow.id).catch(() => []);
+                return reply(409, {
+                    approval_required: true,
+                    error: 'This order needs a manager’s approval.',
+                    reasons,
+                    order: summary(),
+                    can_hold: true,
+                    has_passcodes: passcodes.length > 0
+                });
+            }
+        }
+
+        // ------------------------------------------------------------------
         // Allocate the PO number LAST, immediately before the insert.
         //
         // Deliberately not earlier: every validation above can still reject the
@@ -869,7 +968,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 // back to a typed PO, or to none, would produce an order whose
                 // numbering nobody can account for later.
                 console.error('PO allocation failed:', allocError?.message || 'no sequence for company');
-                return res.status(409).json({
+                return reply(409, {
                     error: 'Purchase order numbering is not set up for this account yet. Please contact CHC.'
                 });
             }
@@ -920,7 +1019,21 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             orderRow.placed_by_group = orderer.group_name;
         }
 
+        // How a rule-tripping order was approved, kept on the order itself.
+        if (approval) {
+            orderRow.approval = approval;
+            orderRow.status_history[0].note += ` — approved by ${approval.approved_by}`;
+        }
+
         let { data: order, error } = await supabaseAdmin.from('orders').insert(orderRow).select().single();
+
+        // Migration 071 adds orders.approval. Without it, place the order and
+        // keep the approval in the status history line above.
+        if (error && /approval/i.test(error.message || '') && orderRow.approval) {
+            console.error('Order placed without its approval record -- apply migration 071:', error.message);
+            delete orderRow.approval;
+            ({ data: order, error } = await supabaseAdmin.from('orders').insert(orderRow).select().single());
+        }
 
         // Migration 047 adds fuel_surcharge and fee_lines. Until it has been applied, place the
         // order without them (the delivery fee column still carries any delivery fee) rather than refuse it.
@@ -945,7 +1058,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             // point of the feature — so it deserves a message the shop can act
             // on rather than a generic failure.
             if (error.code === '23505' && /po/i.test(error.message || '')) {
-                return res.status(409).json({
+                return reply(409, {
                     error: poSource === 'generated'
                         ? 'That purchase order number has already been used. Please try again.'
                         : `Purchase order ${finalPo} has already been used on another order. Please use a different number.`,
@@ -954,7 +1067,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 });
             }
             console.error('Order insert error:', error);
-            return res.status(500).json({ error: 'Failed to submit order.' });
+            return reply(500, { error: 'Failed to submit order.' });
         }
 
         // Send email notification (non-blocking — don't fail the order if email fails).
@@ -999,7 +1112,7 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
             console.error('Email lookup error (non-blocking):', emailErr.message);
         }
 
-        res.status(201).json({
+        return reply(201, {
             message: 'Order submitted successfully!',
             order: {
                 id: order.id,
@@ -1017,14 +1130,21 @@ router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
                 fee_lines: feeLinesOf(order),
                 total: order.total,
                 status: order.status,
-                created_at: order.created_at
+                created_at: order.created_at,
+                // Who approved it, when a rule needed a manager.
+                approved_by: approval ? approval.approved_by : null
             }
         });
 
     } catch (err) {
         console.error('Order submission error:', err);
-        res.status(500).json({ error: 'Failed to submit order.' });
+        return reply(500, { error: 'Failed to submit order.' });
     }
+}
+
+router.post('/:slug/orders', requireCompanyAuth, async (req, res) => {
+    const out = await placeOrder(req, req.body);
+    res.status(out.status).json(out.body);
 });
 
 /**
@@ -1586,6 +1706,9 @@ router.use('/:slug/users', require('./company-users-store'));
 router.use('/:slug/billing', require('./billing-store'));
 // Insights (AI) on the Reports screen. Off unless CHC switches the module on; see routes/insights-store.js.
 router.use('/:slug/insights', require('./insights-store'));
+// Ordering rules and manager approvals (migration 071); see routes/ordering-rules-store.js.
+// Release replays a waiting order through placeOrder, so it is priced and checked like any other.
+router.use('/:slug/ordering-rules', require('./ordering-rules-store').makeOrderingRulesRouter({ placeOrder }));
 
 // People & activity for the company's own owner (the `activity` module): who
 // ordered, how much each person spends, who signed in, and named groups.

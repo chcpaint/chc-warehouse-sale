@@ -167,6 +167,8 @@ router.use('/billing', require('./billing-admin'));
 router.use('/companies/:companyId/delivery-fee', require('./delivery-fee-admin'));
 // Delivery-fee / fuel-surcharge rules and rebate rules, per company.
 router.use('/companies/:companyId/fees-rebates', require('./fee-rules-admin'));
+// Ordering rules and approval passcodes (migration 071).
+router.use('/companies/:companyId/ordering-rules', require('./ordering-rules-admin'));
 // Per-customer, per-item price editor. Its own role gate (super_admin, company
 // admin, order_manager) and the matching ORDER_DESK_ALLOW entries in
 // middleware/auth.js -- see the header of the route file.

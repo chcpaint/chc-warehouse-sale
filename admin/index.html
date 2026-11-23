@@ -11,6 +11,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <script src="/people-activity.js" defer></script>
+    <script src="/ordering-rules.js" defer></script>
     <style>
         .sidebar-link.active { background: rgba(59, 130, 246, 0.1); color: #2563eb; border-right: 3px solid #2563eb; }
         .fade-in { animation: fadeIn 0.3s ease; }
@@ -2710,6 +2711,18 @@
         </div>
     </div>
 
+    <!-- Ordering rules and approval passcodes (migration 071; public/ordering-rules.js) -->
+    <div id="ordering-rules-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xl font-bold"><i class="fas fa-user-shield text-amber-600 mr-2"></i>Ordering rules &mdash; <span id="or-company-name"></span></h3>
+                <button onclick="hideModal('ordering-rules-modal')" class="text-gray-400 hover:text-gray-600" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">Optional controls a shop can ask for. An order that trips a rule needs a manager's approval passcode, or waits in the store until a manager releases it. Nothing waiting is sent to the branch, reported, or given a PO number until then.</p>
+            <div id="or-host"></div>
+        </div>
+    </div>
+
     <!-- People & activity (who ordered, who signed in, named groups) -->
     <div id="people-activity-modal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-y-auto p-6">
@@ -5129,6 +5142,7 @@
                     <button onclick="manageManagerEmails('${c.id}', '${esc((c.email_config?.manager_emails || []).join(', ')).replace(/'/g, "\\'")}')" class="text-purple-500 hover:text-purple-700 text-sm mr-3" title="Manager / general group emails (${(c.email_config?.manager_emails || []).length})"><i class="fas fa-users"></i></button>
                     <button onclick="openEmailRecipients('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-teal-600 hover:text-teal-800 text-sm mr-3" title="Email recipients — company, per-location & branch"><i class="fas fa-envelope-open-text"></i></button>
                     <button onclick="openFeesModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-emerald-600 hover:text-emerald-800 text-sm mr-3" title="Delivery fee, fuel surcharge &amp; rebate rules"><i class="fas fa-percent"></i></button>
+                    <button onclick="openOrderingRules('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="text-amber-600 hover:text-amber-800 text-sm mr-3" title="Ordering rules &amp; approval passcodes (order limit, stock limit, on hold, items that need a manager)"><i class="fas fa-user-shield"></i></button>
                     <button onclick="openModulesModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.inventory?.enabled ? 'text-green-600 hover:text-green-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Modules this customer has"><i class="fas fa-boxes-stacked"></i></button>
                     <button onclick="openKitsModal('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${(c.settings?.inventory?.enabled || c.settings?.kit_submissions?.enabled) ? 'text-indigo-500 hover:text-indigo-700' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Repair kits (which kits this customer can use, and what each line means for them)"><i class="fas fa-boxes-packing"></i></button>
                     <button onclick="openCompanyUsers('${c.id}', '${esc(c.name).replace(/'/g, "\\'")}')" class="${c.settings?.users?.enabled ? 'text-amber-600 hover:text-amber-800' : 'text-gray-300 hover:text-gray-500'} text-sm mr-3" title="Customer users (who can order)"><i class="fas fa-users"></i></button>
@@ -10507,6 +10521,22 @@
         } catch (err) { /* non-fatal */ }
         showModal('company-users-modal');
         loadCompanyUsers();
+    }
+
+    // Ordering rules: the shared widget (public/ordering-rules.js), fresh each
+    // time it opens so listeners never pile up. The same screen a shop's
+    // manager sees in the store; here CHC sets it up and adds the first passcode.
+    function openOrderingRules(companyId, companyName) {
+        document.getElementById('or-company-name').textContent = companyName || '';
+        const host = document.getElementById('or-host');
+        const fresh = document.createElement('div');
+        host.replaceWith(fresh); fresh.id = 'or-host';
+        showModal('ordering-rules-modal');
+        if (!window.OrderingRulesPanel) { fresh.innerHTML = '<p class="text-red-600">The ordering rules screen could not load. Refresh the page and try again.</p>'; return; }
+        window.OrderingRulesPanel.mount(fresh, {
+            loadPath: '',
+            req: (p, o) => adminFetch(`/companies/${companyId}/ordering-rules${p}`, o)
+        });
     }
 
     // People & activity: the shared widget (public/people-activity.js), fresh

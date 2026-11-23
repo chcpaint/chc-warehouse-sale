@@ -75,7 +75,9 @@ const KNOWN_COLUMNS = {
         'backorder_items',
         // Added by migration 045: who placed the order, frozen at the time, so
         // the history survives the person's account being deleted.
-        'placed_by_name', 'placed_by_email', 'placed_by_group'
+        'placed_by_name', 'placed_by_email', 'placed_by_group',
+        // Migration 071: how a rule-tripping order was approved.
+        'approval'
     ]),
     company_po_sequences: new Set([
         'company_id', 'prefix', 'next_number', 'pad_width', 'use_check_digit',
@@ -143,7 +145,24 @@ const KNOWN_COLUMNS = {
     products: new Set([
         'id', 'company_id', 'brand', 'name', 'sku', 'description', 'category', 'price',
         'previous_price', 'case_qty', 'unit', 'image_url', 'metadata', 'sort_order',
-        'is_active', 'created_at', 'updated_at', 'price_on_request'
+        'is_active', 'created_at', 'updated_at', 'price_on_request',
+        // Migration 071: needs a manager when the staff-items rule is on.
+        'requires_approval'
+    ]),
+    // Migration 071: ordering rules and manager approvals.
+    ordering_rules: new Set([
+        'id', 'company_id', 'location_id', 'order_limit_on', 'order_limit', 'stock_ceiling_on', 'stock_ceiling',
+        'hold_on', 'hold_message', 'staff_items_on', 'updated_at', 'updated_by'
+    ]),
+    approval_passcodes: new Set([
+        'id', 'company_id', 'location_id', 'name', 'passcode_hash', 'is_active', 'created_at', 'created_by',
+        'changed_at', 'last_used_at', 'use_count'
+    ]),
+    approval_lockouts: new Set(['company_id', 'scope_key', 'fail_count', 'locked_until', 'updated_at']),
+    order_approvals: new Set([
+        'id', 'company_id', 'location_id', 'status', 'request', 'requested_by', 'contact_name', 'contact_email',
+        'items', 'subtotal', 'total', 'reasons', 'created_at', 'decided_at', 'decided_by_name',
+        'decided_by_passcode', 'decision_reason', 'order_id'
     ]),
     product_barcodes: new Set([
         'id', 'product_id', 'barcode', 'symbology', 'is_primary', 'created_at',

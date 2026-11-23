@@ -432,6 +432,8 @@
                     <button onclick="showTab('products')" type="button" class="mb-4 text-blue-600 hover:underline text-sm">
                         <i class="fas fa-arrow-left mr-1"></i>Continue shopping
                     </button>
+                    <!-- Ordering rules that apply to this shop (on hold, limits); see /ordering-rules.js -->
+                    <div id="orules-cart-note"></div>
 
                     <!-- Select-all + bulk delete. Always visible once the cart
                          has anything in it -- the button is just disabled
@@ -543,7 +545,17 @@
                 <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
                     <i class="fas fa-arrow-left mr-1"></i>Back to Products
                 </button>
-                <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-receipt mr-2"></i>Order History</h2>
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800"><i class="fas fa-receipt mr-2"></i>Order History
+                        <span id="orules-orders-chip" hidden class="ml-2 align-middle text-sm font-semibold bg-amber-100 text-amber-900 rounded-full px-3 py-1"></span></h2>
+                    <!-- Managers: the shop's ordering rules and approval passcodes; see /ordering-rules.js -->
+                    <button id="orules-open-btn" hidden type="button" onclick="window.ORules && ORules.openRules()"
+                        class="bg-white border border-gray-300 hover:bg-gray-50 text-gray-800 text-sm font-semibold px-4 py-2 rounded-lg">
+                        <i class="fas fa-sliders mr-1"></i>Ordering rules
+                    </button>
+                </div>
+                <!-- Orders waiting for a manager's approval (not yet sent to the branch). -->
+                <div id="orules-waiting"></div>
                 <div id="orders-list" class="space-y-3"></div>
                 <div id="no-orders" class="hidden text-center py-12 text-gray-400">
                     <i class="fas fa-receipt text-4xl mb-3"></i>
@@ -1297,6 +1309,8 @@
         loadProducts();
         loadPromotions();
         loadCart();
+        // Ordering rules for this shop: the hold notice, limits and item locks.
+        if (window.ORules) ORules.load().then(() => { if (state.products && state.products.length) renderProducts(); });
         loadTaxConfig();
         loadDeliveryFeeConfig();
         loadPoConfig();
@@ -2225,6 +2239,7 @@
                     ${p.case_qty > 1 ? `<span class="text-xs text-gray-400">/ case of ${p.case_qty}</span>` : ''}
                 </div>
                 ${priceNoteHtml(p)}
+                ${window.ORules ? ORules.badge(p) : ''}
                 <div class="flex items-center gap-2">
                     ${qty > 0 ? `
                         <button onclick="updateCart('${p.id}', ${qty - 1})" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 font-bold">-</button>
@@ -3487,9 +3502,7 @@
                 return;
             }
 
-            const resp = await apiFetch(`/store/${state.slug}/orders`, {
-                method: 'POST',
-                body: JSON.stringify({
+            const orderBody = {
                     contact_name: (() => { const sel = document.getElementById('checkout-name-select'); return sel && !sel.classList.contains('hidden') ? sel.value : document.getElementById('checkout-name').value; })(),
                     contact_email: document.getElementById('checkout-email').value,
                     contact_phone: document.getElementById('checkout-phone').value,
@@ -3498,10 +3511,34 @@
                     location: state.location.name,
                     notes: document.getElementById('checkout-notes').value,
                     items: state.cart.map(c => ({ product_id: c.product_id, quantity: c.quantity }))
-                })
-            });
+                };
+            const sendOrder = async (extra) => {
+                const r = await apiFetch(`/store/${state.slug}/orders`, {
+                    method: 'POST',
+                    body: JSON.stringify({ ...orderBody, ...(extra || {}) })
+                });
+                return { resp: r, data: await r.json().catch(() => ({})) };
+            };
+            let { resp, data } = await sendOrder();
 
-            const data = await resp.json();
+            // An ordering rule needs a manager (order limit, stock limit, orders
+            // on hold, an item that needs approval). Show the order, its total
+            // and why; a manager approves now, or it is sent for approval.
+            if (!resp.ok && data.approval_required && window.ORules) {
+                const outcome = await new Promise(done => ORules.decide(data, sendOrder, done));
+                if (!outcome) return;
+                ({ resp, data } = outcome);
+            }
+
+            // Saved for a manager: not an order yet, but the cart has been dealt with.
+            if (resp.status === 202 && data.held) {
+                state.cart = [];
+                updateCartBadge();
+                renderCart();
+                apiFetch(`/store/${state.slug}/cart`, { method: 'DELETE' }).catch(() => {});
+                if (window.ORules) ORules.heldNotice(data);
+                return;
+            }
 
             if (!resp.ok) {
                 // The server says this order does need a PO (its total, with any promotion
@@ -3654,6 +3691,8 @@
     async function loadOrders() {
         const list = document.getElementById('orders-list');
         const noOrders = document.getElementById('no-orders');
+        // Orders waiting for a manager sit above the history; they are not orders yet.
+        if (window.ORules) { ORules.renderWaiting(); ORules.load(); }
 
         list.innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i></div>';
 
@@ -4026,6 +4065,7 @@
     <script src="/support-footer.js"></script>
     <script>window.RAI_ASSET_VERSION = '__ASSET_VERSION__';</script>
     <script src="/numpad.js"></script>
+    <script src="/ordering-rules.js"></script>
     <script>
     // An open tab or home-screen app can sit on yesterday's code for days.
     // When the phone comes back to the page, ask which deploy is live; if it

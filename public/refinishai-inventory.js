@@ -2475,13 +2475,26 @@
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { alert('Enter a valid email address.'); return; }
         if (!confirm(`Approve this reorder and send it to ${RAI.dist()}?`)) return;
 
-        const resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/replenishment/${orderId}/approve`, {
-            method: 'POST',
-            body: JSON.stringify({
-                po_number: po, contact_name: name, contact_email: email, actor_label: RAI.invActor() || name
-            })
-        });
-        const data = await resp.json();
+        // Ordering rules (order limit, stock limit, on hold, items that need a
+        // manager) apply to a reorder too: the server says when a manager's
+        // approval passcode is needed, and this asks for it (see /ordering-rules.js).
+        let extra = {}, resp, data;
+        for (;;) {
+            resp = await RAI.api(`/store/${RAI.ctx.slug}/inventory/replenishment/${orderId}/approve`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    po_number: po, contact_name: name, contact_email: email, actor_label: RAI.invActor() || name, ...extra
+                })
+            });
+            data = await resp.json().catch(() => ({}));
+            if (!resp.ok && data.approval_required && window.ORules && ORules.askPasscode && resp.status !== 429) {
+                const code = await ORules.askPasscode(data);
+                if (!code) return;
+                extra = { approval_passcode: code };
+                continue;
+            }
+            break;
+        }
         if (!resp.ok) { alert(data.error || 'Could not approve that reorder.'); return; }
 
         alert(`Order ${data.order.order_number || ''} sent to ${RAI.dist()}.`);

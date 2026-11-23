@@ -130,6 +130,9 @@
   .oform .fixed { height: 52px; display: flex; align-items: center; font-size: 1.05rem; font-weight: 600; word-break: break-all; }
   .oform .hint { font-size: .85rem; color: var(--muted); margin-top: 3px; }
 
+  .passwhy { max-width: 560px; margin: 6px auto 4px; text-align: left; background: #fffbeb; border: 2px solid #fcd34d; border-radius: 14px; padding: 10px 14px; color: #78350f; }
+  .passwhy b { display: block; }
+  .passwhy .tot { margin-top: 6px; font-weight: 700; color: var(--ink); }
   .keypad { display: grid; grid-template-columns: repeat(3, 110px); gap: 12px; margin-top: 8px; }
   .keypad button { height: 84px; border-radius: 18px; border: 3px solid var(--line); background: #fff; font-size: 2.1rem; font-weight: 700; color: var(--ink); cursor: pointer; }
   .keypad button:active { background: #e2e8f0; }
@@ -224,8 +227,9 @@
   <!-- Order passcode -->
   <section class="screen" id="s-pass">
     <div class="hero">
-      <h1>Enter the order passcode</h1>
-      <p>Only people who place stock orders have this passcode.</p>
+      <h1 id="pass-title">Enter the order passcode</h1>
+      <p id="pass-sub">Only people who place stock orders have this passcode.</p>
+      <div id="pass-why" class="passwhy" style="display:none"></div>
       <div class="dots" id="pass-dots" aria-live="polite"></div>
       <div class="passmsg" id="pass-msg" role="alert"></div>
       <div class="keypad" id="keypad">
@@ -236,6 +240,7 @@
       </div>
       <div class="passrow">
         <button type="button" id="pass-cancel">Back to Scan-Out</button>
+        <button type="button" id="pass-hold" style="display:none">Save for a manager</button>
         <button type="button" id="pass-go" class="go">Unlock</button>
       </div>
     </div>
@@ -699,7 +704,88 @@
     renderPass();
   }
 
+  // ----- manager approval (ordering rules, migration 071) -----
+  // The same keypad screen, used when an order trips one of the shop's ordering
+  // rules: the manager types an approval passcode, or the order is saved for a
+  // manager to approve in the store. The cart is kept either way.
+  var passMode = 'unlock', approvalBody = null;
+
+  function openApproval(data, body) {
+    passMode = 'approve'; approvalBody = body; passBuf = '';
+    var hide = orderCtx && orderCtx.hide_pricing;
+    $('pass-title').textContent = 'A manager needs to approve this order';
+    $('pass-sub').textContent = 'Enter an approval passcode, or save it for a manager.';
+    $('pass-why').innerHTML = (data.reasons || []).map(function (r) {
+      return '<p><b>' + esc(r.title) + '</b>' + esc(r.detail) + '</p>';
+    }).join('') + (!hide && data.order ? '<p class="tot">Order total ' + money(data.order.total) + '</p>' : '');
+    $('pass-why').style.display = '';
+    $('pass-msg').textContent = data.passcode_rejected ? (data.error || '') : '';
+    $('pass-go').textContent = 'Approve & send';
+    $('pass-hold').style.display = data.can_hold === false ? 'none' : '';
+    $('pass-cancel').textContent = 'Back to order';
+    renderPass(); show('pass'); touch();
+  }
+
+  function closeApproval() {
+    resetPassScreen();
+    show('order'); renderOrder(); focusScan();
+  }
+
+  function resetPassScreen() {
+    passMode = 'unlock'; approvalBody = null; passBuf = '';
+    $('pass-title').textContent = 'Enter the order passcode';
+    $('pass-sub').textContent = 'Only people who place stock orders have this passcode.';
+    $('pass-why').style.display = 'none'; $('pass-why').innerHTML = '';
+    $('pass-msg').textContent = '';
+    $('pass-go').textContent = 'Unlock';
+    $('pass-hold').style.display = 'none';
+    $('pass-cancel').textContent = 'Back to Scan-Out';
+  }
+
+  function postOrder(body, extra) {
+    var all = {};
+    Object.keys(body).forEach(function (k) { all[k] = body[k]; });
+    Object.keys(extra || {}).forEach(function (k) { all[k] = extra[k]; });
+    return storeApi('/orders', { method: 'POST', body: all });
+  }
+
+  function orderResult(r, body) {
+    if (r.status === 201 && r.data.order) { if (passMode === 'approve') closeApproval(); return orderSentOk(r.data.order); }
+    if (r.status === 202 && r.data.held) {
+      if (passMode === 'approve') closeApproval();
+      return orderHeld(r.data);
+    }
+    if (r.status === 401 && !(r.data && r.data.approval_required)) return orderExpired();
+    if (r.data && r.data.approval_required && r.status !== 429) { beep('bad'); return openApproval(r.data, body); }
+    beep('bad');
+    if (passMode === 'approve') { passBuf = ''; renderPass(); $('pass-msg').textContent = (r.data && r.data.error) || 'That did not go through.'; return; }
+    if (r.data && r.data.po_required) $('o-po').classList.add('bad');
+    notify('err', (r.data && r.data.error) || 'The order could not be sent. Your items are still here.');
+  }
+
+  function orderHeld(data) {
+    beep('done');
+    var a = data.approval || {};
+    var hide = orderCtx && orderCtx.hide_pricing;
+    $('m-return-text').textContent = 'Saved for a manager to approve' +
+      (!hide && Number(a.total) > 0 ? ' — total ' + money(a.total) : '') +
+      '. It goes to CHC once a manager approves it in the store’s Orders screen.';
+    cart = []; orderSent = true;
+    $('o-po').value = ''; $('o-notes').value = '';
+    returnAt = Date.now() + RETURN_SECONDS * 1000;
+    $('m-return').classList.add('on');
+    renderOrder();
+  }
+
+  function approvalSend(extra) {
+    if (busy || !approvalBody) return;
+    busy = true; touch();
+    postOrder(approvalBody, extra).then(function (r) { busy = false; orderResult(r, approvalBody); })
+      .catch(function () { busy = false; beep('bad'); $('pass-msg').textContent = 'Can’t reach the server. Check the Wi-Fi.'; });
+  }
+
   function submitPass() {
+    if (passMode === 'approve') { if (passBuf) approvalSend({ approval_passcode: passBuf }); return; }
     if (busy || !passBuf) return;
     busy = true; touch();
     var code = passBuf;
@@ -848,21 +934,15 @@
 
     var userNotes = $('o-notes').value.trim();
     busy = true; touch(); clearNotice(); renderOrder();
-    storeApi('/orders', {
-      method: 'POST',
-      body: {
-        contact_name: name, contact_email: email, po_number: po || undefined,
-        location_id: c.location.id,
-        items: cart.map(function (l) { return { product_id: l.product_id, quantity: l.quantity }; }),
-        notes: 'Placed from the stock-room tablet (' + (c.device || 'kiosk') + ').' + (userNotes ? ' ' + userNotes : '')
-      }
-    }).then(function (r) {
+    var body = {
+      contact_name: name, contact_email: email, po_number: po || undefined,
+      location_id: c.location.id,
+      items: cart.map(function (l) { return { product_id: l.product_id, quantity: l.quantity }; }),
+      notes: 'Placed from the stock-room tablet (' + (c.device || 'kiosk') + ').' + (userNotes ? ' ' + userNotes : '')
+    };
+    postOrder(body).then(function (r) {
       busy = false;
-      if (r.status === 201 && r.data.order) return orderSentOk(r.data.order);
-      if (r.status === 401) return orderExpired();
-      beep('bad');
-      if (r.data && r.data.po_required) $('o-po').classList.add('bad');
-      notify('err', (r.data && r.data.error) || 'The order could not be sent. Your items are still here.');
+      orderResult(r, body);
     }).catch(function () {
       busy = false; beep('bad');
       // The request may or may not have reached CHC. Do not resend blindly.
@@ -884,6 +964,7 @@
   }
 
   function leaveOrder(message) {
+    resetPassScreen();
     orderCtx = null; cart = []; returnAt = 0; orderSent = false; passBuf = '';
     ['m-return', 'm-leave', 'm-chg', 'm-choose'].forEach(function (id) { $(id).classList.remove('on'); });
     $('o-name').value = ''; $('o-po').value = ''; $('o-notes').value = ''; $('o-email').value = '';
@@ -894,7 +975,8 @@
   // Runs every second. Returns true when an ordering state handled the tick.
   function orderTick() {
     if (state === 'pass') {
-      if (Date.now() - lastActivity > 60000 && !busy) leaveOrder();
+      // Idle on the approval keypad goes back to the order (items kept), not out of ordering.
+      if (Date.now() - lastActivity > 60000 && !busy) { if (passMode === 'approve') closeApproval(); else leaveOrder(); }
       return true;
     }
     if (state !== 'order') return false;
@@ -1010,7 +1092,8 @@
   $('btn-order').addEventListener('click', function () { if (!busy) openPass(); });
   $('keypad').addEventListener('click', function (e) { var b = e.target.closest('button[data-k]'); if (b) passKey(b.dataset.k); });
   $('pass-go').addEventListener('click', submitPass);
-  $('pass-cancel').addEventListener('click', function () { if (!busy) leaveOrder(); });
+  $('pass-cancel').addEventListener('click', function () { if (busy) return; if (passMode === 'approve') closeApproval(); else leaveOrder(); });
+  $('pass-hold').addEventListener('click', function () { approvalSend({ hold_for_approval: true }); });
   document.addEventListener('keydown', function (e) {
     if (state !== 'pass' || $('m-chg').classList.contains('on')) return;
     if (/^\d$/.test(e.key)) { e.preventDefault(); passKey(e.key); }

@@ -486,6 +486,29 @@ test('approving a queue raises a real order and emails the branch', async () => 
     assert.equal(fake.db.replenishment_orders[0].order_id, order.id);
 });
 
+test('ordering rules apply to a reorder: over the limit it needs an approval passcode, and records who gave it', async () => {
+    reset();
+    const id = await queueOne();                         // 17 x $84.48 = $1,436.16
+    fake.db.ordering_rules = [{ id: 'r1', company_id: COMPANY_ID, location_id: null, order_limit_on: true, order_limit: 1000 }];
+    fake.db.approval_passcodes = [{ id: 'pc1', company_id: COMPANY_ID, location_id: null, name: 'Mike',
+        passcode_hash: await require('../utils/scan-out').hashPasscode('482913'), is_active: true, use_count: 0 }];
+    fake.db.approval_lockouts = [];
+    const body = { po_number: 'PO-77', contact_name: 'Dana', contact_email: 'dana@shop.com', actor_label: 'Dana' };
+    const url = `/api/store/assured/inventory/replenishment/${id}/approve`;
+
+    const ask = await request(app()).post(url).send(body);
+    assert.equal(ask.status, 409);
+    assert.equal(ask.body.approval_required, true);
+    assert.equal(ask.body.reasons[0].code, 'order_limit');
+    assert.equal(fake.db.orders.length, 0);
+
+    assert.equal((await request(app()).post(url).send({ ...body, approval_passcode: '000111' })).status, 401);
+    const ok = await request(app()).post(url).send({ ...body, approval_passcode: '482913' });
+    assert.equal(ok.status, 201);
+    assert.equal(fake.db.orders[0].approval.approved_by, 'Mike');
+    assert.match(fake.db.orders[0].status_history[0].note, /ordering rules approved by Mike/);
+});
+
 test('an active promotion is honoured on an approved replenishment', async () => {
     reset();
     const id = await queueOne();

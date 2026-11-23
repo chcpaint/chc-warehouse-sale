@@ -22,6 +22,7 @@ const { resolveOrderRecipients } = require('../utils/recipients');
 const { sendOrderNotification } = require('../utils/email');
 const { notifyReorderRaised } = require('../utils/inventory-alerts');
 const { resolveFees, loadFeeRules } = require('../utils/fee-rules');
+const orderingRules = require('../utils/ordering-rules');
 const {
     STORE_MOVEMENT_TYPES,
     MOVEMENT_TYPES,
@@ -1045,6 +1046,35 @@ router.post('/replenishment/:id/approve', async (req, res) => {
         });
         subtotal = Math.round(subtotal * 100) / 100;
 
+        // Ordering rules (migration 071) apply here exactly as they do to an
+        // order placed by hand. A replenishment is already a queue waiting on
+        // a person, so a rule that trips asks for an approval passcode now
+        // rather than saving a second waiting copy.
+        let ruleApproval = null;
+        const ruleCheck = await orderingRules.checkOrder(companyId, location.id, { subtotal, lines: items });
+        if (ruleCheck.reasons.length) {
+            const reasons = ruleCheck.reasons;
+            const at = new Date().toISOString();
+            if (req.companyUser && req.companyUser.role === 'owner') {
+                ruleApproval = { via: 'owner', approved_by: req.companyUser.name || actor, reasons, approved_at: at };
+            } else if (req.body && req.body.approval_passcode) {
+                const check = await orderingRules.verifyApprovalPasscode(companyId, location.id, req.body.approval_passcode);
+                if (!check.ok) {
+                    return res.status(check.status).json({ error: check.error, approval_required: true, passcode_rejected: true,
+                        attempts_left: check.attempts_left, locked_seconds: check.locked_seconds, reasons,
+                        order: { items, subtotal } });
+                }
+                ruleApproval = { via: 'passcode', approved_by: check.passcode.name, passcode_id: check.passcode.id, reasons, approved_at: at };
+            } else {
+                return res.status(409).json({
+                    approval_required: true,
+                    error: 'This order needs a manager’s approval passcode.',
+                    reasons,
+                    order: { items, subtotal, location: { id: location.id, name: location.name } }
+                });
+            }
+        }
+
         // This becomes a real CHC order through the same path as one placed by
         // hand (see the doc comment above), so it is subject to the same
         // delivery fee on a small order. Doesn't touch tax here — this route
@@ -1060,9 +1090,7 @@ router.post('/replenishment/:id/approve', async (req, res) => {
         const notes = text(req.body?.notes, 500);
         const orderNotes = [`refinishAI Inventory replenishment, approved by ${actor}`, notes].filter(Boolean).join(' — ');
 
-        const { data: createdOrder, error: orderErr } = await supabaseAdmin
-            .from('orders')
-            .insert({
+        const orderInsert = {
                 company_id: companyId,
                 contact_name: contactName,
                 contact_email: contactEmail,
@@ -1082,11 +1110,19 @@ router.post('/replenishment/:id/approve', async (req, res) => {
                 status_history: [{
                     status: 'pending',
                     timestamp: now,
-                    note: `refinishAI Inventory replenishment approved by ${actor}`
+                    note: `refinishAI Inventory replenishment approved by ${actor}` +
+                        (ruleApproval ? ` \u2014 ordering rules approved by ${ruleApproval.approved_by}` : '')
                 }]
-            })
-            .select()
-            .single();
+        };
+        if (ruleApproval) orderInsert.approval = ruleApproval;
+        let { data: createdOrder, error: orderErr } = await supabaseAdmin
+            .from('orders').insert(orderInsert).select().single();
+        // Migration 071 adds orders.approval; without it the status line still records it.
+        if (orderErr && orderInsert.approval && /approval/i.test(orderErr.message || '')) {
+            delete orderInsert.approval;
+            ({ data: createdOrder, error: orderErr } = await supabaseAdmin
+                .from('orders').insert(orderInsert).select().single());
+        }
 
         if (orderErr) {
             console.error('Replenishment order insert error:', orderErr);
