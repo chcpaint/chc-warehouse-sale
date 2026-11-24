@@ -149,6 +149,13 @@ const KNOWN_COLUMNS = {
         // Migration 071: needs a manager when the staff-items rule is on.
         'requires_approval'
     ]),
+    // Migration 072: item requests.
+    item_requests: new Set([
+        'id', 'request_no', 'company_id', 'location_id', 'status', 'item_name', 'part_number', 'brand', 'quantity',
+        'notes', 'photos', 'requested_by_name', 'requested_by_email', 'requested_by_user_id', 'source', 'received_via',
+        'entered_by_admin_id', 'entered_by_name', 'product_id', 'staff_note', 'closed_at', 'closed_by_admin_id',
+        'closed_by_name', 'customer_notified_at', 'created_at', 'updated_at'
+    ]),
     // Migration 071: ordering rules and manager approvals.
     ordering_rules: new Set([
         'id', 'company_id', 'location_id', 'order_limit_on', 'order_limit', 'stock_ceiling_on', 'stock_ceiling',

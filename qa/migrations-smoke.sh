@@ -151,6 +151,17 @@ create table kit_product_map (
     updated_at timestamptz not null default now(), updated_by uuid references admin_users(id) on delete set null,
     constraint kit_product_map_unique unique (company_id, kit_item_id));
 
+-- Supabase's storage table and the distributors table, for migrations that
+-- create a bucket or set a distributor setting (072).
+create schema if not exists storage;
+create table storage.buckets (
+    id text primary key, name text not null, public boolean default false,
+    file_size_limit bigint, allowed_mime_types text[]);
+create table if not exists distributors (
+    id uuid primary key default gen_random_uuid(), name text, slug text,
+    is_default boolean not null default false, settings jsonb, support_email text);
+insert into distributors (name, slug, is_default) values ('CHC', 'chc', true);
+
 -- Two customers, so the migrations that seed a rule by name have something to
 -- find. "Assured" is deliberately present: a migration that silently seeds
 -- nothing would otherwise pass this smoke test.

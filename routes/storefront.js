@@ -1706,6 +1706,8 @@ router.use('/:slug/users', require('./company-users-store'));
 router.use('/:slug/billing', require('./billing-store'));
 // Insights (AI) on the Reports screen. Off unless CHC switches the module on; see routes/insights-store.js.
 router.use('/:slug/insights', require('./insights-store'));
+// Item requests: every customer can ask for an item it can't find (migration 072).
+router.use('/:slug/item-requests', require('./item-requests-store'));
 // Ordering rules and manager approvals (migration 071); see routes/ordering-rules-store.js.
 // Release replays a waiting order through placeOrder, so it is priced and checked like any other.
 router.use('/:slug/ordering-rules', require('./ordering-rules-store').makeOrderingRulesRouter({ placeOrder }));

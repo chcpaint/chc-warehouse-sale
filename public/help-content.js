@@ -46,6 +46,8 @@ window.RAI_HELP = {
                   a: 'Your distributor shipped part of the order and the rest is on backorder. The order shows which items are still to come, and a follow-up invoice is added when they ship.' },
                 { q: 'Where are promotions?', k: 'promotions deals sale specials discount',
                   a: 'Open Promotions to see current deals from your distributor. Promotional prices apply in the cart automatically.' },
+                { q: 'How do I ask for an item that isn\'t on my list?', k: 'request item catalog missing product not on list ask part',
+                  a: 'Open Request an Item. Say what you need, add the part number or brand if you have them and up to three photos (the label or the old can), and press Send request. Your distributor adds it to your list and you get an email when it is ready to order, with an Add to cart button on the request. This is only for adding items; for prices or orders, contact your distributor as usual.' },
                 { q: 'How do I contact my distributor about an order?', k: 'contact chc distributor supplier message question order help branch',
                   a: 'Open Contact (shown with your distributor\'s name, for example Contact CHC) to see your branch\'s contacts and send a note. For problems with the software itself, use the support email at the bottom of every page.' }
             ]
@@ -196,6 +198,8 @@ window.RAI_HELP = {
                   a: 'On the order, tick Partial / backorder and choose the items still to come. The order then asks for a follow-up invoice when they ship.' },
                 { q: 'How do I attach an invoice to an order?', k: 'upload invoice pdf attach',
                   a: 'Open the order and press Upload invoice. The customer can download it from Order History.' },
+                { q: 'How do I handle a customer asking for an item to be added?', k: 'item requests add catalog request complete cant supply phone email text',
+                  a: 'Open Item requests. Shops ask from their store; when a customer calls, emails or texts, press Enter a request so it is on the list too. Add the item to their list (Products or Customer Pricing), then press Complete and link it: the customer is emailed that it is ready to order. Can\'t supply asks for a reason, which the customer is told. Who is emailed about new requests lets an admin add someone to cover while you are away.' },
                 { q: 'How do I set a customer\'s prices?', k: 'pricing customer price list discount',
                   a: 'Open Customer Pricing, choose the customer, and edit prices or apply a rule to a brand or category.' },
                 { q: 'What are the Item Library and the Master Table?', k: 'item library master table catalogue barcodes',

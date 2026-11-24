@@ -322,6 +322,13 @@ const ORDER_DESK_ALLOW = [
     ['GET', /^\/companies\/[^/]+\/stock-corrections\/(counts|orders)(\/[^/]+)?$/],
     ['POST', /^\/companies\/[^/]+\/stock-corrections\/counts\/[^/]+\/lines\/[^/]+$/],
     ['POST', /^\/companies\/[^/]+\/stock-corrections\/orders\/[^/]+$/],
+    // Item requests: any staff account may work the list and enter a request
+    // for a customer who called -- per Adam. Reachability only: the route
+    // scopes every request to customers this account can already see, and
+    // changing who is emailed needs a full admin (routes/item-requests-admin.js).
+    ['GET', /^\/item-requests(\/(settings|products|count))?$/],
+    ['POST', /^\/item-requests$/],
+    ['PUT', /^\/item-requests\/[^/]+$/],
     ['GET', /^\/whoami$/],
     ['PUT', /^\/me\/password$/]
 ];

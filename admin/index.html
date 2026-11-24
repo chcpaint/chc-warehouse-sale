@@ -12,6 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <script src="/people-activity.js" defer></script>
     <script src="/ordering-rules.js" defer></script>
+    <script src="/item-requests.js" defer></script>
     <style>
         .sidebar-link.active { background: rgba(59, 130, 246, 0.1); color: #2563eb; border-right: 3px solid #2563eb; }
         .fade-in { animation: fadeIn 0.3s ease; }
@@ -123,6 +124,10 @@
                 </button>
                 <button onclick="adminNav('orders')" data-nav="orders" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                     <i class="fas fa-receipt w-5"></i> Orders
+                </button>
+                <button onclick="adminNav('requests')" data-nav="requests" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-requests">
+                    <i class="fas fa-circle-plus w-5"></i> Item requests
+                    <span id="ir-nav-badge" class="hidden ml-auto bg-amber-500 text-white text-xs rounded-full px-2 py-0.5">0</span>
                 </button>
                 <button onclick="adminNav('scanissues')" data-nav="scanissues" class="sidebar-link w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3" id="nav-scanissues">
                     <i class="fas fa-triangle-exclamation w-5"></i> Scan issues
@@ -1064,6 +1069,12 @@
                             <tbody id="promotions-tbody"></tbody>
                         </table>
                     </div>
+                </section>
+
+                <!-- Item requests: customers asking for an item to be added to their
+                     catalog (migration 072; public/item-requests.js) -->
+                <section id="section-requests" class="hidden fade-in">
+                    <div id="ir-console-root"></div>
                 </section>
 
                 <!-- Orders Management -->
@@ -2905,7 +2916,7 @@
                 // The operations manager (order_manager) also prices per customer;
                 // the sales director does that and adds items to customers' catalogs.
                 const role = admin.user.role;
-                const keep = el.dataset.nav === 'orders' ||
+                const keep = el.dataset.nav === 'orders' || el.dataset.nav === 'requests' ||
                     (el.dataset.nav === 'pricing' && role !== 'order_desk') ||
                     (el.dataset.nav === 'products' && role === 'sales_director');
                 if (!keep) el.classList.add('hidden');
@@ -2913,6 +2924,7 @@
             document.body.classList.add('order-desk-only');
             // The Items screen's customer picker reads the customer list.
             if (admin.user.role === 'sales_director') loadCompanies();
+            irCount();
             adminNav('orders');
             return;
         }
@@ -2941,6 +2953,7 @@
         loadDashboard();
         loadCompanies();
         siCount();
+        irCount();
     }
 
     async function loadPlatformLogo() {
@@ -2984,7 +2997,7 @@
 
         const titles = { dashboard: 'Dashboard', companies: 'Companies', products: 'Products', pricing: 'Customer Pricing',
             library: 'Item Library', master: 'Master Table', kits: 'Kits',
-            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding', tax: 'Tax & Region', billing: 'Billing', platform: 'Distributors (refinishAI platform)', scanissues: 'Scan issues' };
+            promotions: 'Promotions', orders: 'Orders', reports: 'Reports', admins: 'Admin Users', audit: 'Audit Log', branding: 'Branding', tax: 'Tax & Region', billing: 'Billing', platform: 'Distributors (refinishAI platform)', scanissues: 'Scan issues', requests: 'Item requests' };
         document.getElementById('page-title').textContent = titles[section] || section;
 
         if (section === 'dashboard') dbLoad();
@@ -3003,6 +3016,33 @@
         if (section === 'billing') blLoad();
         if (section === 'platform') plLoad();
         if (section === 'scanissues') siLoad();
+        if (section === 'requests') irLoad();
+    }
+
+    // ============================================================
+    // ITEM REQUESTS (migration 072; public/item-requests.js,
+    // routes/item-requests-admin.js): customers asking for an item to be
+    // added to their catalog. Mounted fresh each visit so the list is current.
+    // ============================================================
+    function irBadge(n) {
+        const b = document.getElementById('ir-nav-badge');
+        if (b) { b.textContent = n > 99 ? '99+' : String(n); b.classList.toggle('hidden', !n); }
+    }
+    async function irCount() {
+        try {
+            const r = await adminFetch('/item-requests/count'); if (!r.ok) return;
+            irBadge((await r.json()).open || 0);
+        } catch (e) { /* badge only */ }
+    }
+    function irLoad() {
+        const root = document.getElementById('ir-console-root');
+        if (!window.ItemRequests) { root.innerHTML = '<p class="text-sm text-gray-500">Loading&hellip;</p>'; return setTimeout(irLoad, 300); }
+        window.ItemRequests.mountConsole(root, {
+            req: (p, o) => adminFetch('/item-requests' + p, o),
+            raw: (p, o) => adminFetchRaw('/item-requests' + p, o),
+            onCount: irBadge,
+            toast: m => adminToast(m, 'ok')
+        });
     }
 
     // ============================================================

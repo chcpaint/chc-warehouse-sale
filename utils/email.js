@@ -754,4 +754,115 @@ async function sendAdoptionReport(o) {
     }
 }
 
-module.exports = { sendOrderNotification, sendOrderStatusUpdate, sendOrderNoteAdded, sendContactNote, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite, sendAdoptionReport };
+/**
+ * A new item request, to the distributor's request inbox (see utils/item-requests.js).
+ * Photos the shop attached come along as attachments, so the item can be
+ * identified from the email alone.
+ *
+ * @param {Object} o {to[], ref, companyName, locationName, request, photos:[{buffer, mime, ext}], consoleUrl, replyTo}
+ */
+async function sendItemRequestNew(o) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+    const to = (Array.isArray(o.to) ? o.to : [o.to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!to.length) return { sent: false, reason: 'no_recipient' };
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    const r = o.request || {};
+    const via = { phone: 'a phone call', email: 'an email', text: 'a text message', in_person: 'in person', other: 'another way' };
+    const how = r.source === 'staff'
+        ? `Entered by ${r.entered_by_name || 'staff'} from ${via[r.received_via] || 'another way'}`
+        : 'Sent from the store';
+    const rows = [
+        ['Item', r.item_name], ['Part number', r.part_number], ['Brand', r.brand], ['Quantity', r.quantity],
+        ['Customer', o.companyName + (o.locationName ? ` \u2014 ${o.locationName}` : '')],
+        ['Requested by', [r.requested_by_name, r.requested_by_email].filter(Boolean).join(' \u00b7 ')],
+        ['How', how], ['Notes', r.notes]
+    ].filter(([, v]) => v);
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #b45309; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">Item request ${escHtml(o.ref)}</h2>
+            <p style="margin: 5px 0 0; opacity: 0.95;">${escHtml(o.companyName)} would like an item added to their catalog</p>
+        </div>
+        <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                ${rows.map(([k, v]) => `<tr><td style="padding:6px 8px;color:#6b7280;vertical-align:top;width:120px;">${escHtml(k)}</td><td style="padding:6px 8px;color:#111827;white-space:pre-wrap;">${escHtml(v)}</td></tr>`).join('')}
+            </table>
+            ${(o.photos || []).length ? `<p style="color:#374151;font-size:13px;">${o.photos.length} photo(s) attached.</p>` : ''}
+            <p style="margin-top:16px;color:#374151;">Add the item to their list, then mark it Complete (or Can't supply) in the console under <strong>Item requests</strong>${o.consoleUrl ? `: <a href="${escHtml(o.consoleUrl)}">${escHtml(o.consoleUrl)}</a>` : ''}. The customer is emailed when you do.</p>
+            <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from the refinishAI ordering platform.</p>
+        </div>
+    </div>`;
+    const text = `Item request ${o.ref} \u2014 ${o.companyName}\n\n` + rows.map(([k, v]) => `${k}: ${v}`).join('\n') +
+        `\n\nAdd the item to their list, then mark it Complete (or Can't supply) in the console under Item requests.`;
+    const attachments = (o.photos || []).slice(0, 3).map((p, i) => ({
+        content: p.buffer.toString('base64'), filename: `${o.ref || 'request'}-photo-${i + 1}.${p.ext || 'jpg'}`,
+        type: p.mime || 'image/jpeg', disposition: 'attachment'
+    }));
+    try {
+        await sgMail.send({
+            to, from: fromAddress, replyTo: o.replyTo || undefined,
+            subject: `Add to catalog ${o.ref} \u2014 ${o.companyName}${o.locationName ? ` (${o.locationName})` : ''}: ${r.item_name}`,
+            text, html, attachments: attachments.length ? attachments : undefined
+        });
+        return { sent: true };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Item request email failed:', errMsg);
+        return { sent: false, error: errMsg };
+    }
+}
+
+/**
+ * Tell the customer their item request is closed: ready to order, or why not.
+ * @param {Object} o {to[], ref, companyName, request, outcome:'complete'|'cannot_supply', product, staffNote, storeUrl, distName, replyTo}
+ */
+async function sendItemRequestClosed(o) {
+    if (!ensureInit()) return { sent: false, reason: 'not_configured' };
+    const to = (Array.isArray(o.to) ? o.to : [o.to]).map(x => String(x || '').trim()).filter(Boolean);
+    if (!to.length) return { sent: false, reason: 'no_recipient' };
+    const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
+    const r = o.request || {};
+    const ready = o.outcome === 'complete';
+    const dist = o.distName || 'CHC';
+    const heading = ready ? 'Ready to order' : 'About your item request';
+    const product = o.product ? `${o.product.name}${o.product.sku ? ` (${o.product.sku})` : ''}` : '';
+    const lead = ready
+        ? `Good news: the item you asked for is now on your ${escHtml(dist)} ordering list and ready to order.`
+        : `We looked into the item you asked for and are not able to supply it.`;
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: ${ready ? '#15803d' : '#475569'}; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">${escHtml(heading)}</h2>
+            <p style="margin: 5px 0 0; opacity: 0.95;">${escHtml(o.companyName)} \u00b7 request ${escHtml(o.ref)}</p>
+        </div>
+        <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px; color:#111827;">
+            <p>${lead}</p>
+            <p style="margin:12px 0;padding:12px;background:#f9fafb;border-radius:6px;">
+                <strong>You asked for:</strong> ${escHtml(r.item_name)}${r.part_number ? ` (${escHtml(r.part_number)})` : ''}
+                ${product ? `<br><strong>On your list as:</strong> ${escHtml(product)}` : ''}
+            </p>
+            ${o.staffNote ? `<p style="white-space:pre-wrap;"><strong>${ready ? 'Note' : 'Why'}:</strong> ${escHtml(o.staffNote)}</p>` : ''}
+            ${ready && o.storeUrl ? `<p style="margin:24px 0;"><a href="${escHtml(o.storeUrl)}" style="background:#15803d;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Open your store to order</a></p>` : ''}
+            <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Reply to this email if you have a question.</p>
+        </div>
+    </div>`;
+    const text = `${heading} \u2014 ${o.companyName}, request ${o.ref}\n\n` +
+        (ready ? `The item you asked for is now on your ${dist} ordering list and ready to order.\n` : `We are not able to supply the item you asked for.\n`) +
+        `You asked for: ${r.item_name}${r.part_number ? ` (${r.part_number})` : ''}\n` +
+        (product ? `On your list as: ${product}\n` : '') + (o.staffNote ? `${ready ? 'Note' : 'Why'}: ${o.staffNote}\n` : '') +
+        (ready && o.storeUrl ? `\nOrder here: ${o.storeUrl}\n` : '');
+    try {
+        await sgMail.send({
+            to, from: fromAddress, replyTo: o.replyTo || undefined,
+            subject: ready ? `Ready to order: ${r.item_name}` : `Your item request: ${r.item_name}`,
+            text, html
+        });
+        return { sent: true };
+    } catch (err) {
+        const errMsg = err.response?.body?.errors?.[0]?.message || err.message;
+        console.error('Item request closed email failed:', errMsg);
+        return { sent: false, error: errMsg };
+    }
+}
+
+module.exports = { sendOrderNotification, sendOrderStatusUpdate, sendOrderNoteAdded, sendContactNote, sendInvoiceReady, sendOrderClosed, sendTestEmail, sendLowStockAlert, sendReorderRaised, sendInvite, sendAdoptionReport, sendItemRequestNew, sendItemRequestClosed };

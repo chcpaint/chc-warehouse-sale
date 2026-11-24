@@ -298,6 +298,10 @@
                         class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
                         <i class="fas fa-receipt mr-1"></i> Order History
                     </button>
+                    <button onclick="showTab('requests')" data-tab="requests"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
+                        <i class="fas fa-circle-plus mr-1"></i> Request an Item
+                    </button>
                     <button onclick="showTab('inventory')" data-tab="inventory" id="nav-inventory"
                         class="hidden relative px-4 py-2 text-sm text-gray-600 hover:text-blue-700 border-b-3 border-transparent transition-all">
                         <i class="fas fa-boxes-stacked mr-1"></i> Inventory
@@ -538,6 +542,16 @@
                         </button>
                     </form>
                 </div>
+            </section>
+
+            <!-- ============ REQUEST AN ITEM TAB ============ -->
+            <!-- Ask CHC to add an item to this catalog; see /item-requests.js -->
+            <section id="tab-requests" class="hidden fade-in">
+                <button onclick="showTab('products')" type="button" class="mb-3 text-blue-600 hover:underline text-sm">
+                    <i class="fas fa-arrow-left mr-1"></i>Back to Products
+                </button>
+                <h2 class="text-2xl font-bold text-gray-800 mb-4"><i class="fas fa-circle-plus mr-2"></i>Request an Item</h2>
+                <div id="item-requests-root"></div>
             </section>
 
             <!-- ============ ORDERS TAB ============ -->
@@ -1510,7 +1524,8 @@
             { tab: 'products',   label: 'Products',      icon: 'fa-box' },
             { tab: 'promotions', label: 'Promotions',    icon: 'fa-tags' },
             { tab: 'cart',       label: 'Cart',          icon: 'fa-shopping-cart', badge: 'cart' },
-            { tab: 'orders',     label: 'Order History', icon: 'fa-receipt' }
+            { tab: 'orders',     label: 'Order History', icon: 'fa-receipt' },
+            { tab: 'requests',   label: 'Request an Item', icon: 'fa-circle-plus' }
         ]},
         { group: 'Inventory', requires: 'inventory', items: [
             { tab: 'inventory',  label: 'Stock on Hand', icon: 'fa-boxes-stacked', badge: 'lowstock' }
@@ -1759,6 +1774,7 @@
         // browser last saw it.
         if (tab === 'cart') { renderCart(); loadCart(); }
         if (tab === 'orders') loadOrders();
+        if (tab === 'requests' && window.ItemRequests) window.ItemRequests.mountStore(document.getElementById('item-requests-root'));
         if (tab === 'reports') loadReports();
         if (tab === 'billing') bpLoad();
         if (tab === 'kitsub' && window.KITSUB) window.KITSUB.show();
@@ -4066,6 +4082,7 @@
     <script>window.RAI_ASSET_VERSION = '__ASSET_VERSION__';</script>
     <script src="/numpad.js"></script>
     <script src="/ordering-rules.js"></script>
+    <script src="/item-requests.js"></script>
     <script>
     // An open tab or home-screen app can sit on yesterday's code for days.
     // When the phone comes back to the page, ask which deploy is live; if it
