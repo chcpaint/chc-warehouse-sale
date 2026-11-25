@@ -7489,12 +7489,17 @@
                 <input type="text" id="er-contact" class="w-full px-3 py-2 border rounded-lg text-sm mb-3" value="${esc(d.contact_email || '')}" placeholder="ap@company.com">
                 <label for="er-managers" class="block text-xs font-medium text-gray-500 mb-1">Manager / general group <span class="text-gray-400">(one per line)</span></label>
                 <textarea id="er-managers" rows="${Math.max(2, (d.manager_emails || []).length + 1)}" class="w-full px-3 py-2 border rounded-lg text-sm font-mono" placeholder="manager@company.com">${esc((d.manager_emails || []).join('\n'))}</textarea>
+                <label class="mt-3 flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input type="checkbox" id="er-attach" class="mt-0.5 w-4 h-4" ${d.attach_invoice ? 'checked' : ''}>
+                    <span><b>Attach invoices to the customer's email</b><br><span class="text-xs text-gray-500">When an invoice (or follow-up invoice) is uploaded, this customer's people get the file with the email. Off: they get a link to sign in and download it. CHC branch staff always get the notice only.</span></span>
+                </label>
                 <div class="mt-3 flex gap-2"><button onclick="saveCompanyEmails()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">Save</button>
                 <button onclick="erToggle('company')" class="px-4 py-1.5 rounded-lg text-sm bg-white border border-gray-300">Cancel</button></div>
             </div>` : `
             <div class="bg-gray-50 rounded-xl p-4 mb-4" data-er-company>
                 <div class="flex items-center justify-between gap-2 mb-2"><p class="font-semibold text-gray-800">Company recipients <span class="text-xs font-normal text-gray-400">(copied on every order, from every shop)</span></p>${erEditBtn('company')}</div>
                 <ul class="rounded-lg bg-white px-3 py-1">${erList(companyItems) || '<li class="py-2 text-sm text-gray-500">None.</li>'}</ul>
+                <p class="mt-2 text-xs ${d.attach_invoice ? 'text-green-700' : 'text-gray-500'}"><i class="fas fa-file-invoice mr-1"></i>Invoices: ${d.attach_invoice ? 'the file is attached to the customer\'s email' : 'the customer gets a link to sign in and download (no attachment)'}</p>
             </div>`;
 
         const cards = (d.locations || []).map(l => {
@@ -7606,7 +7611,10 @@
         const contact = document.getElementById('er-contact').value.trim();
         const managers = erParseEmails(document.getElementById('er-managers').value);
         try {
-            const resp = await adminFetch(`/companies/${erCompanyId}`, { method: 'PUT', body: JSON.stringify({ contact_email: contact || null, email_config: { manager_emails: managers } }) });
+            const attachEl = document.getElementById('er-attach');
+            const cfg = { manager_emails: managers };
+            if (attachEl) cfg.attach_invoice = attachEl.checked;
+            const resp = await adminFetch(`/companies/${erCompanyId}`, { method: 'PUT', body: JSON.stringify({ contact_email: contact || null, email_config: cfg }) });
             const d = await resp.json();
             if (!resp.ok) { alert(d.error || 'Failed to save.'); return; }
             adminToast('Updated \u2014 company recipients saved');

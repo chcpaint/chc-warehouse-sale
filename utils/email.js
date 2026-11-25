@@ -353,10 +353,13 @@ async function sendContactNote(options) {
 
 /**
  * Notify recipients that an invoice is ready to retrieve for an order.
+ * With options.attachment ({ buffer, filename, mime }) the invoice file itself
+ * comes with the email -- for customers who have that switched on (see
+ * email_config.attach_invoice, routes/admin.js handleInvoiceUpload).
  */
 async function sendInvoiceReady(options) {
     if (!ensureInit()) return { sent: false, reason: 'not_configured' };
-    const { to, order, companyName, retrieveUrl, replyTo, followUp, backorderItems } = options;
+    const { to, order, companyName, retrieveUrl, replyTo, followUp, backorderItems, attachment } = options;
     const recipients = (Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(Boolean);
     if (!recipients.length) return { sent: false, reason: 'no_recipient' };
     const fromAddress = process.env.SMTP_FROM || process.env.EMAIL_FROM || 'promo@chcpaint.com';
@@ -379,14 +382,24 @@ async function sendInvoiceReady(options) {
         <div style="padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
             <p>${followUp ? 'A follow-up invoice' : 'An invoice'} is now available for <strong>${escHtml(companyName)}</strong> order <strong>#${escHtml(orderNo)}</strong>.</p>
             ${itemsHtml}
-            <p>Sign in to your store, open the order in your order history, and download the ${followUp ? 'follow-up ' : ''}invoice to print and make payment.</p>
+            <p>${attachment
+                ? `The ${followUp ? 'follow-up ' : ''}invoice is attached to this email. It is also in your store: open the order in your order history.`
+                : `Sign in to your store, open the order in your order history, and download the ${followUp ? 'follow-up ' : ''}invoice to print and make payment.`}</p>
             ${retrieveUrl ? `<p style="margin-top:20px;"><a href="${escHtml(retrieveUrl)}" style="background:#1e40af;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;">Go to your store</a></p>` : ''}
             <p style="margin-top: 20px; color: #9ca3af; font-size: 12px;">Automated notification from CHC Paint & Auto Body Supplies ordering platform.</p>
         </div>
     </div>`;
-    const text = `${followUp ? 'Follow-up invoice' : 'Invoice'} ready for ${companyName} order #${orderNo}.${itemsText}\nSign in to your store and open the order to download the ${followUp ? 'follow-up ' : ''}invoice.${retrieveUrl ? '\n' + retrieveUrl : ''}`;
+    const text = `${followUp ? 'Follow-up invoice' : 'Invoice'} ready for ${companyName} order #${orderNo}.${itemsText}\n` +
+        (attachment ? `The ${followUp ? 'follow-up ' : ''}invoice is attached. It is also in your store under the order.`
+                    : `Sign in to your store and open the order to download the ${followUp ? 'follow-up ' : ''}invoice.`) +
+        `${retrieveUrl ? '\n' + retrieveUrl : ''}`;
+    const msg = { to: recipients, from: fromAddress, subject: `${followUp ? 'Follow-up invoice' : 'Invoice'} ${attachment ? 'attached' : 'ready'} — ${companyName} order ${orderNo}`, text, html };
+    if (attachment && attachment.buffer) {
+        msg.attachments = [{ content: attachment.buffer.toString('base64'), filename: attachment.filename || `invoice-${orderNo}.pdf`,
+            type: attachment.mime || 'application/pdf', disposition: 'attachment' }];
+    }
     try {
-        await sgMail.send({ to: recipients, from: fromAddress, subject: `${followUp ? 'Follow-up invoice' : 'Invoice'} ready — ${companyName} order ${orderNo}`, text, html });
+        await sgMail.send(msg);
         console.log(`Email: ${followUp ? 'Follow-up invoice' : 'Invoice'}-ready sent to ${recipients.join(', ')} for order ${orderNo}`);
         return { sent: true };
     } catch (err) {

@@ -846,23 +846,40 @@ async function handleInvoiceUpload(req, res, { followup }) {
 
         await logAction(req.admin.id, followup ? 'followup_invoice_uploaded' : 'invoice_uploaded', 'order', orderId, { filename: req.file.originalname }, req.ip);
 
-        // Notify the same recipients as the order confirmation (company + managers + branch)
+        // Notify the same recipients as the order confirmation (company + managers + branch).
+        // A customer with "attach invoices" switched on (email_config.attach_invoice)
+        // gets the file itself on their side; CHC branch staff still get the notice.
+        let attached = false;
         try {
-            const { to: recipients, replyTo } = await resolveOrderRecipients(order);
+            const { to: recipients, replyTo, customerTo, staffTo } = await resolveOrderRecipients(order);
             if (recipients.length) {
-                const { data: company } = await supabaseAdmin.from('companies').select('name, slug').eq('id', companyId).single();
+                const { data: company } = await supabaseAdmin.from('companies').select('name, slug, email_config').eq('id', companyId).single();
                 const retrieveUrl = `${process.env.APP_URL || ''}/store/${company?.slug || ''}`;
-                sendInvoiceReady({
-                    to: recipients, replyTo,
+                const base = {
+                    replyTo,
                     order: { order_number: order.order_number, id: order.id },
                     companyName: company?.name || '', retrieveUrl,
                     followUp: followup, backorderItems: followup ? (order.followup_invoice_items || []) : undefined
-                }).catch(e => console.error('Invoice email failed (non-blocking):', e.message));
+                };
+                const fail = e => console.error('Invoice email failed (non-blocking):', e.message);
+                const custList = Array.isArray(customerTo) ? customerTo : [];
+                if (company?.email_config?.attach_invoice === true && custList.length) {
+                    attached = true;
+                    const safeName = (stripHtml(req.file.originalname || '').replace(/[^\w.\- ]+/g, '_').slice(0, 120)) || `invoice.${ext}`;
+                    sendInvoiceReady({ ...base, to: custList,
+                        attachment: { buffer: req.file.buffer, filename: safeName, mime: req.file.mimetype || 'application/pdf' } }).catch(fail);
+                    // Staff who are also on the customer's list already have it; don't email them twice.
+                    const staffOnly = (Array.isArray(staffTo) ? staffTo : []).filter(e => !custList.includes(e));
+                    if (staffOnly.length) sendInvoiceReady({ ...base, to: staffOnly }).catch(fail);
+                } else {
+                    sendInvoiceReady({ ...base, to: recipients }).catch(fail);
+                }
             }
         } catch (e) { console.error('Invoice recipients error:', e.message); }
 
         res.json({
-            message: followup ? 'Follow-up invoice uploaded and recipients notified.' : 'Invoice uploaded and recipients notified.',
+            message: (followup ? 'Follow-up invoice uploaded and recipients notified.' : 'Invoice uploaded and recipients notified.') +
+                (attached ? ' The customer\'s email has the invoice attached.' : ''),
             order: updated
         });
     } catch (err) {
@@ -1718,6 +1735,7 @@ router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req
             company_name: company?.name || '',
             contact_email: contactEmail,
             manager_emails: managerEmails,
+            attach_invoice: company?.email_config?.attach_invoice === true,
             // CHC-side lists (branch emails, staff assignments) are super-admin edits,
             // the same rule as the CHC Branches and Admin Users screens.
             can_edit_chc: req.admin.role === 'super_admin',

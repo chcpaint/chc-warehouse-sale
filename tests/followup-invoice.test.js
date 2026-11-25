@@ -484,3 +484,78 @@ test('store page: both download buttons, and a "to follow" note while the second
     assert.match(html, /Backorder invoice to follow/);
     assert.match(html, /\?which=followup/);
 });
+
+// ------------------------------------------------------------------
+// Attach invoices to the customer's email (per customer: email_config.attach_invoice)
+// ------------------------------------------------------------------
+test('off (the default): one notice to everyone, no file attached', async () => {
+    reset();
+    const r = await upload('invoice', 'INV-500.pdf').send();
+    assert.equal(r.status, 200);
+    await new Promise(res => setImmediate(res));
+    assert.equal(sentEmails.invoice.length, 1);
+    assert.equal(sentEmails.invoice[0].attachment, undefined);
+    assert.ok(sentEmails.invoice[0].to.includes('markham@chc.example'));
+    assert.ok(sentEmails.invoice[0].to.includes('pat@example.invalid'));
+    assert.doesNotMatch(r.body.message, /attached/);
+});
+
+test('on: the customer’s side gets the file, CHC branch staff get the notice only, nobody twice', async () => {
+    reset();
+    fake.db.companies[0].email_config = { attach_invoice: true, manager_emails: ['markham@chc.example'] };
+    const r = await upload('invoice', 'INV/500:final.pdf').send();
+    assert.equal(r.status, 200);
+    assert.match(r.body.message, /attached/);
+    await new Promise(res => setImmediate(res));
+    const withFile = sentEmails.invoice.filter(m => m.attachment);
+    const plain = sentEmails.invoice.filter(m => !m.attachment);
+    assert.equal(withFile.length, 1);
+    assert.deepEqual([...withFile[0].to].sort(), ['markham@chc.example', 'pat@example.invalid', 'shop@example.invalid']);
+    assert.equal(withFile[0].attachment.mime, 'application/pdf');
+    assert.equal(withFile[0].attachment.filename, 'INV_500_final.pdf');
+    assert.ok(Buffer.isBuffer(withFile[0].attachment.buffer));
+    // markham@ is on the customer's list too, so the staff-only notice has nobody left to send to
+    assert.equal(plain.length, 0);
+});
+
+test('on: the follow-up invoice comes attached too', async () => {
+    reset();
+    fake.db.companies[0].email_config = { attach_invoice: true };
+    await upload('followup-invoice', 'backorder.pdf').send();
+    await new Promise(res => setImmediate(res));
+    const withFile = sentEmails.invoice.find(m => m.attachment);
+    assert.ok(withFile && withFile.followUp === true);
+    const staff = sentEmails.invoice.find(m => !m.attachment);
+    assert.deepEqual(staff.to, ['markham@chc.example']);
+});
+
+test('the switch is saved with the company’s other email settings, which are kept', async () => {
+    reset();
+    fake.db.companies[0].email_config = { manager_emails: ['boss@example.invalid'], notification_email: 'x@example.invalid' };
+    const r = await request(adminApp()).put(`/api/admin/companies/${CO}`).send({ email_config: { manager_emails: ['boss@example.invalid'], attach_invoice: true } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(fake.db.companies[0].email_config, { manager_emails: ['boss@example.invalid'], notification_email: 'x@example.invalid', attach_invoice: true });
+    const setup = await request(adminApp()).get(`/api/admin/companies/${CO}/email-setup`);
+    assert.equal(setup.body.attach_invoice, true);
+});
+
+test('the real email carries the file and says it is attached', async () => {
+    const emailPath = path.join(ROOT, 'utils/email.js');
+    delete require.cache[emailPath];
+    Module._load = originalLoad;
+    const sent = [];
+    const sg = require('@sendgrid/mail');
+    sg.setApiKey('SG.test'); sg.send = async (m) => { sent.push(m); };
+    process.env.SENDGRID_API_KEY = 'SG.test'; process.env.SMTP_FROM = 'noreply@example.invalid';
+    const real = require(emailPath);
+    const r = await real.sendInvoiceReady({ to: 'a@b.invalid', order: { order_number: 'CHC-1001' }, companyName: 'Assured',
+        attachment: { buffer: Buffer.from('%PDF-1.4 x'), filename: 'INV-500.pdf', mime: 'application/pdf' } });
+    assert.equal(r.sent, true);
+    const m = sent.at(-1);
+    assert.match(m.subject, /^Invoice attached/);
+    assert.match(m.html, /attached to this email/);
+    assert.equal(m.attachments.length, 1);
+    assert.equal(m.attachments[0].filename, 'INV-500.pdf');
+    assert.equal(Buffer.from(m.attachments[0].content, 'base64').toString(), '%PDF-1.4 x');
+    assert.equal(m.replyTo, undefined, 'reply-to unchanged from before');
+});
