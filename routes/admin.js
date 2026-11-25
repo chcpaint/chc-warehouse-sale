@@ -14,7 +14,7 @@ const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAd
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { searchTerm } = require('../utils/search-term');
-const { resolveOrderRecipients } = require('../utils/recipients');
+const { resolveOrderRecipients, branchStaffEmails, validEmails } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed, sendOrderStatusUpdate, sendOrderNoteAdded } = require('../utils/email');
 const { orderScopeIds, applyOrderScope, orderInScope, staffLocationIds, isHeadOffice, staffDistributorId } = require('../utils/order-scope');
 const { redactSecrets } = require('../utils/audit');
@@ -1670,17 +1670,46 @@ router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req
         const { data: locations } = await supabaseAdmin
             .from('company_locations').select('id, name, city, notify_emails, supplier_branch_id')
             .eq('company_id', companyId).order('name');
-        const locs = (locations || []).map(l => ({
-            id: l.id, name: l.name, city: l.city,
-            notify_emails: Array.isArray(l.notify_emails) ? l.notify_emails : [],
-            supplier_branch_id: l.supplier_branch_id,
-            branch_name: l.supplier_branch_id && branchMap[l.supplier_branch_id] ? branchMap[l.supplier_branch_id].name : null,
-            branch_emails: l.supplier_branch_id && branchMap[l.supplier_branch_id] ? (branchMap[l.supplier_branch_id].emails || []) : []
-        }));
+        // CHC staff assigned to a branch in Admin Users get that branch's order
+        // emails too (utils/recipients.js). Shown here so the screen lists
+        // everyone who is actually emailed, not only the typed-in lists.
+        const staffByBranch = {};
+        for (const bid of [...new Set((locations || []).map(l => l.supplier_branch_id).filter(Boolean))]) {
+            staffByBranch[bid] = validEmails(await branchStaffEmails(bid));
+        }
+        const contactEmail = company?.contact_email || '';
+        const managerEmails = Array.isArray(company?.email_config?.manager_emails) ? company.email_config.manager_emails : [];
+        const locs = (locations || []).map(l => {
+            const branch = l.supplier_branch_id ? branchMap[l.supplier_branch_id] : null;
+            const branchOn = branch && branch.is_active !== false;
+            const notify = Array.isArray(l.notify_emails) ? l.notify_emails : [];
+            const branchEmails = branch ? (branch.emails || []) : [];
+            const branchStaff = branchOn ? (staffByBranch[l.supplier_branch_id] || []) : [];
+            // Everyone this shop's orders go to (besides whoever placed the
+            // order), each with where the address comes from. Same rules as
+            // resolveOrderRecipients, which does the sending.
+            const everyone = [];
+            const seen = new Set();
+            const add = (list, from) => validEmails(list).forEach(e => { if (!seen.has(e)) { seen.add(e); everyone.push({ email: e, from }); } });
+            add(notify, 'shop');
+            add(contactEmail ? [contactEmail] : [], 'company_contact');
+            add(managerEmails, 'company_group');
+            if (branchOn) { add(branchEmails, 'branch'); add(branchStaff, 'branch_staff'); }
+            return {
+                id: l.id, name: l.name, city: l.city,
+                notify_emails: notify,
+                supplier_branch_id: l.supplier_branch_id,
+                branch_name: branch ? branch.name : null,
+                branch_active: !!branchOn,
+                branch_emails: branchEmails,
+                branch_staff: branchStaff,
+                everyone
+            };
+        });
         res.json({
             company_name: company?.name || '',
-            contact_email: company?.contact_email || '',
-            manager_emails: Array.isArray(company?.email_config?.manager_emails) ? company.email_config.manager_emails : [],
+            contact_email: contactEmail,
+            manager_emails: managerEmails,
             branches: (branches || []).filter(b => b.is_active !== false).map(b => ({ id: b.id, name: b.name })),
             locations: locs
         });
