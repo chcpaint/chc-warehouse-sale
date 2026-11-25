@@ -14,7 +14,7 @@ const { requireAdminAuth, requireSuperAdmin, requireCompanyAccess, requireFullAd
 const { catalogUpload, logoUpload, invoiceUpload } = require('../middleware/upload');
 const { stripHtml, sanitizeObject, generateSlug, validateEmail, isValidUUID } = require('../utils/sanitize');
 const { searchTerm } = require('../utils/search-term');
-const { resolveOrderRecipients, branchStaffEmails, validEmails } = require('../utils/recipients');
+const { resolveOrderRecipients, branchStaff, validEmails } = require('../utils/recipients');
 const { sendInvoiceReady, sendOrderClosed, sendOrderStatusUpdate, sendOrderNoteAdded } = require('../utils/email');
 const { orderScopeIds, applyOrderScope, orderInScope, staffLocationIds, isHeadOffice, staffDistributorId } = require('../utils/order-scope');
 const { redactSecrets } = require('../utils/audit');
@@ -1674,8 +1674,13 @@ router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req
         // emails too (utils/recipients.js). Shown here so the screen lists
         // everyone who is actually emailed, not only the typed-in lists.
         const staffByBranch = {};
-        for (const bid of [...new Set((locations || []).map(l => l.supplier_branch_id).filter(Boolean))]) {
-            staffByBranch[bid] = validEmails(await branchStaffEmails(bid));
+        const shopsOnBranch = {};
+        const branchIds = [...new Set((locations || []).map(l => l.supplier_branch_id).filter(Boolean))];
+        for (const bid of branchIds) staffByBranch[bid] = await branchStaff(bid);
+        if (branchIds.length) {
+            // How many shops (any customer) share each branch: its list is edited for all of them at once.
+            const { data: shared } = await supabaseAdmin.from('company_locations').select('supplier_branch_id, is_active').in('supplier_branch_id', branchIds);
+            (shared || []).filter(r => r.is_active !== false).forEach(r => { shopsOnBranch[r.supplier_branch_id] = (shopsOnBranch[r.supplier_branch_id] || 0) + 1; });
         }
         const contactEmail = company?.contact_email || '';
         const managerEmails = Array.isArray(company?.email_config?.manager_emails) ? company.email_config.manager_emails : [];
@@ -1684,7 +1689,8 @@ router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req
             const branchOn = branch && branch.is_active !== false;
             const notify = Array.isArray(l.notify_emails) ? l.notify_emails : [];
             const branchEmails = branch ? (branch.emails || []) : [];
-            const branchStaff = branchOn ? (staffByBranch[l.supplier_branch_id] || []) : [];
+            const staffPeople = branchOn ? (staffByBranch[l.supplier_branch_id] || []) : [];
+            const staffEmails = validEmails(staffPeople.map(p => p.email));
             // Everyone this shop's orders go to (besides whoever placed the
             // order), each with where the address comes from. Same rules as
             // resolveOrderRecipients, which does the sending.
@@ -1694,7 +1700,7 @@ router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req
             add(notify, 'shop');
             add(contactEmail ? [contactEmail] : [], 'company_contact');
             add(managerEmails, 'company_group');
-            if (branchOn) { add(branchEmails, 'branch'); add(branchStaff, 'branch_staff'); }
+            if (branchOn) { add(branchEmails, 'branch'); add(staffEmails, 'branch_staff'); }
             return {
                 id: l.id, name: l.name, city: l.city,
                 notify_emails: notify,
@@ -1702,7 +1708,9 @@ router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req
                 branch_name: branch ? branch.name : null,
                 branch_active: !!branchOn,
                 branch_emails: branchEmails,
-                branch_staff: branchStaff,
+                branch_staff: staffEmails,
+                branch_staff_people: staffPeople,
+                branch_shop_count: l.supplier_branch_id ? (shopsOnBranch[l.supplier_branch_id] || 0) : 0,
                 everyone
             };
         });
@@ -1710,10 +1718,48 @@ router.get('/companies/:companyId/email-setup', requireCompanyAccess, async (req
             company_name: company?.name || '',
             contact_email: contactEmail,
             manager_emails: managerEmails,
+            // CHC-side lists (branch emails, staff assignments) are super-admin edits,
+            // the same rule as the CHC Branches and Admin Users screens.
+            can_edit_chc: req.admin.role === 'super_admin',
             branches: (branches || []).filter(b => b.is_active !== false).map(b => ({ id: b.id, name: b.name })),
             locations: locs
         });
     } catch (err) { console.error('Email-setup load error:', err); res.status(500).json({ error: 'Failed to load email setup.' }); }
+});
+
+/**
+ * Take one CHC staff account off one branch, so it stops getting that branch's
+ * order emails (and, for order-desk accounts, stops seeing that branch's
+ * orders). Only for a branch that serves one of this customer's shops. The
+ * account itself is left alone; switch it off in Admin Users if they left.
+ */
+router.post('/companies/:companyId/email-setup/branch-staff/remove', requireCompanyAccess, requireSuperAdmin, async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const adminUserId = String(req.body.admin_user_id || '');
+        const branchId = String(req.body.branch_id || '');
+        if (!isValidUUID(adminUserId) || !isValidUUID(branchId)) return res.status(400).json({ error: 'Choose a staff member and a branch.' });
+        const { data: serves } = await supabaseAdmin.from('company_locations').select('id')
+            .eq('company_id', companyId).eq('supplier_branch_id', branchId).limit(1);
+        if (!serves || !serves.length) return res.status(404).json({ error: 'That branch does not serve this customer.' });
+        const mine = staffDistributorId(req);
+        const { data: branch } = await supabaseAdmin.from('supplier_branches').select('id, name, distributor_id').eq('id', branchId).maybeSingle();
+        if (!branch || (mine && branch.distributor_id && branch.distributor_id !== mine)) return res.status(404).json({ error: 'Branch not found.' });
+        const { data: user } = await supabaseAdmin.from('admin_users').select('id, name, email, branch_id, distributor_id').eq('id', adminUserId).maybeSingle();
+        if (!user || (mine && user.distributor_id && user.distributor_id !== mine)) return res.status(404).json({ error: 'Staff account not found.' });
+
+        await supabaseAdmin.from('admin_user_branches').delete().eq('admin_user_id', adminUserId).eq('branch_id', branchId);
+        if (user.branch_id === branchId) {
+            // The legacy single-branch column follows the first branch still assigned (or none).
+            const { data: left } = await supabaseAdmin.from('admin_user_branches').select('branch_id').eq('admin_user_id', adminUserId).limit(1);
+            await supabaseAdmin.from('admin_users').update({ branch_id: (left && left[0] && left[0].branch_id) || null, updated_at: new Date().toISOString() }).eq('id', adminUserId);
+        }
+        await logAction(req.admin.id, 'admin_user_removed_from_branch', 'admin_user', adminUserId, { branch_id: branchId, branch: branch.name, email: user.email, via: 'order_emails' }, req.ip);
+        res.json({ message: `${user.name || user.email} no longer gets ${branch.name}'s order emails.` });
+    } catch (err) {
+        console.error('Remove branch staff error:', err);
+        res.status(500).json({ error: 'Could not take them off that branch.' });
+    }
 });
 
 // ============================================================

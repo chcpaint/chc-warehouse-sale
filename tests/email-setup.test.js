@@ -221,3 +221,39 @@ test('a switched-off branch shows no CHC recipients, as nothing is sent to it', 
     assert.equal(ym.branch_active, false);
     assert.ok(!ym.everyone.some(x => x.from === 'branch' || x.from === 'branch_staff'));
 });
+
+test('staff are listed with name and id, and the screen says how many shops share the branch', async () => {
+    setup();
+    const r = await request(adminApp()).get(`/api/admin/companies/${CO}/email-setup`);
+    const ym = r.body.locations.find(l => l.name === 'York Mills');
+    assert.deepEqual(ym.branch_staff_people, [{ id: STAFF_ON.id, name: 'Asaad', email: 'asaad@chc.example' }]);
+    assert.equal(ym.branch_shop_count, 1);
+    assert.equal(r.body.can_edit_chc, true);
+});
+
+test('remove from branch: they stop getting that branch’s emails, their login stays on, and it is audited', async () => {
+    setup();
+    fake.db.admin_users.find(u => u.id === STAFF_ON.id).branch_id = BRANCH_MARKHAM;
+    const r = await request(adminApp()).post(`/api/admin/companies/${CO}/email-setup/branch-staff/remove`)
+        .send({ admin_user_id: STAFF_ON.id, branch_id: BRANCH_MARKHAM });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(fake.db.admin_user_branches.filter(x => x.admin_user_id === STAFF_ON.id).length, 0);
+    const u = fake.db.admin_users.find(x => x.id === STAFF_ON.id);
+    assert.equal(u.branch_id, null);
+    assert.equal(u.is_active, true);
+    assert.ok(fake.db.audit_log.some(a => a.action === 'admin_user_removed_from_branch'));
+    const after = await request(adminApp()).get(`/api/admin/companies/${CO}/email-setup`);
+    assert.ok(!after.body.locations[0].everyone.some(x => x.email === 'asaad@chc.example'));
+});
+
+test('remove from branch is refused for a branch that does not serve this customer, and for anyone but a super admin', async () => {
+    setup();
+    const other = await request(adminApp()).post(`/api/admin/companies/${CO}/email-setup/branch-staff/remove`)
+        .send({ admin_user_id: STAFF_ON.id, branch_id: BRANCH_OTHER });
+    assert.equal(other.status, 404);
+    authAdmin = ORDER_MANAGER;
+    const denied = await request(adminApp()).post(`/api/admin/companies/${CO}/email-setup/branch-staff/remove`)
+        .send({ admin_user_id: STAFF_ON.id, branch_id: BRANCH_MARKHAM });
+    assert.ok([403, 401].includes(denied.status), String(denied.status));
+    assert.equal(fake.db.admin_user_branches.length, 1);
+});

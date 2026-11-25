@@ -16,6 +16,11 @@ function validEmails(list) {
  * nobody should keep getting order mail after being deactivated.
  */
 async function branchStaffEmails(branchId) {
+    return (await branchStaff(branchId)).map(s => s.email);
+}
+
+/** The same people as branchStaffEmails, with id and name, for the Order emails screen. */
+async function branchStaff(branchId) {
     if (!branchId) return [];
     const { data: assigned } = await supabaseAdmin
         .from('admin_user_branches')
@@ -35,9 +40,9 @@ async function branchStaffEmails(branchId) {
 
     const { data: staff } = await supabaseAdmin
         .from('admin_users')
-        .select('email, is_active')
+        .select('id, name, email, is_active')
         .in('id', ids);
-    return (staff || []).filter(s => s.is_active).map(s => s.email);
+    return (staff || []).filter(s => s.is_active && s.email).map(s => ({ id: s.id, name: s.name || '', email: s.email }));
 }
 
 /**
@@ -99,4 +104,4 @@ async function resolveOrderRecipients(order) {
     return { to, replyTo, staffTo, customerTo };
 }
 
-module.exports = { resolveOrderRecipients, validEmails, branchStaffEmails };
+module.exports = { resolveOrderRecipients, validEmails, branchStaffEmails, branchStaff };

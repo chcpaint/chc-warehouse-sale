@@ -2340,7 +2340,7 @@
                 <h3 class="text-xl font-bold"><i class="fas fa-envelope-open-text text-blue-500 mr-2"></i>Email Recipients &mdash; <span id="er-company-name"></span></h3>
                 <button onclick="hideModal('email-recipients-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
-            <p class="text-xs text-gray-500 mb-4">Every order also always emails <b>the person who placed it</b> (Reply-To goes to them). Add anyone else who should be copied below.</p>
+            <p class="text-xs text-gray-500 mb-4">Every order also always emails <b>the person who placed it</b> (Reply-To goes to them). Press <b>Edit</b> on a section to add or remove people, for example when someone leaves a shop or CHC.</p>
             <div id="er-body"><p class="text-center text-gray-400 py-6">Loading...</p></div>
         </div>
     </div>
@@ -7403,6 +7403,7 @@
     let erCompanyId = null, erBranches = [];
     async function openEmailRecipients(companyId, companyName) {
         erCompanyId = companyId;
+        erEditing.clear();
         document.getElementById('er-company-name').textContent = companyName;
         document.getElementById('er-body').innerHTML = '<p class="text-center text-gray-400 py-6">Loading...</p>';
         showModal('email-recipients-modal');
@@ -7429,54 +7430,143 @@
         branch: ['CHC branch list', 'bg-purple-50 text-purple-800 border-purple-200'],
         branch_staff: ['CHC staff (Admin Users)', 'bg-purple-50 text-purple-800 border-purple-200']
     };
+    let erData = null;
+    const erEditing = new Set();   // which sections are open for editing ('company' or a shop id)
+    function erList(items) {
+        return items.map(x => {
+            const f = ER_FROM[x.from] || [x.from, 'bg-gray-50 text-gray-700 border-gray-200'];
+            return `<li class="flex items-center justify-between gap-3 py-1 border-b border-gray-100 last:border-0"><span class="text-sm text-gray-800 break-all">${esc(x.email)}</span><span class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${f[1]}">${esc(f[0])}</span></li>`;
+        }).join('');
+    }
+    function erEditBtn(key, label) {
+        return `<button type="button" onclick="erToggle('${key}')" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50"><i class="fas fa-pen"></i> ${label || 'Edit'}</button>`;
+    }
+    function erToggle(key) {
+        if (erEditing.has(key)) erEditing.delete(key); else erEditing.add(key);
+        renderEmailSetup(erData);
+        const first = document.querySelector(`[data-er-shop="${key}"] textarea, [data-er-company] textarea`);
+        if (erEditing.has(key) && first) first.focus();
+    }
     function renderEmailSetup(d) {
-        const cards = (d.locations || []).map(l => {
-            const everyone = l.everyone || [];
-            const chips = everyone.map(x => {
-                const f = ER_FROM[x.from] || [x.from, 'bg-gray-50 text-gray-700 border-gray-200'];
-                return `<li class="flex items-center justify-between gap-3 py-1 border-b border-gray-100 last:border-0"><span class="text-sm text-gray-800 break-all">${esc(x.email)}</span><span class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${f[1]}">${esc(f[0])}</span></li>`;
-            }).join('');
-            const shopList = (l.notify_emails || []).join('\n');
-            const staff = (l.branch_staff || []);
-            return `
-            <div class="rounded-xl border border-gray-200 p-4" data-er-shop="${l.id}">
-                <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-                    <p class="font-semibold text-gray-900">${esc(l.name)}${l.city ? ` <span class="text-xs font-normal text-gray-400">${esc(l.city)}</span>` : ''}</p>
-                    <p class="text-xs text-gray-500">${everyone.length} address${everyone.length === 1 ? '' : 'es'} get this shop's orders, plus whoever places the order</p>
-                </div>
-                <div class="grid gap-4 md:grid-cols-2">
-                    <div class="space-y-3">
-                        <div>
-                            <label for="er-loc-${l.id}" class="block text-xs font-semibold text-gray-600 mb-1">This shop's people <span class="font-normal text-gray-400">(one per line)</span></label>
-                            <textarea id="er-loc-${l.id}" data-loc="${l.id}" rows="${Math.max(3, (l.notify_emails || []).length + 1)}" class="er-loc-emails w-full px-3 py-2 border rounded-lg text-sm font-mono" placeholder="owner@shop.com">${esc(shopList)}</textarea>
-                        </div>
-                        <div>
-                            <label for="er-br-${l.id}" class="block text-xs font-semibold text-gray-600 mb-1">CHC branch that serves this shop</label>
-                            <select id="er-br-${l.id}" data-loc="${l.id}" class="er-loc-branch w-full text-sm border rounded-lg px-2 py-2 bg-white">${erBranchOpts(l.supplier_branch_id)}</select>
-                            <p class="text-xs text-gray-500 mt-1">${l.supplier_branch_id
-                                ? `Branch list: ${(l.branch_emails || []).length ? esc(l.branch_emails.join(', ')) : 'none'} <span class="text-gray-400">(edit under CHC Branches)</span><br>Staff assigned to ${esc(l.branch_name || 'this branch')}: ${staff.length ? esc(staff.join(', ')) : 'none'} <span class="text-gray-400">(edit in Admin Users)</span>${l.branch_active === false ? '<br><span class="text-amber-700">This branch is switched off, so it gets no emails.</span>' : ''}`
-                                : '<span class="text-amber-700">No branch: CHC staff are not emailed for this shop.</span>'}</p>
-                        </div>
-                    </div>
-                    <div>
-                        <p class="text-xs font-semibold text-gray-600 mb-1">Who gets ${esc(l.name)}'s order emails</p>
-                        <ul class="rounded-lg bg-gray-50 px-3 py-1">${chips || '<li class="py-2 text-sm text-gray-500">Nobody yet besides whoever places the order.</li>'}</ul>
-                    </div>
-                </div>
-            </div>`;
-        }).join('') || '<p class="px-2 py-4 text-center text-gray-400 text-sm">No locations yet.</p>';
-        document.getElementById('er-body').innerHTML = `
-            <div class="bg-gray-50 rounded-lg p-4 mb-4">
+        erData = d;
+        const canChc = !!d.can_edit_chc;
+        const companyItems = [
+            ...(d.contact_email ? [{ email: d.contact_email, from: 'company_contact' }] : []),
+            ...(d.manager_emails || []).map(e => ({ email: e, from: 'company_group' }))
+        ];
+        const company = erEditing.has('company') ? `
+            <div class="bg-gray-50 rounded-xl p-4 mb-4" data-er-company>
                 <p class="font-semibold text-gray-800 mb-2">Company recipients <span class="text-xs font-normal text-gray-400">(copied on every order, from every shop)</span></p>
                 <label for="er-contact" class="block text-xs font-medium text-gray-500 mb-1">Company contact email</label>
                 <input type="text" id="er-contact" class="w-full px-3 py-2 border rounded-lg text-sm mb-3" value="${esc(d.contact_email || '')}" placeholder="ap@company.com">
                 <label for="er-managers" class="block text-xs font-medium text-gray-500 mb-1">Manager / general group <span class="text-gray-400">(one per line)</span></label>
                 <textarea id="er-managers" rows="${Math.max(2, (d.manager_emails || []).length + 1)}" class="w-full px-3 py-2 border rounded-lg text-sm font-mono" placeholder="manager@company.com">${esc((d.manager_emails || []).join('\n'))}</textarea>
-                <button onclick="saveCompanyEmails()" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">Save company recipients</button>
-            </div>
-            <p class="font-semibold text-gray-800 mb-2">Shop by shop</p>
-            <div class="space-y-3">${cards}</div>
-            <button onclick="saveLocationEmails()" class="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">Save shop recipients &amp; branches</button>`;
+                <div class="mt-3 flex gap-2"><button onclick="saveCompanyEmails()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">Save</button>
+                <button onclick="erToggle('company')" class="px-4 py-1.5 rounded-lg text-sm bg-white border border-gray-300">Cancel</button></div>
+            </div>` : `
+            <div class="bg-gray-50 rounded-xl p-4 mb-4" data-er-company>
+                <div class="flex items-center justify-between gap-2 mb-2"><p class="font-semibold text-gray-800">Company recipients <span class="text-xs font-normal text-gray-400">(copied on every order, from every shop)</span></p>${erEditBtn('company')}</div>
+                <ul class="rounded-lg bg-white px-3 py-1">${erList(companyItems) || '<li class="py-2 text-sm text-gray-500">None.</li>'}</ul>
+            </div>`;
+
+        const cards = (d.locations || []).map(l => {
+            const everyone = l.everyone || [];
+            const editing = erEditing.has(l.id);
+            const head = `
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div><p class="font-semibold text-gray-900">${esc(l.name)}${l.city ? ` <span class="text-xs font-normal text-gray-400">${esc(l.city)}</span>` : ''}</p>
+                    <p class="text-xs text-gray-500">${everyone.length} address${everyone.length === 1 ? '' : 'es'} get this shop's orders, plus whoever places the order${l.branch_name ? ` · CHC branch: ${esc(l.branch_name)}` : ''}</p></div>
+                    ${editing ? '' : erEditBtn(l.id)}
+                </div>`;
+            if (!editing) {
+                return `<div class="rounded-xl border border-gray-200 p-4" data-er-shop="${l.id}">${head}
+                    <ul class="rounded-lg bg-gray-50 px-3 py-1">${erList(everyone) || '<li class="py-2 text-sm text-gray-500">Nobody yet besides whoever places the order.</li>'}</ul>
+                    ${!l.supplier_branch_id ? '<p class="text-xs text-amber-700 mt-2">No CHC branch: CHC staff are not emailed for this shop.</p>' : ''}
+                    ${l.supplier_branch_id && l.branch_active === false ? '<p class="text-xs text-amber-700 mt-2">This shop\'s branch is switched off, so CHC staff are not emailed.</p>' : ''}
+                </div>`;
+            }
+            const people = l.branch_staff_people || [];
+            const staffRows = people.map(p => `
+                <li class="flex flex-wrap items-center justify-between gap-2 py-1.5 border-b border-gray-100 last:border-0">
+                    <span class="text-sm"><span class="text-gray-800">${esc(p.email)}</span>${p.name ? ` <span class="text-xs text-gray-500">${esc(p.name)}</span>` : ''}</span>
+                    ${canChc ? `<span class="flex gap-2">
+                        <button type="button" onclick="erRemoveStaff('${l.id}','${p.id}')" class="text-xs rounded border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50">Remove from ${esc(l.branch_name || 'branch')}</button>
+                        <button type="button" onclick="erStaffLeft('${p.id}')" class="text-xs rounded border border-red-200 bg-white px-2 py-1 text-red-700 hover:bg-red-50">Left CHC</button></span>` : ''}
+                </li>`).join('');
+            const shared = l.branch_shop_count > 1 ? ` <span class="font-normal text-amber-700">· shared by ${l.branch_shop_count} shops</span>` : '';
+            return `<div class="rounded-xl border-2 border-blue-300 p-4" data-er-shop="${l.id}">${head}
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div class="space-y-3">
+                        <div>
+                            <label for="er-loc-${l.id}" class="block text-xs font-semibold text-gray-600 mb-1">This shop's people <span class="font-normal text-gray-400">(one per line)</span></label>
+                            <textarea id="er-loc-${l.id}" rows="${Math.max(3, (l.notify_emails || []).length + 1)}" class="w-full px-3 py-2 border rounded-lg text-sm font-mono" placeholder="owner@shop.com">${esc((l.notify_emails || []).join('\n'))}</textarea>
+                        </div>
+                        <div>
+                            <label for="er-br-${l.id}" class="block text-xs font-semibold text-gray-600 mb-1">CHC branch that serves this shop</label>
+                            <select id="er-br-${l.id}" class="w-full text-sm border rounded-lg px-2 py-2 bg-white">${erBranchOpts(l.supplier_branch_id)}</select>
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        ${l.supplier_branch_id ? `
+                        <div>
+                            <label for="er-bl-${l.id}" class="block text-xs font-semibold text-gray-600 mb-1">${esc(l.branch_name || 'Branch')} email list <span class="font-normal text-gray-400">(one per line)</span>${shared}</label>
+                            <textarea id="er-bl-${l.id}" rows="${Math.max(3, (l.branch_emails || []).length + 1)}" class="w-full px-3 py-2 border rounded-lg text-sm font-mono" ${canChc ? '' : 'disabled'}>${esc((l.branch_emails || []).join('\n'))}</textarea>
+                            ${l.branch_shop_count > 1 ? `<p class="text-xs text-gray-500 mt-1">Changing this list changes it for every shop on ${esc(l.branch_name || 'this branch')}.</p>` : ''}
+                        </div>
+                        <div>
+                            <p class="text-xs font-semibold text-gray-600 mb-1">CHC staff assigned to ${esc(l.branch_name || 'this branch')}</p>
+                            <ul class="rounded-lg bg-gray-50 px-3 py-1">${staffRows || '<li class="py-2 text-sm text-gray-500">None.</li>'}</ul>
+                        </div>` : '<p class="text-xs text-amber-700">Pick a branch to email CHC staff about this shop\'s orders.</p>'}
+                        ${canChc ? '' : '<p class="text-xs text-gray-500">Only a super admin can change CHC branch lists and staff.</p>'}
+                    </div>
+                </div>
+                <p data-er-err="${l.id}" class="hidden mt-2 text-sm text-red-700"></p>
+                <div class="mt-3 flex gap-2"><button onclick="erSaveShop('${l.id}')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">Save</button>
+                <button onclick="erToggle('${l.id}')" class="px-4 py-1.5 rounded-lg text-sm bg-white border border-gray-300">Cancel</button></div>
+            </div>`;
+        }).join('') || '<p class="px-2 py-4 text-center text-gray-400 text-sm">No locations yet.</p>';
+        document.getElementById('er-body').innerHTML = company + '<p class="font-semibold text-gray-800 mb-2">Shop by shop</p><div class="space-y-3">' + cards + '</div>';
+    }
+    async function erSaveShop(locId) {
+        const l = (erData.locations || []).find(x => x.id === locId); if (!l) return;
+        const err = document.querySelector(`[data-er-err="${locId}"]`);
+        const fail = m => { err.textContent = m; err.classList.remove('hidden'); };
+        const shop = erParseEmails(document.getElementById(`er-loc-${locId}`).value);
+        const branchId = document.getElementById(`er-br-${locId}`).value || null;
+        try {
+            const r = await adminFetch(`/companies/${erCompanyId}/locations/${locId}`, { method: 'PUT', body: JSON.stringify({ notify_emails: shop, supplier_branch_id: branchId }) });
+            if (!r.ok) { const d = await r.json().catch(() => ({})); return fail(d.error || 'Could not save this shop.'); }
+            const bl = document.getElementById(`er-bl-${locId}`);
+            if (bl && !bl.disabled && l.supplier_branch_id) {
+                const list = erParseEmails(bl.value);
+                if (list.join(',') !== (l.branch_emails || []).map(e => e.toLowerCase()).join(',')) {
+                    const r2 = await adminFetch(`/branches/${l.supplier_branch_id}`, { method: 'PUT', body: JSON.stringify({ emails: list }) });
+                    if (!r2.ok) { const d = await r2.json().catch(() => ({})); return fail(d.error || 'The shop saved, but the branch list did not.'); }
+                }
+            }
+            erEditing.delete(locId);
+            adminToast(`Updated — ${l.name}'s order emails saved`);
+            erReload();
+        } catch (e) { fail('No connection. Nothing was saved.'); }
+    }
+    async function erRemoveStaff(locId, userId) {
+        const l = (erData.locations || []).find(x => x.id === locId); if (!l) return;
+        const p = (l.branch_staff_people || []).find(x => x.id === userId); if (!p) return;
+        if (!confirm(`Take ${p.name || p.email} off ${l.branch_name}?\n\nThey stop getting order emails for every shop on ${l.branch_name}, and an order-desk login stops seeing ${l.branch_name}'s orders. Their login stays on.`)) return;
+        const r = await adminFetch(`/companies/${erCompanyId}/email-setup/branch-staff/remove`, { method: 'POST', body: JSON.stringify({ admin_user_id: userId, branch_id: l.supplier_branch_id }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return alert(d.error || 'Could not take them off that branch.');
+        adminToast(d.message || 'Removed.');
+        erReload();
+    }
+    async function erStaffLeft(userId) {
+        const p = (erData.locations || []).flatMap(l => l.branch_staff_people || []).find(x => x.id === userId); if (!p) return;
+        if (!confirm(`${p.name || p.email} left CHC?\n\nThis switches off their console login. They stop getting all order emails and can't sign in. You can switch them back on in Admin Users.`)) return;
+        const r = await adminFetch(`/users/${userId}`, { method: 'PUT', body: JSON.stringify({ is_active: false }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return alert(d.error || 'Could not switch off that login.');
+        adminToast(`${p.name || p.email}'s login is switched off`);
+        erReload();
     }
     async function erReload() {
         try {
@@ -7492,26 +7582,11 @@
             const d = await resp.json();
             if (!resp.ok) { alert(d.error || 'Failed to save.'); return; }
             adminToast('Updated \u2014 company recipients saved');
+            erEditing.delete('company');
             loadCompanies();
             erReload();
         } catch (e) { alert('Failed to save company recipients.'); }
     }
-    async function saveLocationEmails() {
-        const branchByLoc = {};
-        document.querySelectorAll('.er-loc-branch').forEach(sel => { branchByLoc[sel.dataset.loc] = sel.value; });
-        let ok = 0, fail = 0;
-        for (const inp of document.querySelectorAll('.er-loc-emails')) {
-            const locId = inp.dataset.loc;
-            const body = { notify_emails: erParseEmails(inp.value), supplier_branch_id: branchByLoc[locId] || null };
-            try {
-                const resp = await adminFetch(`/companies/${erCompanyId}/locations/${locId}`, { method: 'PUT', body: JSON.stringify(body) });
-                if (resp.ok) ok++; else fail++;
-            } catch (e) { fail++; }
-        }
-        if (fail) alert(`Saved ${ok} location(s), ${fail} failed.`); else adminToast(`Updated \u2014 ${ok} location(s) saved`);
-        erReload();
-    }
-
     async function editNotificationEmail(companyId, currentEmail) {
         const newEmail = prompt('Company contact email (copied on every order for this company):', currentEmail);
         if (newEmail === null) return; // cancelled
