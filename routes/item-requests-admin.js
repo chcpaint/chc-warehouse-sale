@@ -8,6 +8,7 @@
  *   POST /                    enter a request for a customer who called, emailed or texted
  *   PUT  /:id                 close it: { status: complete|cannot_supply|open, product_id?, staff_note?, notify? }
  *   GET  /count               how many are waiting (sidebar badge)
+ *   GET  /customers           customers + shops for the request form's pickers
  *   GET  /products            search a customer's list to link the item (?company_id=, ?q=)
  *   GET  /settings            who is emailed about new requests
  *   PUT  /settings            change that list (full admins)
@@ -130,6 +131,24 @@ async function scopedCompanies(req) {
     const { data: coRows } = await companies;
     return (coRows || []).filter(c => !dist || !c.distributor_id || c.distributor_id === dist);
 }
+
+/** The customers (and their shops) this account can enter a request for: the form's pickers. */
+router.get('/customers', async (req, res) => {
+    try {
+        const coList = await scopedCompanies(req);
+        const coIds = coList.map(c => c.id);
+        const shops = {};
+        if (coIds.length) {
+            const { data: locs } = await supabaseAdmin.from('company_locations').select('id, name, company_id, is_active')
+                .in('company_id', coIds).order('name');
+            (locs || []).filter(l => l.is_active !== false).forEach(l => { (shops[l.company_id] = shops[l.company_id] || []).push({ id: l.id, name: l.name }); });
+        }
+        res.json({ companies: coList.map(c => ({ id: c.id, name: c.name, locations: shops[c.id] || [] })) });
+    } catch (err) {
+        console.error('Item request customers error:', err);
+        res.status(500).json({ error: 'Could not load customers.' });
+    }
+});
 
 /** How many are waiting: the sidebar badge. */
 router.get('/count', async (req, res) => {

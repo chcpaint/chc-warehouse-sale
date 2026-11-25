@@ -297,3 +297,14 @@ test('the sidebar badge counts waiting requests for the customers this account c
     admin = { id: 'a2', role: 'admin', name: 'Shop admin', company_id: CO2 };
     assert.equal((await request(app()).get('/api/admin/item-requests/count')).body.open, 1);
 });
+
+test('the request form’s customer picker: everyone for head office, only their own shops’ customers for the order desk', async () => {
+    reset();
+    const all = await request(app()).get('/api/admin/item-requests/customers');
+    assert.equal(all.status, 200);
+    assert.deepEqual(all.body.companies.map(c => c.name).sort(), ['Concord Collision', 'Weins']);
+    assert.deepEqual(all.body.companies.find(c => c.id === CO).locations, [{ id: LOC, name: 'Concord' }]);
+    admin = { id: 'd1', role: 'order_desk', name: 'Desk', loc_ids: [LOC2] };
+    const desk = await request(app()).get('/api/admin/item-requests/customers');
+    assert.deepEqual(desk.body.companies.map(c => c.name), ['Weins']);
+});

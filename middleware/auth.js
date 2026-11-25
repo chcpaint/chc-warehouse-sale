@@ -326,7 +326,7 @@ const ORDER_DESK_ALLOW = [
     // for a customer who called -- per Adam. Reachability only: the route
     // scopes every request to customers this account can already see, and
     // changing who is emailed needs a full admin (routes/item-requests-admin.js).
-    ['GET', /^\/item-requests(\/(settings|products|count))?$/],
+    ['GET', /^\/item-requests(\/(settings|products|count|customers))?$/],
     ['POST', /^\/item-requests$/],
     ['PUT', /^\/item-requests\/[^/]+$/],
     ['GET', /^\/whoami$/],

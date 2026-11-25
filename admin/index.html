@@ -1110,6 +1110,11 @@
                             </div>
                         </div>
                         <div class="flex gap-2 items-center flex-wrap">
+                            <!-- A customer asks for an item that isn't on their list: log it here
+                                 instead of messaging Adam (public/item-requests.js). -->
+                            <button onclick="irNewRequest()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold" title="A customer asked for an item that isn't on their list">
+                                <i class="fas fa-circle-plus mr-1"></i> Item request
+                            </button>
                             <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
                                 <button id="grp-branch" onclick="setOrderGroup('branch', this)" class="px-3 py-1.5 bg-blue-700 text-white font-semibold"><i class="fas fa-warehouse mr-1"></i>By CHC Branch</button>
                                 <button id="grp-all" onclick="setOrderGroup('all', this)" class="px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50">All</button>
@@ -2350,7 +2355,12 @@
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold"><i class="fas fa-pen-to-square text-blue-500 mr-2"></i>Order <span id="od-order-number"></span></h3>
-                <button onclick="hideModal('order-detail-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                <div class="flex items-center gap-3">
+                    <button onclick="irNewRequestForOrder()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold" title="This customer asked for an item that isn't on their list">
+                        <i class="fas fa-circle-plus mr-1"></i> Item request
+                    </button>
+                    <button onclick="hideModal('order-detail-modal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                </div>
             </div>
 
             <h4 class="text-sm font-bold text-gray-700 mb-2">Pricing</h4>
@@ -3033,6 +3043,24 @@
             const r = await adminFetch('/item-requests/count'); if (!r.ok) return;
             irBadge((await r.json()).open || 0);
         } catch (e) { /* badge only */ }
+    }
+    /** The "Enter a request" form, from the Orders screen: the customer and shop picked there come pre-filled. */
+    function irNewRequest(companyId, locationId) {
+        if (!window.ItemRequests || !ItemRequests.openRequestForm) { adminToast('Still loading. Try again in a moment.', 'warn'); return; }
+        ItemRequests.openRequestForm({
+            req: (p, o) => adminFetch('/item-requests' + p, o),
+            raw: (p, o) => adminFetchRaw('/item-requests' + p, o),
+            companyId: companyId !== undefined ? companyId : (document.getElementById('admin-order-company') || {}).value || '',
+            locationId: locationId !== undefined ? locationId : (document.getElementById('admin-order-location') || {}).value || '',
+            toast: m => adminToast(m, 'ok'),
+            onDone: () => irCount()
+        });
+    }
+    /** From an open order: that order's customer and shop. */
+    function irNewRequestForOrder() {
+        const ctx = typeof orderDetailCtx !== 'undefined' ? orderDetailCtx : null;
+        const o = ctx ? (currentAdminOrders || []).find(x => x.id === ctx.orderId) : null;
+        irNewRequest(ctx ? ctx.companyId : '', o && o.location_id ? o.location_id : '');
     }
     function irLoad() {
         const root = document.getElementById('ir-console-root');

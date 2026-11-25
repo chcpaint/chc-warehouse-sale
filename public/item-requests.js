@@ -202,6 +202,88 @@
             '<input id="' + id + '" type="' + type + '" maxlength="200" class="w-full border rounded-lg px-3 py-2" placeholder="' + esc(ph || '') + '" value="' + esc(value || '') + '"' + (required ? ' required' : '') + '></div>';
     }
 
+    function modalBox(html) {
+        var back = document.createElement('div');
+        back.className = 'fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4';
+        back.innerHTML = '<div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92vh] overflow-y-auto p-6">' + html + '</div>';
+        document.body.appendChild(back);
+        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+        return { box: back.firstChild, close: function () { back.remove(); } };
+    }
+
+    /**
+     * The "Enter a request" form on its own, for any console screen (the Item
+     * requests list, the Orders screen, an order's window).
+     *   o.raw(path, init)  fetch to /api/admin/item-requests + path, no JSON content type
+     *   o.companies        [{id, name, locations:[{id,name}]}] the customers this account can see
+     *   o.companyId, o.locationId  pre-filled choices
+     *   o.toast(msg), o.onDone()   after it is saved
+     */
+    function requestForm(o) {
+    var cos = o.companies || [];
+    var m = modalBox('<h3 class="text-xl font-bold mb-1">Enter a request</h3>' +
+            '<p class="text-sm text-gray-500 mb-4">A customer called, emailed, texted or asked in person for an item to be added to their catalog. It joins the list and the request inbox is emailed.</p>' +
+            '<div class="grid sm:grid-cols-2 gap-3">' +
+            '<div><label for="irn-co" class="block text-sm font-semibold text-gray-700 mb-1">Customer <span class="text-red-600">*</span></label>' +
+            '<select id="irn-co" class="w-full border rounded-lg px-3 py-2"><option value="">Choose…</option>' + cos.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('') + '</select></div>' +
+            '<div><label for="irn-loc" class="block text-sm font-semibold text-gray-700 mb-1">Shop</label><select id="irn-loc" class="w-full border rounded-lg px-3 py-2"><option value="">Any / not sure</option></select></div>' +
+            '</div>' +
+            '<div class="mt-3">' + field('irn-item', 'Item', 'text', 'What they asked for', true) + '</div>' +
+            '<div class="grid grid-cols-2 gap-3 mt-3">' + field('irn-part', 'Part number', 'text', '') + field('irn-brand', 'Brand', 'text', '') + '</div>' +
+            '<div class="grid grid-cols-2 gap-3 mt-3">' + field('irn-qty', 'How many', 'text', '') +
+            '<div><label for="irn-via" class="block text-sm font-semibold text-gray-700 mb-1">How it came in</label><select id="irn-via" class="w-full border rounded-lg px-3 py-2">' +
+            VIA.map(function (v) { return '<option value="' + v[0] + '">' + esc(v[1]) + '</option>'; }).join('') + '</select></div></div>' +
+            '<div class="grid grid-cols-2 gap-3 mt-3">' + field('irn-name', 'Who asked', 'text', '') + field('irn-email', 'Their email', 'email', 'for the "ready" email') + '</div>' +
+            '<div class="mt-3"><label for="irn-notes" class="block text-sm font-semibold text-gray-700 mb-1">Notes</label><textarea id="irn-notes" rows="2" maxlength="2000" class="w-full border rounded-lg px-3 py-2"></textarea></div>' +
+            '<div class="mt-3"><label for="irn-photos" class="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-2 text-sm cursor-pointer"><i class="fas fa-camera"></i> Add photos (up to 3)</label>' +
+            '<input id="irn-photos" type="file" accept="image/*" multiple class="sr-only"><div data-thumbs="irn-photos" class="flex gap-3 mt-2"></div></div>' +
+            '<p data-err class="hidden mt-2 text-sm text-red-700"></p>' +
+            '<div class="mt-5 flex justify-end gap-2"><button type="button" data-x class="px-4 py-2 rounded-lg bg-gray-100">Cancel</button>' +
+            '<button type="button" data-ok class="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold">Add request</button></div>');
+        var picker = photoPicker(m.box, 'irn-photos');
+        var co = m.box.querySelector('#irn-co'), loc = m.box.querySelector('#irn-loc');
+        co.addEventListener('change', function () {
+            var c = cos.find(function (x) { return x.id === co.value; });
+            loc.innerHTML = '<option value="">Any / not sure</option>' + ((c && c.locations) || []).map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.name) + '</option>'; }).join('');
+        });
+        if (o.companyId && cos.some(function (c) { return c.id === o.companyId; })) {
+            co.value = o.companyId; co.dispatchEvent(new Event('change'));
+            if (o.locationId) loc.value = o.locationId;
+        }
+        m.box.querySelector('[data-x]').addEventListener('click', m.close);
+        m.box.querySelector('[data-ok]').addEventListener('click', async function () {
+            var err = m.box.querySelector('[data-err]');
+            if (!co.value) { err.textContent = 'Choose the customer.'; err.classList.remove('hidden'); return; }
+            var fd = new FormData();
+            fd.append('company_id', co.value);
+            if (loc.value) fd.append('location_id', loc.value);
+            [['item_name', 'irn-item'], ['part_number', 'irn-part'], ['brand', 'irn-brand'], ['quantity', 'irn-qty'], ['received_via', 'irn-via'],
+             ['requested_by_name', 'irn-name'], ['requested_by_email', 'irn-email'], ['notes', 'irn-notes']].forEach(function (p) {
+                var v = m.box.querySelector('#' + p[1]).value.trim(); if (v) fd.append(p[0], v);
+            });
+            picker.files().forEach(function (f) { fd.append('photos', f, f.name || 'photo.jpg'); });
+            var r = await o.raw('', { method: 'POST', body: fd });
+            var d = await readJson(r);
+            if (!r.ok) { err.textContent = d.error || 'That did not save.'; err.classList.remove('hidden'); return; }
+            m.close();
+            if (o.toast) o.toast(d.message || 'Added.');
+            if (o.onDone) o.onDone(d);
+        });
+    }
+
+
+    /** Open the form from anywhere in the console; loads the customer list first. */
+    async function openRequestForm(o) {
+        var companies = o.companies;
+        if (!companies) {
+            var r = await o.req('/customers');
+            var d = await readJson(r);
+            if (!r.ok) { if (o.toast) o.toast(d.error || 'Could not load customers.'); return; }
+            companies = d.companies || [];
+        }
+        requestForm(Object.assign({}, o, { companies: companies }));
+    }
+
     // ------------------------------------------------------------------
     // THE CONSOLE
     // ------------------------------------------------------------------
@@ -289,14 +371,7 @@
                 '</div></div></div>';
         }
 
-        function modal(html) {
-            var back = document.createElement('div');
-            back.className = 'fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4';
-            back.innerHTML = '<div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92vh] overflow-y-auto p-6">' + html + '</div>';
-            document.body.appendChild(back);
-            back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
-            return { box: back.firstChild, close: function () { back.remove(); } };
-        }
+        var modal = modalBox;
 
         function openClose(id, to) {
             var q = (data.requests || []).find(function (x) { return x.id === id; });
@@ -346,52 +421,7 @@
         }
 
         function openNew() {
-            var cos = data.companies || [];
-            var m = modal('<h3 class="text-xl font-bold mb-1">Enter a request</h3>' +
-                '<p class="text-sm text-gray-500 mb-4">A customer called, emailed, texted or asked in person for an item to be added to their catalog. It joins the list and the request inbox is emailed.</p>' +
-                '<div class="grid sm:grid-cols-2 gap-3">' +
-                '<div><label for="irn-co" class="block text-sm font-semibold text-gray-700 mb-1">Customer <span class="text-red-600">*</span></label>' +
-                '<select id="irn-co" class="w-full border rounded-lg px-3 py-2"><option value="">Choose…</option>' + cos.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('') + '</select></div>' +
-                '<div><label for="irn-loc" class="block text-sm font-semibold text-gray-700 mb-1">Shop</label><select id="irn-loc" class="w-full border rounded-lg px-3 py-2"><option value="">Any / not sure</option></select></div>' +
-                '</div>' +
-                '<div class="mt-3">' + field('irn-item', 'Item', 'text', 'What they asked for', true) + '</div>' +
-                '<div class="grid grid-cols-2 gap-3 mt-3">' + field('irn-part', 'Part number', 'text', '') + field('irn-brand', 'Brand', 'text', '') + '</div>' +
-                '<div class="grid grid-cols-2 gap-3 mt-3">' + field('irn-qty', 'How many', 'text', '') +
-                '<div><label for="irn-via" class="block text-sm font-semibold text-gray-700 mb-1">How it came in</label><select id="irn-via" class="w-full border rounded-lg px-3 py-2">' +
-                VIA.map(function (v) { return '<option value="' + v[0] + '">' + esc(v[1]) + '</option>'; }).join('') + '</select></div></div>' +
-                '<div class="grid grid-cols-2 gap-3 mt-3">' + field('irn-name', 'Who asked', 'text', '') + field('irn-email', 'Their email', 'email', 'for the "ready" email') + '</div>' +
-                '<div class="mt-3"><label for="irn-notes" class="block text-sm font-semibold text-gray-700 mb-1">Notes</label><textarea id="irn-notes" rows="2" maxlength="2000" class="w-full border rounded-lg px-3 py-2"></textarea></div>' +
-                '<div class="mt-3"><label for="irn-photos" class="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-2 text-sm cursor-pointer"><i class="fas fa-camera"></i> Add photos (up to 3)</label>' +
-                '<input id="irn-photos" type="file" accept="image/*" multiple class="sr-only"><div data-thumbs="irn-photos" class="flex gap-3 mt-2"></div></div>' +
-                '<p data-err class="hidden mt-2 text-sm text-red-700"></p>' +
-                '<div class="mt-5 flex justify-end gap-2"><button type="button" data-x class="px-4 py-2 rounded-lg bg-gray-100">Cancel</button>' +
-                '<button type="button" data-ok class="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold">Add request</button></div>');
-            var picker = photoPicker(m.box, 'irn-photos');
-            var co = m.box.querySelector('#irn-co'), loc = m.box.querySelector('#irn-loc');
-            co.addEventListener('change', function () {
-                var c = cos.find(function (x) { return x.id === co.value; });
-                loc.innerHTML = '<option value="">Any / not sure</option>' + ((c && c.locations) || []).map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.name) + '</option>'; }).join('');
-            });
-            if (filter.company_id) { co.value = filter.company_id; co.dispatchEvent(new Event('change')); }
-            m.box.querySelector('[data-x]').addEventListener('click', m.close);
-            m.box.querySelector('[data-ok]').addEventListener('click', async function () {
-                var err = m.box.querySelector('[data-err]');
-                if (!co.value) { err.textContent = 'Choose the customer.'; err.classList.remove('hidden'); return; }
-                var fd = new FormData();
-                fd.append('company_id', co.value);
-                if (loc.value) fd.append('location_id', loc.value);
-                [['item_name', 'irn-item'], ['part_number', 'irn-part'], ['brand', 'irn-brand'], ['quantity', 'irn-qty'], ['received_via', 'irn-via'],
-                 ['requested_by_name', 'irn-name'], ['requested_by_email', 'irn-email'], ['notes', 'irn-notes']].forEach(function (p) {
-                    var v = m.box.querySelector('#' + p[1]).value.trim(); if (v) fd.append(p[0], v);
-                });
-                picker.files().forEach(function (f) { fd.append('photos', f, f.name || 'photo.jpg'); });
-                var r = await raw('', { method: 'POST', body: fd });
-                var d = await readJson(r);
-                if (!r.ok) { err.textContent = d.error || 'That did not save.'; err.classList.remove('hidden'); return; }
-                m.close();
-                if (opts.toast) opts.toast(d.message || 'Added.');
-                load();
-            });
+            requestForm({ raw: raw, companies: data.companies, companyId: filter.company_id, toast: opts.toast, onDone: function () { load(); } });
         }
 
         async function openInbox() {
@@ -420,5 +450,5 @@
         return { reload: load };
     }
 
-    window.ItemRequests = { mountStore: mountStore, mountConsole: mountConsole };
+    window.ItemRequests = { mountStore: mountStore, mountConsole: mountConsole, openRequestForm: openRequestForm };
 })();
