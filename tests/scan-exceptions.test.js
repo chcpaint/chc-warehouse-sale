@@ -266,3 +266,39 @@ test('the kiosk records an unknown scan too, under the badge holder', () => {
     const direct = inv.match(/inventory\/lookup\?code=/g) || [];
     assert.equal(direct.length, 1, 'only the ambiguous-pick follow-up calls it directly');
 });
+
+test('a shop scan-out refused for stock is kept as "Not enough on hand"; the console fixes the count and closes it', async () => {
+    reset();
+    const r = await request(storeApp()).post('/api/store/concord/inventory/movements')
+        .send({ location_id: LOC, product_id: P_FILM, movement_type: 'consume', quantity: 3, actor_label: 'Sam', scanned_barcode: '30669' });
+    assert.equal(r.status, 409);
+    assert.match(r.body.error, /Only 0 on hand.*Saved to Scan issues/);
+    assert.equal(r.body.exception.reason, 'not_enough_stock');
+    assert.equal(r.body.exception.reason_label, 'Not enough on hand');
+    const row = fake.db.scan_exceptions[0];
+    assert.equal(row.suggested_product_id, P_FILM);
+    assert.equal(Number(row.qty), 3);
+    assert.equal(row.actor_label, 'Sam');
+
+    // A receive or count never records one: only a scan-out means goods the count missed.
+    assert.equal(fake.db.stock_movements.length, 0);
+
+    // Console: the issue offers "close", and closing with a count sets on hand.
+    const list = await request(adminApp()).get('/api/admin/scan-exceptions');
+    const issue = list.body.issues.find(i => i.id === row.id);
+    assert.equal(issue.scans_now.id, P_FILM);
+    const res = await request(adminApp()).post(`/api/admin/scan-exceptions/${row.id}/resolve`).send({ action: 'close', stock: 'count', qty: 4 });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.match(res.body.message, /on hand set to 4/);
+    assert.equal(fake.db.stock_movements[0].qty_change, 4);
+    assert.equal(fake.db.scan_exceptions[0].status, 'resolved');
+});
+
+test('the help page explains "Not enough on hand"', () => {
+    const vm = require('vm'); const w = {};
+    vm.runInNewContext(require('fs').readFileSync(path.join(ROOT, 'public/help-content.js'), 'utf8'), { window: w });
+    const sec = w.RAI_HELP.sections ? w.RAI_HELP.sections.find(s => s.id === 'scanissues') : null;
+    const items = sec ? sec.items : JSON.stringify(w.RAI_HELP);
+    assert.match(JSON.stringify(items), /Not enough on hand/);
+    assert.equal(se.REASONS.not_enough_stock.label, 'Not enough on hand');
+});

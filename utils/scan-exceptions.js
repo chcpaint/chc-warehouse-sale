@@ -20,6 +20,10 @@
  *                    wrong: almost always a misread. Scan it again.
  *   unknown_code     nothing anywhere matches. Someone needs to read the
  *                    package and say what it is.
+ *   not_enough_stock the item DID scan, but taking it would put on-hand below
+ *                    zero and the shop does not allow that, so the scan-out was
+ *                    refused. The goods were physically there, so the count is
+ *                    out. Recorded by recordStockShortfall(), not classified.
  *
  * A case or box code (a 14-digit GTIN starting 1-8) is also tried as the code
  * of the single item inside it, so a box scan can still point at its item.
@@ -249,7 +253,60 @@ async function recordScanException({ companyId, locationId, raw, context, contex
     }
 }
 
+/**
+ * Keep a scan-out that was refused because the count showed too few on hand.
+ * The item is known, so nothing is classified: the reason is not_enough_stock
+ * and the item is the suggestion. A repeat for the same code adds to the
+ * quantity. Never throws.
+ */
+async function recordStockShortfall({ companyId, locationId, product, scannedBarcode, qty, onHand, context, contextRef, actor }) {
+    try {
+        if (!companyId || !product || !product.id) return null;
+        const code = clean(scannedBarcode || product.sku || product.id, 128);
+        const canonical = canonicalBarcode(code) || code.toUpperCase();
+        const ctx = contextOf(context);
+        const n = Number(qty);
+        const taken = Number.isFinite(n) && n > 0 && n <= 100000 ? Math.round(n * 1000) / 1000 : 1;
+        const note = clean(`Refused: count showed ${Number(onHand) || 0} on hand.`, 300);
+        const who = clean(actor, 80) || null;
+
+        let q = supabaseAdmin.from('scan_exceptions').select('*')
+            .eq('company_id', companyId).eq('code_canonical', canonical).eq('status', 'open');
+        q = locationId ? q.eq('location_id', locationId) : q.is('location_id', null);
+        const { data: existing, error: readErr } = await q.limit(1);
+        if (readErr) throw readErr;
+        if (existing && existing[0]) {
+            const row = existing[0];
+            const patch = { attempts: (row.attempts || 1) + 1, last_seen_at: new Date().toISOString(),
+                qty: Math.min(100000, Number(row.qty || 0) + taken), note };
+            if (who) patch.actor_label = who;
+            const { data: updated } = await supabaseAdmin.from('scan_exceptions').update(patch).eq('id', row.id).select('*').single();
+            return shapeException(updated || { ...row, ...patch });
+        }
+        const { count } = await supabaseAdmin.from('scan_exceptions')
+            .select('id', { count: 'exact', head: true }).eq('company_id', companyId).eq('status', 'open');
+        if ((count || 0) >= MAX_OPEN_PER_COMPANY) return null;
+
+        const { data: created, error } = await supabaseAdmin.from('scan_exceptions').insert({
+            company_id: companyId, location_id: locationId || null,
+            code, code_canonical: canonical,
+            reason: 'not_enough_stock',
+            context: ctx, context_ref: clean(contextRef, 80) || null,
+            intended_movement: 'consume',
+            suggested_product_id: product.id,
+            suggested_label: clean(`${product.sku || ''} ${product.name || ''}`.trim(), 200) || null,
+            actor_label: who, qty: taken, note
+        }).select('*').single();
+        if (error) throw error;
+        return shapeException(created);
+    } catch (err) {
+        if (!NOT_INSTALLED.test(err && err.message || '')) console.error('Stock shortfall not recorded:', err.message || err);
+        return null;
+    }
+}
+
 module.exports = {
+    recordStockShortfall,
     REASONS, REASON_NAMES, CONTEXTS, CONTEXT_NAMES, INTENDED, MAX_OPEN_PER_COMPANY, NOT_INSTALLED,
     isMisread, innerItemCode, lookupForms, classifyScan, shapeException, recordScanException, contextOf, intendedOf
 };

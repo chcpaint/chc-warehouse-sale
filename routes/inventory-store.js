@@ -32,7 +32,7 @@ const {
     replenishmentFor,
     inventorySettings
 } = require('../utils/inventory');
-const { recordScanException } = require('../utils/scan-exceptions');
+const { recordScanException, recordStockShortfall } = require('../utils/scan-exceptions');
 
 const router = express.Router({ mergeParams: true });
 
@@ -457,10 +457,17 @@ router.post('/movements', async (req, res) => {
         if (!delta.ok) return res.status(400).json({ error: delta.error });
 
         if (!settings.allow_negative && currentOnHand + delta.delta < 0) {
+            // Only a scan-out (use) means goods in hand the count does not know about.
+            const noted = movementType === 'consume' ? await recordStockShortfall({
+                companyId, locationId: location.id, product, scannedBarcode: req.body?.scanned_barcode,
+                qty: Math.abs(delta.delta), onHand: currentOnHand, context: 'scan', actor
+            }) : null;
             return res.status(409).json({
-                error: `Only ${currentOnHand} on hand — that would take ${product.name} negative.`,
+                error: `Only ${currentOnHand} on hand — that would take ${product.name} negative.` +
+                    (noted ? ' Saved to Scan issues so the count can be checked.' : ''),
                 on_hand: currentOnHand,
-                requested: Math.abs(delta.delta)
+                requested: Math.abs(delta.delta),
+                ...(noted ? { exception: noted } : {})
             });
         }
 
@@ -597,7 +604,12 @@ async function postOneMovement({ companyId, location, actor, settings, line, sou
     if (!delta.ok) return { ok: false, error: delta.error, product_id: product.id };
 
     if (!settings.allow_negative && currentOnHand + delta.delta < 0) {
-        return { ok: false, error: `Only ${currentOnHand} on hand for ${product.sku || product.name}`, product_id: product.id };
+        const noted = movementType === 'consume' ? await recordStockShortfall({
+            companyId, locationId: location.id, product, scannedBarcode: line.scanned_barcode,
+            qty: Math.abs(delta.delta), onHand: currentOnHand, context: 'scan', actor
+        }) : null;
+        return { ok: false, error: `Only ${currentOnHand} on hand for ${product.sku || product.name}` + (noted ? ' (saved to Scan issues)' : ''),
+            product_id: product.id, ...(noted ? { exception: noted } : {}) };
     }
 
     const { data: movement, error } = await supabaseAdmin

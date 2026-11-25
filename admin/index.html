@@ -3079,7 +3079,8 @@
     let siData = { issues: [], can_fix: false };
     const SI_REASON_CHIP = {
         missing_barcode: 'bg-blue-100 text-blue-800', not_in_catalog: 'bg-purple-100 text-purple-800',
-        inactive_item: 'bg-gray-200 text-gray-700', invalid_code: 'bg-amber-100 text-amber-800', unknown_code: 'bg-red-100 text-red-800'
+        inactive_item: 'bg-gray-200 text-gray-700', invalid_code: 'bg-amber-100 text-amber-800', unknown_code: 'bg-red-100 text-red-800',
+        not_enough_stock: 'bg-orange-100 text-orange-800'
     };
     const SI_STOCK = { receive: 'Add to stock (received)', consume: 'Take out of stock (used)', count: 'Set on hand to this count', none: 'Don’t change stock' };
     const siWhen = t => t ? new Date(t).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -3152,7 +3153,10 @@
         if (!i) return;
         const fix = siData.can_fix;
         const opts = [];
-        if (fix && i.scans_now) opts.push(['close', `It scans now as <b>${esc(i.scans_now.sku)} ${esc(i.scans_now.name)}</b>. Close it.`]);
+        const short = i.reason === 'not_enough_stock';
+        if (fix && i.scans_now) opts.push(['close', short
+            ? `Fix the count for <b>${esc(i.scans_now.sku)} ${esc(i.scans_now.name)}</b> below and close it.`
+            : `It scans now as <b>${esc(i.scans_now.sku)} ${esc(i.scans_now.name)}</b>. Close it.`]);
         if (fix && i.suggested_product && !i.scans_now) {
             opts.push(i.reason === 'inactive_item'
                 ? ['reactivate', `Switch <b>${esc(i.suggested_product.sku)} ${esc(i.suggested_product.name)}</b> back on for this shop.`]
@@ -3165,7 +3169,8 @@
         if (fix && !i.scans_now) opts.push(['attach_other', 'Attach this barcode to another item in this shop’s catalogue:']);
         opts.push(['dismiss', 'Dismiss: a mis-scan, nothing to put right.']);
 
-        const intended = ['receive', 'consume', 'count', 'none'].includes(i.intended_movement) ? i.intended_movement : 'receive';
+        // A refused scan-out is fixed by counting what is really on the shelf.
+        const intended = short ? 'count' : (['receive', 'consume', 'count', 'none'].includes(i.intended_movement) ? i.intended_movement : 'receive');
         document.getElementById('si-modal-body').innerHTML = `
             <div class="text-sm text-gray-700 mb-4 space-y-1">
                 <div><b>${esc(i.company_name)}</b>${i.location_name ? ' · ' + esc(i.location_name) : ''}</div>
@@ -3189,7 +3194,9 @@
                     <select id="si-stock" class="border rounded-lg px-3 py-2 text-sm bg-white">${Object.entries(SI_STOCK).map(([k, v]) => `<option value="${k}" ${k === intended ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
                     <label class="text-xs text-gray-600">Quantity<input id="si-qty" type="number" min="0" step="any" value="${esc(String(i.qty))}" class="block border rounded-lg px-3 py-2 text-sm w-28"></label>
                 </div>
-                <p class="text-xs text-gray-500 mt-2">Defaults to what the scan was for (${esc(i.context_label.toLowerCase())}). The movement is in the stock history, marked as a scan issue put right.</p>
+                <p class="text-xs text-gray-500 mt-2">${short
+                    ? `${esc(String(i.qty))} were taken but the count did not have them. Enter what is on the shelf now.`
+                    : `Defaults to what the scan was for (${esc(i.context_label.toLowerCase())}).`} The movement is in the stock history, marked as a scan issue put right.</p>
             </div>
             <div id="si-msg" class="hidden text-sm mb-3"></div>
             <div class="flex justify-end gap-2">

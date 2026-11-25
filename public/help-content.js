@@ -87,7 +87,7 @@ window.RAI_HELP = {
             id: 'scanissues', title: 'Scan issues: what the terms mean', audience: 'shop',
             items: [
                 { q: 'What is a scan issue?', k: 'scan issue scan issues what is meaning failed scan not found barcode did not scan',
-                  a: 'A scan that did not find an item. It is saved automatically, wherever it happened (Stock, Receiving, Deliveries, Counts, Transfers or the kiosk), with who scanned it, where, when, and a reason. Your distributor puts it right and the quantity you entered is posted to stock, so nothing on the shelf is lost. You see them under Stock on Hand, Scan issues.' },
+                  a: 'A scan that did not find an item. It is saved automatically, wherever it happened (Stock, Receiving, Deliveries, Counts, Transfers or the kiosk), with who scanned it, where, when, and a reason. A scan-out refused because the count showed too few on hand is saved too. Your distributor puts it right and the quantity you entered is posted to stock, so nothing on the shelf is lost. You see them under Stock on Hand, Scan issues.' },
                 { q: 'What does "Missing barcode" mean?', k: 'missing barcode meaning not attached new package box code case code',
                   a: 'The item is in your catalogue, but this barcode is not attached to it yet. It is often a new package design or the barcode on a box or case instead of the single item. Enter how many there are; your distributor attaches the barcode and the next scan finds the item.' },
                 { q: 'What does "Not in catalogue" mean?', k: 'not in catalogue catalog meaning not carried item library add item',
@@ -96,6 +96,8 @@ window.RAI_HELP = {
                   a: 'The barcode belongs to an item that has been switched off for your shop, for example one removed from your catalogue. Your distributor decides whether to switch it back on. Enter how many you have so it is not lost meanwhile.' },
                 { q: 'What does "Misread barcode" mean?', k: 'misread barcode check digit wrong bad scan dirty label glare meaning',
                   a: 'The code that came through cannot be a real barcode (its check digit is wrong), so the scanner almost certainly misread it, usually because of a creased, dirty or shiny label. Scan it again, or type the part number. Dismiss the misread one.' },
+                { q: 'What does "Not enough on hand" mean?', k: 'not enough on hand stock refused scan out kiosk see your manager count zero negative',
+                  a: 'The item scanned fine, but your stock count said fewer were on hand than were taken, so the scan-out was refused and nothing came off stock. The goods were there, so the count is out, often because the item was never counted in. Count the item (or enter how many there really are); your manager or distributor sets the right count. If your shop would rather let scan-outs go through and fix counts afterwards, your distributor can allow stock below zero.' },
                 { q: 'What does "Unknown code" mean?', k: 'unknown code meaning nothing matches not recognised qr shipping label',
                   a: 'Nothing anywhere matches this code. It may be a product your distributor does not carry yet, a shipping or internal label, or a QR code. Write the name on the package in "What is it?" so it can be identified, or dismiss it if it was not stock.' },
                 { q: 'What do Open, Put right and Dismissed mean?', k: 'open put right resolved dismissed status meaning scanned times attempts',

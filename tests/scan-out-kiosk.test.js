@@ -469,6 +469,41 @@ test('taking more than is on hand is refused with a plain reason, and the rest s
     assert.equal(onHand(P_MASK), 9);
 });
 
+test('a scan-out refused for stock is kept in Scan issues for the manager, and a repeat adds to it', async () => {
+    fake = seed();
+    const r = await post('/api/kiosk/scan-out', {
+        session_id: SESSION, badge_code: BADGE_CODE,
+        items: [{ product_id: P_TAPE, quantity: 5, scanned_barcode: '012345678905' }]
+    });
+    assert.equal(r.status, 409, 'nothing went through');
+    const tape = r.body.results.find(x => x.product_id === P_TAPE);
+    assert.equal(tape.noted, true);
+    assert.match(tape.error, /Only 2 on hand — it has been noted for your manager/);
+    const rows = fake.db.scan_exceptions;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].reason, 'not_enough_stock');
+    assert.equal(rows[0].context, 'kiosk');
+    assert.equal(rows[0].location_id, LOC);
+    assert.equal(rows[0].suggested_product_id, P_TAPE);
+    assert.equal(rows[0].actor_label, 'Alex Painter');
+    assert.equal(Number(rows[0].qty), 5);
+    assert.match(rows[0].note, /count showed 2 on hand/);
+    assert.equal(onHand(P_TAPE), 2, 'stock untouched');
+    // the same item refused again: one issue, more taken
+    await post('/api/kiosk/scan-out', { session_id: '0b5d1c2e-0000-4000-8000-0000000000aa', badge_code: BADGE_CODE,
+        items: [{ product_id: P_TAPE, quantity: 3, scanned_barcode: '012345678905' }] });
+    assert.equal(fake.db.scan_exceptions.length, 1);
+    assert.equal(Number(fake.db.scan_exceptions[0].qty), 8);
+    assert.equal(fake.db.scan_exceptions[0].attempts, 2);
+});
+
+test('a scan-out refused for stock with no barcode (typed part number) is kept under the part number', async () => {
+    fake = seed();
+    await post('/api/kiosk/scan-out', { session_id: SESSION, badge_code: BADGE_CODE, items: [{ product_id: P_TAPE, quantity: 9 }] });
+    assert.equal(fake.db.scan_exceptions[0].code, 'TAPE-18');
+    assert.equal(fake.db.scan_exceptions[0].suggested_label, 'TAPE-18 Masking tape 18mm');
+});
+
 test('a company that allows negative stock lets the scan-out through', async () => {
     fake = seed({}, { allow_negative: true });
     const r = await post('/api/kiosk/scan-out', { session_id: SESSION, badge_code: BADGE_CODE, items: [{ product_id: P_TAPE, quantity: 5 }] });

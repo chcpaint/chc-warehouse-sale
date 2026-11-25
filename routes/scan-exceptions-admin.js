@@ -138,6 +138,11 @@ router.get('/', async (req, res) => {
                 const forms = new Set(formsByIssue.get(r.id));
                 const hit = found.find(f => forms.has(f.barcode) && f.products && f.products.company_id === r.company_id);
                 if (hit) nowScans.set(r.id, { id: hit.products.id, sku: hit.products.sku, name: hit.products.name });
+                // "Not enough on hand": the item scanned (or was typed) fine; it is the count that needs fixing.
+                if (!hit && r.reason === 'not_enough_stock' && prodBy.get(r.suggested_product_id)) {
+                    const p = prodBy.get(r.suggested_product_id);
+                    nowScans.set(r.id, { id: p.id, sku: p.sku, name: p.name });
+                }
             }
         }
 
@@ -321,6 +326,8 @@ router.post('/:id/resolve', async (req, res) => {
 
         if (action === 'close') {
             const holders = await codeHolders();
+            // "Not enough on hand": the item scanned fine; the fix is the count, posted below.
+            if (issue.reason === 'not_enough_stock' && issue.suggested_product_id) holders.push(issue.suggested_product_id);
             const p = await ownProduct(req.body?.product_id || holders[0]);
             if (!p || !holders.includes(p.id)) return res.status(400).json({ error: 'This code does not scan to an item yet. Attach it to an item first.' });
             const problem = await checkStock(p.id); if (problem) return res.status(400).json({ error: problem });

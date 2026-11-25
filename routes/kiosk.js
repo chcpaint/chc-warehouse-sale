@@ -57,7 +57,7 @@ const {
     ORDER_LOCK_MS,
     ORDER_TOKEN_SECONDS
 } = require('../utils/scan-out');
-const { recordScanException } = require('../utils/scan-exceptions');
+const { recordScanException, recordStockShortfall } = require('../utils/scan-exceptions');
 
 const router = express.Router();
 
@@ -571,9 +571,18 @@ router.post('/scan-out', async (req, res) => {
             }
 
             if (!k.inventory.allow_negative && onHand + delta.delta < 0) {
+                // The item was in hand and scanned, so the count is out. Keep it
+                // in Scan issues for the manager, like any other scan that failed.
+                const noted = await recordStockShortfall({
+                    companyId: k.company.id, locationId: k.location.id, product,
+                    scannedBarcode: line.scanned_barcode, qty: Math.abs(delta.delta), onHand,
+                    context: 'kiosk', contextRef: k.device && k.device.id, actor: badge ? badge.name : null
+                });
                 results.push({
-                    product_id: product.id, name: product.name, sku: product.sku, ok: false,
-                    error: `Only ${onHand} on hand — see your manager.`
+                    product_id: product.id, name: product.name, sku: product.sku, ok: false, noted: !!noted,
+                    error: noted
+                        ? `Only ${onHand} on hand — it has been noted for your manager to check the count.`
+                        : `Only ${onHand} on hand — see your manager.`
                 });
                 continue;
             }
