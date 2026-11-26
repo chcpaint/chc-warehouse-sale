@@ -31,6 +31,7 @@ const { staffDistributorId } = require('../utils/order-scope');
 const { libraryTableForCompany } = require('../utils/library-scope');
 const { canonicalBarcode, cleanBarcode, detectSymbology, movementDelta, inventorySettings } = require('../utils/inventory');
 const { shapeException, lookupForms, REASONS, CONTEXTS, NOT_INSTALLED } = require('../utils/scan-exceptions');
+const { addFromMaster } = require('../utils/catalogue-add');
 
 const router = express.Router();
 router.use(requireFullAdmin);
@@ -275,44 +276,13 @@ router.post('/:id/resolve', async (req, res) => {
         if (action === 'add_from_library') {
             const libId = req.body?.library_id || issue.suggested_library_id;
             if (!isValidUUID(libId)) return res.status(400).json({ error: 'Choose the Item Library item to add.' });
-            const lib = await libraryTableForCompany(companyId);
-            const { data: item } = await lib.select('id, sku, name, brand, category, unit, case_qty, list_price, barcode').eq('id', libId).maybeSingle();
-            if (!item) return res.status(404).json({ error: 'That Item Library item was not found.' });
-
-            const { data: same } = await supabaseAdmin.from('products').select('id, sku, is_active')
-                .eq('company_id', companyId).ilike('sku', String(item.sku).replace(/[%_,()]/g, '')).limit(1);
-            if (same && same[0]) {
-                return res.status(409).json({ error: `This shop already has ${same[0].sku}${same[0].is_active === false ? ' (switched off)' : ''}. Attach the barcode to it instead.` });
-            }
-            // The same commercial rules as a Master Table push.
-            const [{ data: excl }, { data: policy }] = await Promise.all([
-                supabaseAdmin.from('company_catalogue_exclusions').select('brand, category, sku_key, reason').eq('company_id', companyId),
-                supabaseAdmin.from('company_catalogue_policy').select('push_mode, reason').eq('company_id', companyId).maybeSingle()
-            ]);
-            if (policy && policy.push_mode === 'closed') return res.status(409).json({ error: policy.reason || 'This shop’s catalogue is closed to new items.' });
-            const lc = v => String(v || '').toLowerCase();
-            const rule = (excl || []).find(r => (r.brand && lc(r.brand) === lc(item.brand)) || (r.category && lc(r.category) === lc(item.category)) || (r.sku_key && r.sku_key === item.sku));
-            if (rule) return res.status(409).json({ error: rule.reason || 'This item is excluded from this shop’s catalogue.' });
-            if (code && (await codeHolders()).length) return res.status(409).json({ error: 'That barcode is already on another item in this catalogue.' });
             const problem = await checkStock(null); if (problem) return res.status(400).json({ error: problem });
-
-            const onRequest = !(Number(item.list_price) > 0);
-            const { data: created, error } = await supabaseAdmin.from('products').insert({
-                company_id: companyId, sku: item.sku, name: String(item.name || item.sku).replace(/^\*\s*/, ''),
-                brand: item.brand || null, category: item.category || null,
-                price: onRequest ? 0 : item.list_price, price_on_request: onRequest,
-                case_qty: item.case_qty || 1, unit: item.unit || 'each', is_active: true
-            }).select('id, sku').single();
-            if (error) throw error;
-            const codes = [...new Set([item.barcode && cleanBarcode(item.barcode), code].filter(Boolean))];
-            for (const [i, c] of codes.entries()) {
-                await supabaseAdmin.from('product_barcodes').insert({
-                    product_id: created.id, barcode: c, symbology: detectSymbology(c),
-                    is_primary: i === 0, is_internal: false, source: 'scan_issue'
-                });
+            const added = await addFromMaster({ companyId, libraryId: libId, code: issue.code });
+            if (!added.ok) {
+                return res.status(added.status).json({ error: added.existing ? `${added.error} Attach the barcode to it instead.` : added.error });
             }
-            productId = created.id; resolution = 'added_to_catalogue';
-            Object.assign(details, { product: item.sku, price: onRequest ? 'on request' : Number(item.list_price) });
+            productId = added.product.id; resolution = 'added_to_catalogue';
+            Object.assign(details, { product: added.product.sku, price: added.on_request ? 'on request' : added.price });
         }
 
         if (action === 'reactivate') {

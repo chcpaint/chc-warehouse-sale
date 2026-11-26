@@ -14,7 +14,7 @@ const REASONS = {
         fix: 'Attach the barcode to the item, and post the quantity.' },
     not_in_catalog:  { label: 'Not in catalogue',
         help: 'The Item Library knows this barcode, but this shop\u2019s catalogue does not carry the item.',
-        shop: 'Enter how many there are. Your distributor adds the item to your catalogue.',
+        shop: 'Press Add to my list to put it on your list at the master list price, then scan it again. (At the scan-out kiosk, a manager does this from Scan issues.)',
         fix: 'Add the Item Library item to the shop\u2019s catalogue, and post the quantity.' },
     inactive_item:   { label: 'Item switched off',
         help: 'This barcode belongs to an item that has been switched off for this shop.',

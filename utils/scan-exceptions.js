@@ -153,7 +153,19 @@ async function classifyScan(companyId, raw) {
         }
     }
 
-    // 3. A misread (bad check digit), or simply unknown.
+    // 3. A part number typed or on a shelf label that the shop does not carry,
+    //    but the master does: "Not in catalogue", so it can be added.
+    {
+        const typed = clean(raw, 64).replace(/[%_,()]/g, '');
+        if (typed.length >= 3 && !/^\d{8,14}$/.test(typed)) {
+            const lib = await libraryTableForCompany(companyId);
+            const { data: bySku } = await lib.select('id, sku, name, is_active').ilike('sku', typed).limit(5);
+            const item = (bySku || []).find(r => r.is_active !== false);
+            if (item) return { ...out, reason: 'not_in_catalog', suggested_library_id: item.id, suggested_label: `${item.sku} ${item.name || ''}`.trim() };
+        }
+    }
+
+    // 4. A misread (bad check digit), or simply unknown.
     if (isMisread(raw)) return { ...out, reason: 'invalid_code' };
     return out;
 }
@@ -172,6 +184,7 @@ function shapeException(row) {
         context_label: (CONTEXTS[row.context] || CONTEXTS.other).label,
         intended_movement: row.intended_movement,
         suggested_label: row.suggested_label || null,
+        suggested_library_id: row.suggested_library_id || null,
         attempts: row.attempts,
         qty: Number(row.qty),
         note: row.note || '',

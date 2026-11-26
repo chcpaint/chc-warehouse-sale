@@ -302,3 +302,73 @@ test('the help page explains "Not enough on hand"', () => {
     assert.match(JSON.stringify(items), /Not enough on hand/);
     assert.equal(se.REASONS.not_enough_stock.label, 'Not enough on hand');
 });
+
+// ------------------------------------------------------------------
+// "On the master list": the shop adds it on the spot (per CHC: shop screens, not the kiosk)
+// ------------------------------------------------------------------
+test('a scan on the master but not the shop’s list comes back with an offer to add it, at master price', async () => {
+    reset();
+    const r = await scan('5025427632691');
+    assert.equal(r.status, 404);
+    assert.equal(r.body.exception.reason, 'not_in_catalog');
+    assert.deepEqual(r.body.master_offer, { library_id: LIB_TONER, sku: 'T462', name: 'EHP Fine Red Pearl 1L', brand: 'PPG', price: 547.43 });
+    assert.match(r.body.error, /T462 is on the master list/);
+});
+
+test('a typed part number the master knows is "Not in catalogue" too, not "Unknown code"', async () => {
+    reset();
+    const r = await scan('t462');
+    assert.equal(r.body.exception.reason, 'not_in_catalog');
+    assert.equal(r.body.master_offer.sku, 'T462');
+    const nothing = await scan('ZZZ999');
+    assert.equal(nothing.body.exception.reason, 'unknown_code');
+    assert.equal(nothing.body.master_offer, undefined);
+});
+
+test('the shop adds it: on its list at master price with the barcode, the issue is put right, and the next scan finds it', async () => {
+    reset();
+    const r = await scan('5025427632691');
+    const id = r.body.exception.id;
+    const list = await request(storeApp()).get(`/api/store/concord/inventory/scan-exceptions?location_id=${LOC}`);
+    assert.equal(list.body.issues[0].master_offer.sku, 'T462');
+
+    const add = await request(storeApp()).post(`/api/store/concord/inventory/scan-exceptions/${id}/add`).send({ actor_label: 'Sam' });
+    assert.equal(add.status, 200, JSON.stringify(add.body));
+    assert.match(add.body.message, /T462 is on your list now \(\$547\.43\)/);
+    const p = fake.db.products.find(x => x.sku === 'T462');
+    assert.equal(p.company_id, CO);
+    assert.equal(Number(p.price), 547.43);
+    assert.equal(p.price_on_request, false);
+    assert.ok(fake.db.product_barcodes.some(b => b.product_id === p.id && b.barcode === '5025427632691'));
+    const row = fake.db.scan_exceptions[0];
+    assert.equal(row.status, 'resolved');
+    assert.equal(row.resolution, 'added_to_catalogue');
+    assert.equal(row.resolved_by_label, 'Sam');
+    assert.match(row.note, /Added to the list from the master by Sam \(\$547\.43\)/);
+    assert.equal((await scan('5025427632691')).status, 200);
+    // Not twice.
+    const again = await request(storeApp()).post(`/api/store/concord/inventory/scan-exceptions/${id}/add`).send({});
+    assert.equal(again.status, 409);
+});
+
+test('a typed part number added from the master does not become a barcode', async () => {
+    reset();
+    const r = await scan('T462');
+    await request(storeApp()).post(`/api/store/concord/inventory/scan-exceptions/${r.body.exception.id}/add`).send({ actor_label: 'Sam' });
+    const p = fake.db.products.find(x => x.sku === 'T462');
+    const codes = fake.db.product_barcodes.filter(b => b.product_id === p.id).map(b => b.barcode);
+    assert.deepEqual(codes, ['5025427632691'], 'the master barcode only, not "T462"');
+});
+
+test('only a master-list item can be added from the shop, and the shop’s exclusions still apply', async () => {
+    reset();
+    const unknown = await scan('ZZZ999');
+    const r1 = await request(storeApp()).post(`/api/store/concord/inventory/scan-exceptions/${unknown.body.exception.id}/add`).send({});
+    assert.equal(r1.status, 400);
+    fake.db.company_catalogue_policy = [{ company_id: CO, push_mode: 'closed', reason: 'Concord’s list is managed by CHC.' }];
+    const r = await scan('5025427632691');
+    const r2 = await request(storeApp()).post(`/api/store/concord/inventory/scan-exceptions/${r.body.exception.id}/add`).send({});
+    assert.equal(r2.status, 409);
+    assert.match(r2.body.error, /managed by CHC/);
+    assert.equal(fake.db.products.filter(x => x.sku === 'T462').length, 0);
+});

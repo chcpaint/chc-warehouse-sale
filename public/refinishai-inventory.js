@@ -917,10 +917,14 @@
     RAI.noteScanIssue = function (found, plain) {
         const ex = found && found.exception;
         if (!ex || !ex.id) return '';
+        // On CHC's master but not this shop's list: the tray offers "Add to my list".
+        if (found.master_offer) ex.master_offer = found.master_offer;
         inv.issueTray = [ex, ...inv.issueTray.filter(i => i.id !== ex.id)].slice(0, 5);
         RAI.renderIssueTray();
         RAI.refreshIssueBadge();
-        const msg = ` Saved to Scan issues (${ex.reason_label}).`;
+        const msg = ex.master_offer
+            ? ` It is on the master list as ${ex.master_offer.sku}: add it to your list below.`
+            : ` Saved to Scan issues (${ex.reason_label}).`;
         return plain ? msg : RAI.esc(msg);
     };
 
@@ -1012,9 +1016,67 @@
               <span class="text-xs text-gray-500">Saved to <button type="button" class="underline" onclick="RAI.showInvView('issues')">Scan issues</button></span>
               <button type="button" onclick="RAI.dropFromTray('${RAI.esc(ex.id)}')" class="ml-auto text-gray-400 hover:text-gray-600 text-sm" aria-label="Hide">✕</button>
             </div>
-            <p class="text-xs text-gray-600 mt-1">${RAI.esc(ex.reason_help)}${ex.suggested_label ? ` Looks like <b>${RAI.esc(ex.suggested_label)}</b>.` : ''}</p>
-            ${RAI.issueEditor(ex, 't')}
+            ${ex.master_offer ? '' : `<p class="text-xs text-gray-600 mt-1">${RAI.esc(ex.reason_help)}${ex.suggested_label ? ` Looks like <b>${RAI.esc(ex.suggested_label)}</b>.` : ''}</p>`}
+            ${RAI.masterOfferHtml(ex, 't')}
+            ${ex.master_offer ? `<span id="inv-is-t-${RAI.esc(ex.id)}" class="block text-xs text-red-700 mt-1"></span>` : RAI.issueEditor(ex, 't')}
           </div>`).join('');
+    };
+
+    /** A short note that fades on its own (never blocks scanning the way an alert would). */
+    RAI.toast = function (text) {
+        let el = document.getElementById('rai-toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'rai-toast';
+            el.setAttribute('role', 'status');
+            el.className = 'fixed left-1/2 -translate-x-1/2 bottom-6 z-[80] max-w-[90vw] rounded-xl bg-green-700 text-white text-sm font-semibold px-4 py-3 shadow-lg';
+            document.body.appendChild(el);
+        }
+        el.textContent = text;
+        el.style.display = 'block';
+        clearTimeout(RAI._toastT);
+        RAI._toastT = setTimeout(() => { el.style.display = 'none'; }, 4500);
+    };
+
+    /** "On the master list: <item> — $price. [Add to my list]" for a scan that is not on this shop's list. */
+    RAI.masterOfferHtml = function (ex, where) {
+        const o = ex && ex.status !== 'resolved' && ex.master_offer;
+        if (!o) return '';
+        const id = RAI.esc(ex.id);
+        const price = o.price != null ? '$' + Number(o.price).toFixed(2) : 'price on request';
+        return `
+          <div class="mt-2 flex flex-wrap items-center gap-3 rounded-lg bg-white border border-blue-200 px-3 py-2">
+            <span class="text-sm text-gray-800 flex-1 min-w-[12rem]"><i class="fas fa-book-open text-blue-600 mr-1"></i>On ${RAI.esc(RAI.dist())}’s master list:
+              <b>${RAI.esc(o.sku)}</b> ${RAI.esc(o.name)}${o.brand ? ' · ' + RAI.esc(o.brand) : ''} · <b>${RAI.esc(price)}</b></span>
+            <button type="button" id="inv-add-${where}-${id}" onclick="RAI.addFromMaster('${id}', '${where}')"
+              class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"><i class="fas fa-plus mr-1"></i>Add to my list</button>
+          </div>`;
+    };
+
+    RAI.addFromMaster = async function (id, where) {
+        const btn = document.getElementById(`inv-add-${where}-${id}`);
+        const msg = document.getElementById(`inv-is-${where}-${id}`);
+        if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+        try {
+            const r = await RAI.api(`/store/${RAI.ctx.slug}/inventory/scan-exceptions/${encodeURIComponent(id)}/add`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ actor_label: RAI.invActor() })
+            });
+            const d = await r.json();
+            if (!r.ok) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus mr-1"></i>Add to my list'; }
+                if (msg) msg.textContent = d.error || 'Could not add it.'; else alert(d.error || 'Could not add it.');
+                return;
+            }
+            inv.issueTray = inv.issueTray.filter(i => i.id !== id);
+            RAI.renderIssueTray();
+            RAI.refreshIssueBadge();
+            if (document.getElementById('inv-view-issues') && !document.getElementById('inv-view-issues').classList.contains('hidden')) RAI.loadScanIssues();
+            RAI.toast(d.message);
+        } catch (e) {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus mr-1"></i>Add to my list'; }
+            if (msg) msg.textContent = 'Could not reach the server.';
+        }
     };
 
     RAI.dropFromTray = function (id) {
@@ -1096,7 +1158,8 @@
                   <span class="text-xs text-gray-500">${RAI.esc(ex.context_label)} · ${RAI.esc(when(ex.last_seen_at))}${ex.actor_label ? ' · ' + RAI.esc(ex.actor_label) : ''}${ex.attempts > 1 ? ` · scanned ${ex.attempts} times` : ''}</span>
                   ${ex.status === 'open' ? `<button type="button" onclick="RAI.dismissScanIssue('${RAI.esc(ex.id)}')" class="ml-auto text-sm text-gray-500 hover:text-red-600">Dismiss</button>` : ''}
                 </div>
-                ${ex.suggested_label ? `<p class="text-xs text-gray-600 mt-1">Looks like <b>${RAI.esc(ex.suggested_label)}</b>.</p>` : ''}
+                ${ex.suggested_label && !ex.master_offer ? `<p class="text-xs text-gray-600 mt-1">Looks like <b>${RAI.esc(ex.suggested_label)}</b>.</p>` : ''}
+                ${ex.status === 'open' ? RAI.masterOfferHtml(ex, 'l') : ''}
                 ${ex.status === 'open' ? RAI.issueEditor(ex, 'l')
                   : `<p class="text-sm text-gray-600 mt-1">${RAI.esc(Number(ex.qty))} × ${RAI.esc(ex.note || 'no description')}${ex.resolved_by_label ? ' · ' + RAI.esc(ex.resolved_by_label) : ''}${ex.resolved_at ? ' · ' + RAI.esc(when(ex.resolved_at)) : ''}</p>`}
               </div>`).join('') + '</div>';

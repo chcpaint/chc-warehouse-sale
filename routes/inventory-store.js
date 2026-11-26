@@ -33,6 +33,7 @@ const {
     inventorySettings
 } = require('../utils/inventory');
 const { recordScanException, recordStockShortfall } = require('../utils/scan-exceptions');
+const { masterItem, offerOf } = require('../utils/catalogue-add');
 
 const router = express.Router({ mergeParams: true });
 
@@ -342,11 +343,15 @@ router.get('/lookup', async (req, res) => {
                 actor: req.query.actor,
                 qty: req.query.qty
             });
+            // On CHC's master but not this shop's list: offer to add it there and then.
+            const offer = exception && exception.reason === 'not_in_catalog' && exception.suggested_library_id
+                ? offerOf(await masterItem(companyId, exception.suggested_library_id)) : null;
             return res.status(404).json({
-                error: 'No product matches that code.',
+                error: offer ? `Not on your list yet, but ${offer.sku} is on the master list.` : 'No product matches that code.',
                 code: raw,
                 canonical: canonicalBarcode(raw),
-                exception
+                exception,
+                ...(offer ? { master_offer: offer } : {})
             });
         }
 

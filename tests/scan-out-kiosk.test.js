@@ -334,6 +334,19 @@ test('another company’s product, and nonsense, are not found', async () => {
     assert.equal((await get('/api/kiosk/resolve')).status, 400);
 });
 
+test('a kiosk scan that is on the master but not the shop’s list says the manager can add it; the kiosk cannot', async () => {
+    fake = seed();
+    fake.db.item_library.push({ id: '9a9a9a9a-0000-4000-8000-000000000001', sku: 'T462', name: 'EHP Fine Red Pearl 1L', brand: 'PPG',
+        barcode: '5025427632691', list_price: 547.43, is_active: true, distributor_id: null });
+    const r = await get('/api/kiosk/resolve?code=5025427632691');
+    assert.equal(r.status, 404);
+    assert.match(r.body.error, /isn’t on this shop’s list yet.*your manager can add it from Scan issues in one tap/);
+    assert.equal(fake.db.scan_exceptions[0].reason, 'not_in_catalog');
+    assert.equal(fake.db.products.filter(p => p.sku === 'T462').length, 0, 'nothing added from the kiosk');
+    const unknown = await get('/api/kiosk/resolve?code=zzzz-nothing');
+    assert.match(unknown.body.error, /Nothing matches zzzz-nothing\. It has been noted for your manager/);
+});
+
 // ==================================================================
 // Scanning out
 // ==================================================================

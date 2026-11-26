@@ -465,11 +465,15 @@ router.get('/resolve', async (req, res) => {
                 const badge = await findBadge(k.company.id, text(req.query.badge, 40)).catch(() => null);
                 if (badge) actor = badge.name;
             }
-            await recordScanException({
+            const noted = await recordScanException({
                 companyId: k.company.id, locationId: k.location.id, raw,
                 context: 'kiosk', contextRef: k.device && k.device.id, intended: 'consume', actor
             });
-            return res.status(404).json({ kind: 'none', error: `Nothing matches ${raw}. It has been noted for your manager.`, code: raw, noted: true });
+            const onMaster = noted && noted.reason === 'not_in_catalog';
+            return res.status(404).json({ kind: 'none', code: raw, noted: true,
+                error: onMaster
+                    ? `${raw} isn’t on this shop’s list yet. It has been noted — your manager can add it from Scan issues in one tap.`
+                    : `Nothing matches ${raw}. It has been noted for your manager.` });
         }
 
         // No prices, no stock levels: the kiosk only needs to know what it is.
